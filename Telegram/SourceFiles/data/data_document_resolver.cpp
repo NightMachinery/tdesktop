@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_document_resolver.h"
+#include "purple/purple_archive_capture.h"
 
 #include "base/platform/base_platform_info.h"
 #include "boxes/abstract_box.h" // Ui::show().
@@ -270,6 +271,7 @@ void ResolveDocument(
 				&& item->media()
 				&& item->media()->ttlSeconds()) {
 				ChatHelpers::ShowTTLMediaLayerWidget(controller, item);
+				Purple::ObserveArchiveAttachment(item, true);
 			}
 		} else {
 			showDocument();

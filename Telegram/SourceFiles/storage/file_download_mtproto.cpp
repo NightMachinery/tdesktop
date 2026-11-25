@@ -27,7 +27,8 @@ mtpFileLoader::mtpFileLoader(
 	LoadToCacheSetting toCache,
 	LoadFromCloudSetting fromCloud,
 	bool autoLoading,
-	uint8 cacheTag)
+	uint8 cacheTag,
+	Destination destination)
 : FileLoader(
 	session,
 	to,
@@ -37,8 +38,10 @@ mtpFileLoader::mtpFileLoader(
 	toCache,
 	fromCloud,
 	autoLoading,
-	cacheTag)
-, DownloadMtprotoTask(&session->downloader(), location, origin) {
+	cacheTag,
+	bool(destination))
+, DownloadMtprotoTask(&session->downloader(), location, origin)
+, _destination(std::move(destination)) {
 }
 
 mtpFileLoader::mtpFileLoader(
@@ -144,7 +147,12 @@ int64 mtpFileLoader::takeNextRequestOffset() {
 
 bool mtpFileLoader::feedPart(int64 offset, const QByteArray &bytes) {
 	const auto buffer = bytes::make_span(bytes);
-	if (!writeResultPart(offset, buffer)) {
+	if (_destination) {
+		if (!_destination(offset, bytes)) {
+			cancel(FailureReason::FileWriteFailure);
+			return false;
+		}
+	} else if (!writeResultPart(offset, buffer)) {
 		return false;
 	}
 	if (buffer.empty() || (buffer.size() % 1024)) { // bad next offset

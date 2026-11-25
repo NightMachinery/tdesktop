@@ -622,7 +622,7 @@ not_null<HistoryItem*> History::createItem(
 		MessageFlags localFlags,
 		bool detachExistingItem,
 		bool newMessage) {
-	Purple::ObserveArchiveMessage(&session(), message, id, localFlags);
+	Purple::ObserveArchiveMessage(&session(), message, id, localFlags, newMessage);
 	owner().fillMessagePeers(peer->id, message);
 	if (const auto result = owner().message(peer, id)) {
 		if (detachExistingItem) {

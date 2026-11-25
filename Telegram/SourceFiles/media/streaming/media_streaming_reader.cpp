@@ -530,6 +530,28 @@ bool Reader::Slices::checkFullInCache() const {
 	});
 }
 
+void Reader::Slices::prepareBoundedFill(uint32 offset, uint32 length,
+	uint32 sliceSize, int maximum) {
+	if (!_boundedNoCache || _headerMode != HeaderMode::NoCache || isFullInHeader()) {
+		return;
+	}
+	const auto first = offset / sliceSize;
+	const auto last = (offset + length - 1) / sliceSize;
+	for (auto index = first; index <= last; ++index) {
+		markSliceUsed(index);
+	}
+	while (_usedSlices.size() > maximum) {
+		unloadSlice(_data[_usedSlices.front()]);
+		_usedSlices.pop_front();
+	}
+}
+
+bool Reader::Slices::acceptBoundedPart(uint32 offset, uint32 sliceSize) const {
+	return !_boundedNoCache || _headerMode != HeaderMode::NoCache || isFullInHeader()
+		|| std::find(_usedSlices.begin(), _usedSlices.end(), int(offset / sliceSize)) != _usedSlices.end();
+}
+
+
 void Reader::Slices::processPart(
 		uint32 offset,
 		QByteArray &&bytes) {

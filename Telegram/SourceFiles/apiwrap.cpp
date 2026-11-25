@@ -5,7 +5,6 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "purple/purple_compose_source.h"
 #include "purple/purple_webp_paste_route.h"
 #include "apiwrap.h"
 
@@ -4970,12 +4969,9 @@ void ApiWrap::sendMessage(
 			.effectId = action.options.effectId,
 			.suggest = HistoryMessageSuggestInfo(action.options),
 		}, sending, media);
-		const auto sourceReceipt = Purple::BindDesktopCompose(message.purpleMarkdownSource,
-			_session, lastMessage, randomId, sending, sentEntities.v, isFirst && isLast);
 		const auto done = [=](
-				const MTPUpdates &result,
+				const MTPUpdates &,
 				const MTP::Response &response) {
-			if (sourceReceipt) sourceReceipt(result);
 			if (clearCloudDraft) {
 				history->finishSavingCloudDraft(
 					draftTopicRootId,

@@ -1,99 +1,70 @@
 #include "purple/purple_archive_menu.h"
 
 #include "base/weak_ptr.h"
-#include "data/data_channel.h"
-#include "data/data_chat.h"
-#include "data/data_forum_topic.h"
 #include "data/data_peer.h"
-#include "data/data_session.h"
 #include "history/history.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
-#include "purple/purple_archive_capture.h"
-#include "purple/purple_archive_deleted_box.h"
-#include "purple/purple_archive_purge_box.h"
-#include "purple/purple_config.h"
+#include "purple/purple_archive_v2_boxes.h"
+#include "purple/purple_archive_v2_service.h"
 #include "purple/purple_picker.h"
+#include "purple/purple_settings_editor.h"
 #include "styles/style_menu_icons.h"
+#include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
-#include <QtCore/QStringList>
-
-#include <algorithm>
-
 namespace Purple {
-
-ArchiveViewScope ArchiveDeletedScope(not_null<PeerData*> peer, std::optional<int64> topic) {
-	auto result = ArchiveViewScope();
-	result.messages.account = SessionAccountKey(&peer->owner().session());
-	result.messages.chat = DesktopArchiveChat(peer->id);
-	const auto addAlias = [&](PeerData *alias) {
-		if (!alias) {
-			return;
-		}
-		const auto key = DesktopArchiveChat(alias->id);
-		if (key != *result.messages.chat
-			&& std::find(result.messages.migrationAliases.begin(), result.messages.migrationAliases.end(), key)
-				== result.messages.migrationAliases.end()) {
-			result.messages.migrationAliases.push_back(key);
-		}
-	};
-	addAlias(peer->migrateFrom());
-	addAlias(peer->migrateTo());
-	result.collection = ArchiveCollection::Received;
-	result.representation = u"original"_q;
-	if (topic) {
-		result.topic = ArchiveTopicScope{*result.messages.chat, *topic};
-	}
-	return result;
-}
-
-bool SameArchiveViewScope(const ArchiveViewScope &a, const ArchiveViewScope &b) {
-	return a.messages.account == b.messages.account && a.messages.chat == b.messages.chat
-		&& a.messages.migrationAliases == b.messages.migrationAliases
-		&& bool(a.topic) == bool(b.topic)
-		&& (!a.topic || (a.topic->chat == b.topic->chat && a.topic->id == b.topic->id))
-		&& a.collection == b.collection && a.representation == b.representation;
-}
 
 void AddArchiveChatActions(not_null<Window::SessionController*> controller,
 		Dialogs::EntryState request, const Window::PeerMenuCallback &callback) {
 	const auto history = request.key.owningHistory();
 	if (!history || request.key.sublist() || request.section == Dialogs::EntryState::Section::Scheduled
-		|| request.section == Dialogs::EntryState::Section::ShortcutMessages || !PickerVisible(history)) {
-		return;
-	}
-	const auto peer = history->peer;
-	const auto topic = request.key.topic();
-	const auto topicId = topic ? std::optional<int64>(topic->rootId().bare) : std::nullopt;
-	const auto scope = ArchiveDeletedScope(peer, topicId);
+		|| request.section == Dialogs::EntryState::Section::ShortcutMessages || !PickerVisible(history)) return;
+	const auto peer = ArchiveV2::Peer(history->peer->id);
+	const auto name = PeerTokenText(peer);
+	if (!name) return;
 	const auto window = base::make_weak(controller.get());
-	const auto session = base::make_weak(&controller->session());
+	const auto lease = ArchiveV2::SessionLease(&controller->session());
 	const auto current = [=] {
-		return window && session && &window->session() == session.get() && PickerVisible(peer)
-			&& SameArchiveViewScope(scope, ArchiveDeletedScope(peer, topicId));
+		const auto host = window.get();
+		return host && lease && lease->live.load() && ArchiveV2::SessionLease(&host->session()) == lease
+			&& host->window().maybeSession() == &host->session();
 	};
-	auto names = QStringList{peer->name()};
-	if (const auto from = peer->migrateFrom()) {
-		names.push_back(from->name());
-	}
-	if (const auto to = peer->migrateTo()) {
-		names.push_back(to->name());
-	}
-	const auto scopeName = names.join(u", "_q);
+	callback(tr::lng_purple_archive_history(tr::now), [=] {
+		if (current()) OpenArchivedMessages(window.get(), peer, false);
+	}, &st::menuIconViewReplies);
 	callback(tr::lng_purple_archive_deleted(tr::now), [=] {
-		if (current()) {
-			ShowArchiveDeleted(window.get(), scope, scopeName, current);
-		}
+		if (current()) OpenArchivedMessages(window.get(), peer, true);
 	}, &st::menuIconDelete);
-	for (const auto kind : {ArchivePurgeKind::Trashbin, ArchivePurgeKind::EditHistory}) {
-		callback(kind == ArchivePurgeKind::Trashbin ? tr::lng_purple_archive_empty_trash(tr::now)
-			: tr::lng_purple_archive_clear_edits(tr::now), [=] {
-			if (current()) {
-				ShowArchivePurgeBox(window.get(), kind, scope.messages, scopeName, current);
-			}
-		}, &st::menuIconDelete);
-	}
+	const auto change = [=](QString key, std::optional<SettingScalar> value) {
+		if (!current()) return;
+		const auto host = &window->window();
+		const auto opening = CaptureWindowSettingsEditor(host, current);
+		auto review = PrepareWindowSettingsEditorEdit(opening, std::vector<SettingsEdit>{
+			SettingsEdit{ { u"archive"_q, u"chats"_q, *name, std::move(key) }, std::move(value) },
+		});
+		if (!review.review) {
+			window->showToast(review.error);
+			return;
+		}
+		RequestSettingsEditorApply(host, std::move(review.review), [=](SettingsEditorApplyResult result) {
+			if (current() && !result.error.isEmpty()) window->showToast(result.error);
+		});
+	};
+	const auto &policy = ArchiveV2::CurrentPolicy(&controller->session());
+	const auto row = policy.chats.find(*name);
+	const auto ordinary = row != policy.chats.end() && row->second.ordinaryOnArrival;
+	callback(ordinary ? u"Keep descriptions for new files"_q : u"Save whole files on arrival"_q,
+		[=] { change(u"ordinary_on_arrival"_q, SettingScalar(!ordinary)); }, &st::menuIconStorage);
+	callback(u"Timed downloads · On open"_q, [=] {
+		change(u"timed_download"_q, SettingScalar(u"on_open"_q));
+	}, &st::menuIconStorage);
+	callback(u"Timed downloads · Off"_q, [=] {
+		change(u"timed_download"_q, SettingScalar(u"off"_q));
+	}, &st::menuIconStorage);
+	callback(u"Timed downloads · Inherit"_q, [=] {
+		change(u"timed_download"_q, std::nullopt);
+	}, &st::menuIconStorage);
 }
 
 }

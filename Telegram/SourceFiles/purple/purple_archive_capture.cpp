@@ -1,211 +1,162 @@
 #include "purple/purple_archive_capture.h"
+
 #include "api/api_text_entities.h"
 #include "base/unixtime.h"
-#include "core/file_location.h"
-#include "data/data_document.h"
-#include "data/data_document_media.h"
+#include "base/weak_ptr.h"
 #include "data/data_media_types.h"
-#include "data/data_peer.h"
-#include "data/data_photo.h"
-#include "data/data_photo_media.h"
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
-#include "iv/iv_rich_page.h"
 #include "main/main_session.h"
-#include "purple/purple_archive_crypto.h"
-#include "purple/purple_archive_files.h"
-#include "purple/purple_archive_service.h"
-#include "purple/purple_archive_acquired_source.h"
+#include "purple/purple_archive_v2_service.h"
 #include "purple/purple_archive_lifecycle_capture.h"
-#include "history/history_item_components.h"
-#include "purple/purple_article_markdown.h"
 #include "purple/purple_markdown_current.h"
-#include "purple/purple_archive_markdown.h"
-#include "purple/purple_config.h"
-#include <QtCore/QCryptographicHash>
+#include "ui/text/text_entity.h"
+
 #include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
 
 namespace Purple {
 namespace {
 
-QString Fresh() {
-	const auto bytes = DesktopArchiveCrypto::Random(16);
-	return bytes ? QString::fromLatin1(bytes->toHex()) : QString();
-}
-QString Digest(const QByteArray &bytes) {
-	return QString::fromLatin1(
-		QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+using namespace ArchiveV2;
+
+QByteArray Pack(const TextWithEntities &text, PeerId sender,
+		const std::vector<Attachment> &attachments = {}) {
+	auto entities = QJsonArray();
+	for (const auto &entity : text.entities) {
+		entities.push_back(QJsonArray{ int(entity.type()), entity.offset(), entity.length(), entity.data() });
+	}
+	auto media = QJsonArray();
+	for (const auto &entry : attachments) media.push_back(QString::fromLatin1(entry.source));
+	return QJsonDocument(QJsonObject{ { u"text"_q, text.text }, { u"entities"_q, entities },
+		{ u"sender"_q, QString::number(sender.value) }, { u"media"_q, media } }).toJson(QJsonDocument::Compact);
 }
 
-QJsonArray Entities(const EntitiesInText &entities) {
-	auto result = QJsonArray();
-	for (const auto &entity : entities) {
-		result.push_back(
-			QJsonObject{{u"type"_q, int(entity.type())}, {u"offset"_q, entity.offset()},
-				{u"length"_q, entity.length()}, {u"data"_q, entity.data()}});
-	}
-	return result;
-}
-
-void Decorate(not_null<Main::Session*> session, const MTPMessage &message, ArchiveEvent &event) {
-	if (message.type() != mtpc_message || tl::count_length(message) > 1024 * 1024) { return; }
-	const auto rich = message.c_message().vrich_message();
-	if (!rich) { return; }
-	if (const auto page = Iv::ParseRichPage(session, *rich)) {
-		AttachDesktopArticleMarkdown(event, *page);
-	}
-}
-
-void Available(not_null<Main::Session*> session, const ArchiveEvent &event) {
-	TrackArchiveAcquisition(session, event);
-}
-
-std::optional<ArchiveEvent> LiveSnapshot(
-	not_null<Main::Session*> session, not_null<HistoryItem*> item) {
-	if (!IsServerMsgId(item->id) || (!item->isRegular() && !item->Has<HistoryServiceSelfDestruct>()) || item->isScheduled()
-		|| item->shortcutId()) {
-		return {};
-	}
-	auto event = ArchiveEvent();
-	event.key = {SessionAccountKey(session),
-		DesktopArchiveChat(item->history()->peer->id), item->id.bare};
-	event.id = Fresh();
-	event.content = ArchiveContent();
-	event.content->text = item->originalText().text;
-	event.content->entities = Entities(item->originalText().entities);
-	event.observation.observedAt = base::unixtime::now();
-	event.observation.serverTime = item->date();
-	if (const auto page
-		= item->fullRichPage() ? item->fullRichPage() : item->richPage()) {
-		const auto rendered = RenderArticleMarkdown(*page);
-		event.content->rich = QJsonObject{
-			{u"format"_q, u"observed-article-markdown"_q}, {u"text"_q, rendered.text}};
-	}
-	if (const auto media = item->media()) {
-		if (const auto document = media->document()) {
-			event.content->media.push_back(
-				{u"document:"_q + QString::number(document->id), u"document"_q});
+void Attach(const MTPMessageMedia *media, CapturedEvent &event) {
+	if (!media) return;
+	if (media->type() == mtpc_messageMediaPhoto) {
+		const auto &data = media->c_messageMediaPhoto();
+		if (const auto photo = data.vphoto(); photo && photo->type() == mtpc_photo) {
+			event.attachments.push_back({ "photo:" + QByteArray::number(photo->c_photo().vid().v),
+				"Photo", int(MediaKind::Photo), !!data.vttl_seconds() });
 		}
-		if (const auto photo = media->photo()) {
-			event.content->media.push_back(
-				{u"photo:"_q + QString::number(photo->id), u"photo"_q});
+	} else if (media->type() == mtpc_messageMediaDocument) {
+		const auto &data = media->c_messageMediaDocument();
+		const auto document = data.vdocument();
+		if (!document || document->type() != mtpc_document) return;
+		const auto &value = document->c_document();
+		auto kind = MediaKind::Other;
+		auto name = QString();
+		for (const auto &attribute : value.vattributes().v) {
+			switch (attribute.type()) {
+			case mtpc_documentAttributeFilename: name = qs(attribute.c_documentAttributeFilename().vfile_name()); break;
+			case mtpc_documentAttributeAudio:
+				if (attribute.c_documentAttributeAudio().is_voice()) kind = MediaKind::Voice;
+				break;
+			case mtpc_documentAttributeVideo:
+				kind = attribute.c_documentAttributeVideo().is_round_message() ? MediaKind::Round : MediaKind::Video;
+				break;
+			}
 		}
-	}
-	if (const auto page = item->fullRichPage() ? item->fullRichPage() : item->richPage()) {
-		AttachDesktopArticleMarkdown(event, *page);
-	}
-	event.completeness = ArchiveCompleteness::Partial;
-	event.missing.content.push_back({{u"observedStructure"_q}});
-	return event;
-}
-
-std::optional<ArchiveEvent> Preimage(
-	not_null<Main::Session*> session, const MTPMessage &message) {
-	if (message.type() != mtpc_message) {
-		return {};
-	}
-	const auto &data = message.c_message();
-	const auto item = session->data().message(peerFromMTP(data.vpeer_id()), data.vid().v);
-	if (!item || !item->isRegular() || item->isScheduled()) {
-		return {};
-	}
-	auto event = LiveSnapshot(session, item);
-	if (event) {
-		event->observation.context.insert(u"desktopLivePreimage"_q, true);
-	}
-	return event;
-}
-
-}
-
-std::optional<ArchiveEvent> DesktopArchiveLiveSnapshot(
-	not_null<Main::Session*> session, not_null<HistoryItem*> item) {
-	return LiveSnapshot(session, item);
-}
-
-void ObserveArchiveShortSent(not_null<Main::Session*> session,
-	not_null<HistoryItem*> item, const MTPDupdateShortSentMessage &acknowledgement) {
-	auto observed = LiveSnapshot(session, item);
-	const auto event = observed
-		? DesktopArchiveShortSentSnapshot(std::move(*observed), acknowledgement)
-		: std::nullopt;
-	if (event) {
-		QueueArchiveObservation(session, *event);
-		Available(session, *event);
+		event.attachments.push_back({ "document:" + QByteArray::number(value.vid().v),
+			QJsonDocument(QJsonObject{ { u"name"_q, name }, { u"mime"_q, qs(value.vmime_type()) },
+				{ u"bytes"_q, QString::number(value.vsize().v) } }).toJson(QJsonDocument::Compact),
+			int(kind), !!data.vttl_seconds() });
 	}
 }
 
-void ObserveArchiveSentMetadata(
-	not_null<Main::Session*> session, const MTPDmessage &message) {
-	auto event = DesktopArchiveSnapshotData(SessionAccountKey(session), message,
-		ArchiveOrigin::Baseline, Fresh(), base::unixtime::now());
-	if (!event) {
-		return;
+CapturedEvent Event(PeerId peer, MsgId id, Observation kind, QByteArray token, PeerData *chat = nullptr) {
+	return { .identity = { Peer(peer), uint64(id.bare) }, .kind = Classify(chat),
+		.event = kind, .eventId = std::move(token), .observedAt = base::unixtime::now() };
+}
+
+QByteArray Preimage(HistoryItem *item) {
+	return item && (item->isRegular() || item->isTtlCoveredMedia())
+		? Pack(item->originalText(), item->from()->id) : QByteArray();
+}
+
+void Accept(not_null<Main::Session*> session, const MTPDmessage &data, Observation event,
+		QByteArray token, bool arrival = false) {
+	if (!IsServerMsgId(MsgId(data.vid().v)) || data.vquick_reply_shortcut_id() || !SessionLease(session.get())) return;
+	const auto peer = peerFromMTP(data.vpeer_id());
+	const auto msg = MsgId(data.vid().v);
+	auto captured = Event(peer, msg, event, std::move(token), session->data().peerLoaded(peer));
+	Attach(data.vmedia(), captured);
+	const auto sender = data.vfrom_id() ? peerFromMTP(*data.vfrom_id()) : peer;
+	const auto entities = data.ventities();
+	captured.body = Pack({ qs(data.vmessage()), entities ? Api::EntitiesFromMTP(session.get(), entities->v)
+		: EntitiesInText() }, sender, captured.attachments);
+	if (event == Observation::Edit) captured.preimage = Preimage(session->data().message(peer, msg));
+	const auto request = arrival && !captured.attachments.empty() && !captured.attachments.front().timed;
+	if (Queue(session, std::move(captured)) && request) {
+		const auto weak = base::make_weak(session.get());
+		const auto lease = SessionLease(session.get());
+		crl::on_main([=] {
+			if (const auto live = weak.get(); live && SessionLease(live) == lease) {
+				if (const auto item = live->data().message(peer, msg)) ObserveArchiveAttachment(item, false);
+			}
+		});
 	}
-	event->observation.context.insert(u"desktopSendMetadata"_q, true);
-	QueueArchiveObservation(session, *event);
-	Available(session, *event);
+}
+
+}
+
+TextForMimeData ArchivedText(const QByteArray &body) {
+	const auto object = QJsonDocument::fromJson(body).object();
+	auto text = TextWithEntities{ object.value(u"text"_q).toString() };
+	for (const auto &value : object.value(u"entities"_q).toArray()) {
+		const auto row = value.toArray();
+		if (row.size() != 4) continue;
+		text.entities.push_back({ EntityType(row[0].toInt()), row[1].toInt(), row[2].toInt(), row[3].toString() });
+	}
+	return TextForMimeData::Rich(std::move(text));
 }
 
 void ObserveArchiveMessage(not_null<Main::Session*> session, const MTPMessage &message,
-	MsgId id, MessageFlags flags) {
-	if (!DesktopArchiveReceivedId(id, flags, message)) {
-		return;
-	}
+		MsgId id, MessageFlags flags, bool arrival) {
+	if (!IsServerMsgId(id) || (flags & (MessageFlag::AdminLogEntry | MessageFlag::FakeHistoryItem))
+		|| message.type() != mtpc_message || id.bare != message.c_message().vid().v) return;
 	RememberDesktopRichPreview(session, message);
-	if (auto event = DesktopArchiveSnapshot(SessionAccountKey(session), message,
-			ArchiveOrigin::Baseline, Fresh(), base::unixtime::now())) {
-		Decorate(session, message, *event);
-		QueueArchiveObservation(session, *event);
-		Available(session, *event);
-	}
+	Accept(session, message.c_message(), Observation::Baseline, "baseline", arrival);
 }
 
-void ObserveArchiveEdit(
-	not_null<Main::Session*> session, const MTPMessage &message, int pts, bool channel) {
+void ObserveArchiveEdit(not_null<Main::Session*> session, const MTPMessage &message, int pts, bool channel) {
 	RememberDesktopRichPreview(session, message);
-	if (ObserveArchiveExpiredReplacement(session, message, pts)) {
-		return;
-	}
-	if (const auto preimage = Preimage(session, message)) {
-		QueueArchiveObservation(session, *preimage);
-		Available(session, *preimage);
-	}
-	auto event = DesktopArchiveSnapshot(SessionAccountKey(session), message,
-		ArchiveOrigin::AuthoritativeEdit, Fresh(), base::unixtime::now());
-	if (!event) {
-		return;
-	}
-	event->id
-		= Digest((channel ? QByteArray("channel-edit/") : QByteArray("global-edit/"))
-				 + QByteArray::number(pts) + '/' + QByteArray::number(event->key.chat.id)
-				 + '/' + QByteArray::number(event->key.messageId) + '/'
-				 + ArchiveContentHash(*event->content).toUtf8());
-	Decorate(session, message, *event);
-	event->observation.context.insert(u"acceptedPts"_q, pts);
-	QueueArchiveObservation(session, *event);
-	Available(session, *event);
+	if (message.type() != mtpc_message || ObserveArchiveExpiredReplacement(session, message, pts)) return;
+	Accept(session, message.c_message(), Observation::Edit,
+		(channel ? QByteArray("channel-edit/") : QByteArray("edit/")) + QByteArray::number(pts));
 }
 
-void ObserveArchiveDelete(
-	not_null<Main::Session*> session, PeerId peer, const QVector<MTPint> &ids, int pts) {
+void ObserveArchiveSentMetadata(not_null<Main::Session*> session, const MTPDmessage &message) {
+	Accept(session, message, Observation::Baseline, "baseline", true);
+}
+
+void ObserveArchiveShortSent(not_null<Main::Session*> session, not_null<HistoryItem*> item,
+		const MTPDupdateShortSentMessage &acknowledgement) {
+	if (!IsServerMsgId(item->id) || item->id.bare != acknowledgement.vid().v || item->isScheduled() || item->shortcutId()) return;
+	auto event = Event(item->history()->peer->id, item->id, Observation::Baseline, "baseline", item->history()->peer);
+	Attach(acknowledgement.vmedia(), event);
+	event.body = Pack(item->originalText(), item->from()->id, event.attachments);
+	(void)Queue(session, std::move(event));
+}
+
+void ObserveArchiveDelete(not_null<Main::Session*> session, PeerId peer, const QVector<MTPint> &ids, int pts) {
+	const auto token = "delete/" + QByteArray::number(pts);
 	for (const auto &id : ids) {
-		if (id.v <= 0) {
-			continue;
-		}
-		auto event = ArchiveEvent();
-		event.key = {SessionAccountKey(session),
-			peer ? DesktopArchiveChat(peer) : ArchiveChatKey{ArchiveChatKind::User, 1},
-			id.v};
-		event.id
-			= Digest(QByteArray("delete/") + QByteArray::number(pts) + '/'
-					 + QByteArray::number(peer.value) + '/' + QByteArray::number(id.v));
-		event.origin = ArchiveOrigin::AuthoritativeDelete;
-		event.observation.observedAt = base::unixtime::now();
-		event.observation.context.insert(u"desktopNonChannelDelete"_q, !peer);
-		QueueArchiveObservation(session, std::move(event));
+		if (!IsServerMsgId(MsgId(id.v))) continue;
+		auto event = Event(peer, MsgId(id.v), Observation::Delete, token);
+		if (peer) event.preimage = Preimage(session->data().message(peer, MsgId(id.v)));
+		(void)Queue(session, std::move(event));
 	}
+}
+
+void RecordArchiveExpiry(not_null<HistoryItem*> item, bool consumed) {
+	CancelArchiveAttachment(item);
+	const auto peer = item->history()->peer;
+	auto event = Event(peer->id, item->id, consumed ? Observation::Consume : Observation::Expire, "end", peer);
+	event.preimage = Preimage(item);
+	(void)Queue(&item->history()->session(), std::move(event));
 }
 
 }

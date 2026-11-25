@@ -736,15 +736,22 @@ ordered(config_cpp, "void RequestSettingsEditorApply", "_opening.windowCurrent",
         "RequestWait({", "WaitAction::ChangePeekOption", "apply(current, true)", ".onResult = finish")
 ordered(config_cpp, "PurpleNoticeWindow(session)", "hasConfigPeerIds", "ShowPurpleNotice",
         "config:reload:")
-archive_cpp = read("purple/purple_archive_service.cpp")
-ordered(archive_cpp, "void ShowArchiveRemovalPending()", ".appScoped = true",
-        "kArchiveRemovalNoticeKey")
-ordered(archive_cpp, "void ShowArchiveDiscardFailure", "event=discard_failed reason=%1 count=1",
-        ".arg(reason)", "ShowPurpleNotice", "archive:discard_failed:")
-ordered(archive_cpp, "void ReportArchiveCaptureLoss", "AccumulateArchiveCaptureIncidents",
-        "event=%1 reason=%2 count=%3", "if (warn)", "ShowPurpleNotice", "archive:gap:")
-ordered(archive_cpp, "void RemoveArchiveAtLogout", "ShowArchiveRemovalPending();",
-        "Fn<void()> ArchiveDiscardAction", "ShowArchiveDiscardFailure")
+archive_cpp = read("purple/purple_archive_v2_service.cpp")
+archive_ui = read("purple/purple_archive_v2_ui.cpp")
+ordered(archive_cpp, "void StartSession", "LogIncident", "crl::on_main",
+        "SessionLease(live) != route", "PublishIncident(live")
+ordered(archive_cpp, "void Logout", "writer->logout", "CloseViews", "Accounts.erase")
+ordered(archive_cpp, "void PublishIncident", "effect.reason", "effect.count",
+        "ShowPurpleNotice", 'u"archive:v2:"_q')
+ordered(archive_ui, "ArchiveWarning LogIncident", "stage=%1 reason=%2 media=%3 count=%4")
+ordered(keys, '"archive-history"', '"archive-deleted"', '"archive-storage"',
+        "case Action::ArchiveHistory:", "OpenArchivedMessages(current", "OpenArchiveStorage(current)")
+ordered(read("data/data_document_resolver.cpp"), "playPause", "ShowTTLMediaLayerWidget", "ObserveArchiveAttachment")
+ordered(read("media/view/media_view_overlay_widget.cpp"), "void OverlayWidget::show(OpenRequest",
+        "displayDocument(", "ObserveArchiveAttachment")
+ordered(read("purple/purple_archive_v2_download.cpp"), "FileWrites.async", "file.write(bytes)",
+        "destination->parts.count(false)", "Complete(Input")
+assert "ObserveArchiveStream" not in read("data/data_streaming.cpp")
 topic_edit = read("boxes/peers/edit_forum_topic_box.cpp")
 ordered(topic_edit, "const auto refreshBotTopic", "bot ? peer->forum() : nullptr",
         "liveForum->requestTopic(rootId)", "MTPmessages_EditForumTopic",

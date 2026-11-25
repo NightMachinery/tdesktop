@@ -13,7 +13,7 @@ using ViewCurrent = std::function<bool()>;
 using DecodeBody = std::function<TextForMimeData(const QByteArray &)>;
 
 struct MediaViewActions {
-	std::optional<std::pair<int64, int64>> saving;
+	Fn<bool(int64, int64)> saving;
 	Fn<void(int64, int64)> openSaved;
 };
 
@@ -21,10 +21,13 @@ void FillHistoryBox(not_null<Ui::GenericBox*> box, const HistoryPage &page,
 	const DecodeBody &decode, ViewCurrent current, Fn<void(int64)> older, MediaViewActions media = {});
 void FillTimelineBox(not_null<Ui::GenericBox*> box, const TimelinePage &page, bool deleted,
 	const DecodeBody &decode, ViewCurrent current, Fn<void(TimelineCursor)> older);
-void FillStorageBox(not_null<Ui::GenericBox*> box, const StorageSummary &summary,
+void FillStorageBox(not_null<Ui::GenericBox*> box, const std::optional<StorageSummary> &summary,
 	std::optional<int64> previousBytes, ViewCurrent current,
 	Fn<void(CleanupKind)> reviewCleanup, Fn<void()> reviewPrevious);
 
+[[nodiscard]] QString ArchiveSize(int64 bytes);
+void FillArchiveConfirm(not_null<Ui::GenericBox*> box, QString title, QString detail,
+	ViewCurrent current, Fn<void()> confirm);
 void FillPreviousArchiveConfirm(not_null<Ui::GenericBox*> box, QString account,
 	int64 reviewedBytes, ViewCurrent current, Fn<void()> confirm);
 

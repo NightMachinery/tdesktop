@@ -28,21 +28,17 @@ def routes():
     builder = (SOURCE / "settings/settings_builder.cpp").read_text()
     playback = (SOURCE / "purple/purple_media_playback.cpp").read_text()
     recording = (SOURCE / "purple/purple_recording_settings.cpp").read_text()
-    archive = (SOURCE / "purple/purple_archive_service.cpp").read_text()
+    archive = (SOURCE / "purple/purple_archive_v2_boxes.cpp").read_text()
     ordered(purple, "const auto kPages = std::array", "ArchiveSettings::Id()",
             "WorkActivitySettings::Id()", "MediaSettings::Id()", "PrivacySettings::Id()",
             "AccountsSettings::Id()", "DiagnosticsSettings::Id()", ".parentId = PurpleSettings::Id()")
     ordered(purple, "void BuildPurpleSection", "advanced/purple_customize_settings",
             "for (const auto &page : kPages)", "builder.addSectionButton", "AddVersionRow")
-    ordered(purple, "builder.addSectionButton", "ArchiveSummaryValue(builder.session(), true)")
-    ordered(archive, "QString ArchiveStorageSizeLabel", "FormatArchiveSize(usage->bytes)",
-            "if (!usage->complete)", "label += u'+'", "return st::wrap_rtl(label)")
-    ordered(purple, "void BuildArchiveSettings", "ArchiveSummaryValue(session)",
-            "purple/archive_cleanup", "advanced/purple_archive_trash",
-            "advanced/purple_archive_edits", 'u"trash"_q', "LocalStorageId()",
-            "advanced/purple_archive_discard", "ArchiveDiscardAction", ".confirmed",
-            "if (current()) { discard(); }", "sessionControllerValue()", "!current()",
-            "confirm->closeBox()")
+    ordered(archive, "void ReviewArchiveReset", "store.reviewReset(store.id())",
+            "ArchiveSize(review->bytes())", "Confirm(route", "RequestReset(live, review)")
+    ordered(purple, "void BuildArchiveSettings", "purple/archive_storage", "OpenArchiveStorage",
+            "purple/archive_deleted", "OpenArchivedMessages", "advanced/purple_archive_discard",
+            "ReviewArchiveReset", "LocalStorageId()")
     ordered(purple, "auto CurrentSettingsWindow", "base::make_weak(builder.controller())",
             "own->window().sessionController() == own", "live->account().maybeSession() == live")
     ordered(builder, "SearchRegistry::collectAll", "contains(root, sectionId)",

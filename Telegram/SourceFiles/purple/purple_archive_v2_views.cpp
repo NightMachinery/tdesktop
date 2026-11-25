@@ -12,7 +12,9 @@ constexpr auto kChanges = ArchiveSqlExpectation::AnyChanges;
 constexpr auto kOne = ArchiveSqlExpectation::OneChange;
 constexpr auto kPage = int64(64);
 
-std::optional<MessageIdentity> ParseIdentity(const QByteArray &text) {
+}
+
+std::optional<MessageIdentity> Store::parseIdentity(const QByteArray &text) {
 	const auto colon = text.lastIndexOf(':');
 	if (colon <= 0) return std::nullopt;
 	const auto peer = ParsePeerToken(QString::fromLatin1(text.first(colon)));
@@ -22,6 +24,8 @@ std::optional<MessageIdentity> ParseIdentity(const QByteArray &text) {
 	if (!peer || !peer->id || !ok || !message || suffix != QByteArray::number(message)) return std::nullopt;
 	return MessageIdentity{ *peer, uint64_t(message) };
 }
+
+namespace {
 
 ArchiveSqlProgram Begin() {
 	return { ArchiveSqlStatus::Ready, {{ u"BEGIN IMMEDIATE"_q }} };
@@ -98,7 +102,7 @@ std::optional<TimelinePage> Store::timeline(std::optional<PeerToken> peer, bool 
 		if (!head || !head->head || head->emptied || (deletedOnly && head->head->status == MessageStatus::Live) || *last != head->activity) {
 			return std::nullopt;
 		}
-		const auto identity = ParseIdentity(head->identity);
+		const auto identity = parseIdentity(head->identity);
 		if (!identity || (peer && identity->peer != *peer)) return std::nullopt;
 		auto latest = head->sequence ? body(*identity, head->sequence) : std::nullopt;
 		if (head->sequence && !latest) return std::nullopt;
@@ -186,7 +190,7 @@ CleanupResult Store::cleanupPage(const CleanupTicket &ticket) {
 		auto row = readHead(*key, {});
 		if (!row || !row->head) return failed({ u"cleanup_blocked"_q });
 		if (!ticket.chat.isEmpty()) {
-			const auto identity = ParseIdentity(row->identity);
+			const auto identity = parseIdentity(row->identity);
 			const auto peer = identity ? PeerTokenText(identity->peer) : std::nullopt;
 			if (!peer || token("chat", peer->toLatin1()) != ticket.chat) {
 				return failed({ u"cleanup_blocked"_q });

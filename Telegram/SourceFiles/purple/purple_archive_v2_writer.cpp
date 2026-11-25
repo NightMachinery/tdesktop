@@ -39,7 +39,10 @@ struct Writer::State {
 	std::deque<std::shared_ptr<BlobInput>> blobs;
 	std::shared_ptr<BlobInput> writing;
 	int64 bytes = 0;
+	uint64_t dropped = 0;
 	bool stopped = false;
+	bool finished = false;
+	std::optional<std::chrono::steady_clock::time_point> quitDeadline;
 	std::optional<QByteArray> logout;
 	std::shared_ptr<Lease> lease;
 	Report report;
@@ -61,7 +64,7 @@ Writer::~Writer() {
 StoreEffect Writer::post(CapturedEvent event) {
 	const auto size = Weight(event);
 	const auto lock = std::lock_guard(_state->mutex);
-	if (_state->stopped || !_state->lease->live.load()) return { u"scope_retired"_q };
+	if (_state->stopped || _state->quitDeadline || !_state->lease->live.load()) return { u"scope_retired"_q };
 	if (!_state->jobs.empty() && event.event == Observation::Baseline && !event.fillsMissing) {
 		const auto last = std::get_if<CapturedEvent>(&_state->jobs.back());
 		if (last && last->event == Observation::Baseline && !last->fillsMissing
@@ -69,7 +72,11 @@ StoreEffect Writer::post(CapturedEvent event) {
 			return {};
 		}
 	}
-	if (_state->jobs.size() >= kEvents || size > kBytes - _state->bytes) return { u"text_queue_full"_q };
+	if (_state->jobs.size() >= kEvents || size > kBytes - _state->bytes) {
+		++_state->dropped;
+		_state->changed.notify_one();
+		return { u"text_queue_full"_q };
+	}
 	_state->bytes += size;
 	_state->jobs.emplace_back(std::move(event));
 	_state->changed.notify_one();
@@ -79,7 +86,7 @@ StoreEffect Writer::post(CapturedEvent event) {
 StoreEffect Writer::postBlob(BlobInput input) {
 	const auto lock = std::lock_guard(_state->mutex);
 	const auto revision = _state->lease->mediaRevision.load();
-	if (_state->stopped || !_state->lease->live.load() || input.revision != revision) return { u"scope_retired"_q };
+	if (_state->stopped || _state->quitDeadline || !_state->lease->live.load() || input.revision != revision) return { u"scope_retired"_q };
 	std::erase_if(_state->blobs, [&](const auto &queued) { return queued->revision != revision; });
 	const auto matches = [&](const auto &other) { return input.sameTarget(*other); };
 	if ((_state->writing && matches(_state->writing))
@@ -92,9 +99,18 @@ StoreEffect Writer::postBlob(BlobInput input) {
 	return {};
 }
 
+bool Writer::saving(const MessageIdentity &identity, int64 sequence, int64 ordinal) const {
+	const auto lock = std::lock_guard(_state->mutex);
+	const auto matches = [&](const auto &blob) {
+		return blob && blob->identity == identity && blob->sequence == sequence && blob->ordinal == ordinal
+			&& blob->revision == _state->lease->mediaRevision.load();
+	};
+	return _state->lease->live.load() && (matches(_state->writing) || std::ranges::any_of(_state->blobs, matches));
+}
+
 bool Writer::query(QByteArray expectedId, ReadOrCleanup operation) {
 	const auto lock = std::lock_guard(_state->mutex);
-	if (!operation || _state->stopped || !_state->lease->live.load() || _state->jobs.size() == kEvents) return false;
+	if (!operation || _state->stopped || _state->quitDeadline || !_state->lease->live.load() || _state->jobs.size() == kEvents) return false;
 	_state->jobs.emplace_back(State::Query{ std::move(expectedId), std::move(operation) });
 	_state->changed.notify_one();
 	return true;
@@ -102,7 +118,7 @@ bool Writer::query(QByteArray expectedId, ReadOrCleanup operation) {
 
 bool Writer::reset(ResetReview review) {
 	const auto lock = std::lock_guard(_state->mutex);
-	if (_state->stopped || !_state->lease->live.load() || _state->jobs.size() == kEvents) return false;
+	if (_state->stopped || _state->quitDeadline || !_state->lease->live.load() || _state->jobs.size() == kEvents) return false;
 	_state->jobs.emplace_back(std::move(review));
 	_state->changed.notify_one();
 	return true;
@@ -110,6 +126,19 @@ bool Writer::reset(ResetReview review) {
 
 void Writer::logout(QByteArray expectedId) {
 	stop(std::move(expectedId));
+}
+
+bool Writer::drainUntil(std::chrono::steady_clock::time_point deadline) {
+	const auto lock = std::lock_guard(_state->mutex);
+	if (_state->finished || _state->stopped || std::chrono::steady_clock::now() >= deadline) return false;
+	if (!_state->quitDeadline) {
+		_state->quitDeadline = deadline;
+		_state->lease->mediaRevision.fetch_add(1);
+		std::erase_if(_state->jobs, [](const auto &job) { return !std::holds_alternative<CapturedEvent>(job); });
+		_state->blobs.clear();
+		_state->changed.notify_one();
+	}
+	return true;
 }
 
 void Writer::stop(std::optional<QByteArray> logout) {
@@ -122,13 +151,18 @@ void Writer::stop(std::optional<QByteArray> logout) {
 }
 
 void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
+	const auto finish = gsl::finally([&] {
+		const auto lock = std::lock_guard(state->mutex);
+		state->finished = true;
+	});
 	auto store = std::make_unique<Store>(std::move(options));
-	const auto report = [&](StoreEffect effect, QByteArray id) {
+	const auto report = [&](StoreEffect effect, QByteArray id, IncidentStage stage) {
+		effect.stage = stage;
 		if (state->report) state->report(std::move(effect), std::move(id));
 	};
 	auto opened = store->open();
 	const auto initial = store->id();
-	if (state->lease->live.load()) report(std::move(opened), initial);
+	if (state->lease->live.load()) report(std::move(opened), initial, IncidentStage::Startup);
 	const auto drain = [&] {
 		auto events = std::vector<CapturedEvent>();
 		auto query = std::optional<State::Query>();
@@ -144,19 +178,20 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 				if (!event) break;
 				state->bytes -= Weight(*event);
 				events.push_back(std::move(*event));
+				if (events.back().storeId.isEmpty()) events.back().storeId = store->id();
 				state->jobs.pop_front();
 			}
 		}
-		if (query && query->generation == store->id()) query->operation(*store);
+		if (query && (query->generation.isEmpty() || query->generation == store->id())) query->operation(*store);
 		for (auto &effect : store->captureBatch(events)) {
-			if (state->lease->live.load()) report(std::move(effect), store->id());
+			if (state->lease->live.load()) report(std::move(effect), store->id(), IncidentStage::Capture);
 		}
 		return query.has_value() || !events.empty();
 	};
 	auto retry = std::chrono::steady_clock::time_point();
 	for (;;) {
 		auto lock = std::unique_lock(state->mutex);
-		const auto hasWork = [&] { return state->stopped || !state->jobs.empty() || !state->blobs.empty(); };
+		const auto hasWork = [&] { return state->stopped || state->quitDeadline || state->dropped || !state->jobs.empty() || !state->blobs.empty(); };
 		const auto now = std::chrono::steady_clock::now();
 		if (!hasWork() && (!store->maintenancePending() || now < retry)) {
 			const auto midnight = std::chrono::seconds(86400
@@ -170,11 +205,17 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 				auto effect = store->logout(*logout);
 				const auto id = store->id();
 				store.reset();
-				report(std::move(effect), id);
+				report(std::move(effect), id, IncidentStage::Cleanup);
 			}
 			return;
 		}
-		if (!state->jobs.empty()) {
+		if (state->quitDeadline && (state->jobs.empty() || std::chrono::steady_clock::now() >= *state->quitDeadline)) return;
+		const auto quitting = state->quitDeadline.has_value();
+		if (state->dropped) {
+			const auto dropped = std::exchange(state->dropped, 0);
+			lock.unlock();
+			report({ u"text_queue_full"_q, false, IncidentStage::Capture, dropped }, store->id(), IncidentStage::Capture);
+		} else if (!state->jobs.empty()) {
 			if (const auto expected = std::get_if<ResetReview>(&state->jobs.front())) {
 				const auto review = *expected;
 				state->jobs.pop_front();
@@ -182,11 +223,16 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 				auto effect = store->reset(review);
 				const auto id = store->id();
 				if (effect.committed || !state->lease->live.load()) {
+					const auto logout = [&] {
+						const auto guard = std::lock_guard(state->mutex);
+						return state->logout;
+					}();
+					if (logout) effect = store->logout({});
 					store.reset();
-					report(std::move(effect), id);
+					report(std::move(effect), id, IncidentStage::Cleanup);
 					return;
 				}
-				report(std::move(effect), id);
+				report(std::move(effect), id, IncidentStage::Cleanup);
 			} else {
 				lock.unlock();
 				drain();
@@ -200,16 +246,14 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 				const auto guard = std::lock_guard(state->mutex);
 				state->writing.reset();
 			}
-			if (state->lease->live.load()) report(std::move(effect), store->id());
+			if (state->lease->live.load()) report(std::move(effect), store->id(), IncidentStage::WholeFile);
 		} else {
 			lock.unlock();
 		}
-		if (store->maintenancePending() && std::chrono::steady_clock::now() >= retry) {
+		if (!quitting && store->maintenancePending() && std::chrono::steady_clock::now() >= retry) {
 			const auto result = store->maintain();
-			if (!result && state->lease->live.load()) {
-				report(result, store->id());
-				retry = std::chrono::steady_clock::now() + std::chrono::minutes(1);
-			}
+			if (state->lease->live.load()) report(result, store->id(), IncidentStage::Maintenance);
+			if (!result) retry = std::chrono::steady_clock::now() + std::chrono::minutes(1);
 		}
 	}
 }

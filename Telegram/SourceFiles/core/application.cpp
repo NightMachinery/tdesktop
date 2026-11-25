@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qt_signal_producer.h"
 #include "base/timer.h"
 #include "purple/purple_app_services.h"
+#include "purple/purple_archive_v2_service.h"
 #include "purple/purple_keys.h"
 #include "purple/purple_playlist_song_list.h"
 #include "purple/purple_settings_customize.h"
@@ -2054,7 +2055,7 @@ void QuitAttempt() {
 }
 
 bool Application::readyToQuit() {
-	auto prevented = false;
+	auto prevented = Quitting() && Purple::ArchiveV2::DrainOnQuit();
 	if (_calls->isQuitPrevent()) {
 		prevented = true;
 	}

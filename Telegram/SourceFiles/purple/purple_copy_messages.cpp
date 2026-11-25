@@ -2,16 +2,12 @@
 
 #include "apiwrap.h"
 #include "main/main_account.h"
-#include "purple/purple_archive_service.h"
 #include "purple/purple_markdown_current.h"
 #include "base/weak_ptr.h"
 #include "base/unixtime.h"
-#include "purple/purple_archive_capture.h"
 #include "purple/purple_config.h"
 #include "purple/purple_notices.h"
 #include "purple/purple_markdown_delivery.h"
-#include "purple/purple_archive_markdown.h"
-#include <QtCore/QCryptographicHash>
 #include "base/weak_qptr.h"
 #include "core/application.h"
 #include "data/data_changes.h"
@@ -149,9 +145,7 @@ private:
 	MarkdownCopyToken _copyToken;
 	MessageIdsList _ids;
 	std::vector<Entry> _entries;
-	std::optional<DesktopMarkdownCopyScope> _archiveScope;
 	bool _hasGenuine = false;
-	std::vector<ArchiveEvent> _resolvedBodies;
 	qsizetype _resolvedBytes = 0;
 	bool _selection = false;
 	bool _group = false;
@@ -272,7 +266,6 @@ void CopyBatch::start() {
 	if (_ids.empty() || !contextValid()) {
 		return;
 	}
-	_archiveScope = OpenDesktopMarkdownCopy(_session.get());
 	const auto owner = &_session.get()->data();
 	for (const auto id : _ids) {
 		const auto item = owner->message(id);
@@ -331,21 +324,7 @@ void CopyBatch::start() {
 			if (!page || !DesktopRichPageExtends(*entry.inlinePage, *page)) { continue; }
 			entry.verifiedResponse = page;
 			entry.richCompletion = *verified;
-			const auto bytes = tl::count_length(*verified);
-			if (bytes > 8 * 1024 * 1024 - strong->_resolvedBytes) { continue; }
-			auto wire = mtpBuffer();
-			verified->write(wire);
-			const auto raw = QByteArray(reinterpret_cast<const char*>(wire.constData()), wire.size() * sizeof(mtpPrime));
-			const auto id = QString::fromLatin1(QCryptographicHash::hash(raw, QCryptographicHash::Sha256).toHex());
-			if (auto event = DesktopArchiveSnapshot(SessionAccountKey(response.session), *verified,
-					ArchiveOrigin::Hydration, id, base::unixtime::now())) {
-				AttachDesktopArticleMarkdown(*event, *page);
-				const auto retainedBytes = event->observation.payload.size()
-					+ (event->content ? QJsonDocument(event->content->rich.toObject()).toJson().size() : 0);
-				if (retainedBytes > 8 * 1024 * 1024 - strong->_resolvedBytes) { continue; }
-				strong->_resolvedBytes += retainedBytes;
-				strong->_resolvedBodies.push_back(*event);
-			}
+
 		}
 	}, _lifetime);
 	owner->itemResizeRequest() | rpl::on_next([=] {
@@ -452,46 +431,25 @@ void CopyBatch::publish() {
 		markdown = CopyTextAsMarkdown(HistoryGroupText(group));
 	}
 	if (markdown.isEmpty() && !_hasGenuine) { return; }
-	const auto deliver = [&] { SetDesktopMarkdownClipboard(markdown); };
-	auto published = false;
-	if (_archiveScope) {
-		const auto &scope = *_archiveScope;
-		published = scope.publication->publish(scope.stamp, [&] {
-			return scope.current() && entriesValid();
-		}, deliver);
-	} else if (!markdown.isEmpty()) {
-		deliver();
-		published = true;
-	}
-	if (published && contextValid()) {
-		for (auto &event : _resolvedBodies) {
-			QueueDesktopResolvedRichBody(_session.get(), std::move(event));
-		}
-		_resolvedBodies.clear();
-	}
-
+	SetDesktopMarkdownClipboard(markdown);
 }
 
 void CopyBatch::ordinary(size_t index) {
 	auto &entry = _entries[index];
 	const auto item = _session.get()->data().message(entry.id);
-	const auto sameDisplay = entry.ordinary.rich == entry.original;
-	const auto &body = entry.body;
-	if (!_archiveScope || _selection || entry.display.translated()
-		|| (!sameDisplay && body.document.isEmpty())) {
+	if (!item || _selection || entry.display.translated() || !IsDesktopMarkdownFile(entry.body)) {
 		entry.markdown = CopyTextAsMarkdown(entry.ordinary);
 		next(index + 1);
 		return;
 	}
 	const auto self = shared_from_this();
-	ReadDesktopMarkdownSource(_session.get(), *_archiveScope, body,
-		[self, index](DesktopMarkdownCopySource source) {
-			if (!source.current || !self->entriesValid()) { self->cancel(); return; }
-			auto &entry = self->_entries[index];
-			self->_hasGenuine = self->_hasGenuine || source.text.has_value();
-			entry.markdown = source.text ? *source.text : CopyTextAsMarkdown(entry.ordinary);
-			self->next(index + 1);
-		});
+	ReadDesktopMarkdownFile(item, [self, index](std::optional<QString> source) {
+		if (!self->entriesValid()) { self->cancel(); return; }
+		auto &entry = self->_entries[index];
+		self->_hasGenuine = self->_hasGenuine || source.has_value();
+		entry.markdown = source ? *source : CopyTextAsMarkdown(entry.ordinary);
+		self->next(index + 1);
+	});
 }
 
 void CopyBatch::rendered(size_t index, const std::shared_ptr<const Iv::RichPage> &page) {
@@ -591,8 +549,7 @@ void AddMarkdownDocumentCopyAction(not_null<Ui::PopupMenu*> menu,
 		bool permitted, bool asGroup) {
 	if (!permitted || !item || item->richPage() || !item->media()) { return; }
 	const auto body = DesktopMarkdownBodyForItem(item);
-	if (!body.document.isEmpty() && IsDesktopMarkdownFile({body.document, u"document"_q,
-		{{u"name"_q, body.name}, {u"mime"_q, body.mime}}})) {
+	if (IsDesktopMarkdownFile(body)) {
 		AddMessageCopyAsMarkdownAction(menu, list, item->fullId(), asGroup);
 	}
 }

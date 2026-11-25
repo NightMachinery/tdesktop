@@ -6,149 +6,27 @@ import json
 from pathlib import Path
 import shlex
 import subprocess
-import re
-import shutil
 import tempfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--build-dir', type=Path, required=True)
 parser.add_argument('--output-dir', type=Path)
 parser.add_argument('--use-build-objects', action='store_true')
-parser.add_argument('--capture-only', action='store_true')
-parser.add_argument('--views', action='store_true')
-parser.add_argument('--purge', action='store_true')
-parser.add_argument('--lifecycle', action='store_true')
-parser.add_argument('--access', action='store_true')
-parser.add_argument('--pagination-only', action='store_true')
-parser.add_argument('--handoff', action='store_true')
-parser.add_argument('--passive', action='store_true')
-parser.add_argument('--markdown', action='store_true')
-parser.add_argument('--markdown-source', action='store_true')
 parser.add_argument('--music-index', action='store_true')
 parser.add_argument('--build-only', action='store_true')
 parser.add_argument('--reuse-from', type=Path)
 args = parser.parse_args()
-args.access = args.access or args.pagination_only
 repo = Path(__file__).resolve().parent.parent
 build = args.build_dir.resolve()
 owned = tempfile.TemporaryDirectory(prefix='purple-archive-test.') if not args.output_dir else None
 work = args.output_dir.resolve() if args.output_dir else Path(owned.name)
 work.mkdir(parents=True, exist_ok=True)
-service = (repo / 'Telegram/SourceFiles/purple/purple_archive_service.cpp').read_text()
-start = service.index('if (!weak || Retired.contains(weak.get()))')
-end = start + re.search(r'\n\s*\}\);', service[start:]).start()
-(work / 'archive-page-callback.inc').write_text(service[start:end] + '\n')
-if args.access:
-    begin = service.index('void OpenArchiveMedia(')
-    position = service.index('{', begin) + 1
-    depth = 1
-    while depth:
-        depth += (service[position] == '{') - (service[position] == '}')
-        position += 1
-    callback = service[begin:position]
-    assert callback.count('not_null<Main::Session*>') == 1
-    (work / 'archive-media-callback.inc').write_text(callback.replace(
-        'not_null<Main::Session*>', 'not_null<CallbackSession*>').replace(
-        'crl::on_main', 'CallbackOnMain') + '\n')
-    history = (repo / 'Telegram/SourceFiles/purple/purple_archive_history_box.cpp').read_text()
-    begin = history.index('[=](ArchiveLeaseRevisionChange change)')
-    position = history.index('{', begin) + 1
-    depth = 1
-    while depth:
-        depth += (history[position] == '{') - (history[position] == '}')
-        position += 1
-    history_callback = history[begin:position]
-    (work / 'archive-history-lease.inc').write_text('return ' + history_callback + ';\n')
-    reader = (repo / 'Telegram/SourceFiles/media/streaming/media_streaming_reader.cpp').read_text()
-    (work / 'archive-reader-slices.inc').write_text(reader[
-        reader.index('namespace Media {'):reader.index('Reader::Reader(')]
-        + reader[reader.index('QByteArray SerializeComplexPartsMap('):])
-def extract(text, signature):
-    begin = text.index(signature)
-    pos = text.index('{', begin) + 1
-    depth = 1
-    while depth:
-        depth += (text[pos] == '{') - (text[pos] == '}')
-        pos += 1
-    return text[begin:pos] + '\n'
-if args.views:
-    menu = (repo / 'Telegram/SourceFiles/purple/purple_archive_menu.cpp').read_text()
-    deleted = (repo / 'Telegram/SourceFiles/purple/purple_archive_deleted_box.cpp').read_text()
-    (work / 'archive-view-route.inc').write_text(extract(deleted, 'const auto current = [=]') + ';\n')
-    (work / 'archive-scope-match.inc').write_text(extract(menu, 'bool SameArchiveViewScope('))
-    worker = extract(service, 'class ArchiveWorker final') + ';\n'
-    (work / 'archive-view-worker.inc').write_text(worker.replace('ArchiveWorker', 'ProbeViewWorker'))
-    delivery = extract(service, 'void DeliverDeletedPage(')
-    assert delivery.count('not_null<Main::Session*>') == 1
-    (work / 'archive-deleted-delivery.inc').write_text(delivery.replace(
-        'not_null<Main::Session*>', 'not_null<Session*>').replace('crl::on_main', 'OnMain'))
-    history_action = extract(deleted, '[=] {\n\t\t\t\t\t\tif (current() && active->load())')
-    (work / 'archive-deleted-history-action.inc').write_text('return ' + history_action + ';\n')
-    history = (repo / 'Telegram/SourceFiles/purple/purple_archive_history_box.cpp').read_text()
-    (work / 'archive-history-current.inc').write_text(extract(history, 'const auto current = [=]') + ';\n')
-    (work / 'archive-history-notice.inc').write_text(extract(history, 'const auto check = [=]') + ';\n')
-if args.purge:
-    worker = extract(service, 'class ArchiveWorker final') + ';\n'
-    (work / 'archive-purge-worker.inc').write_text(worker.replace('ArchiveWorker', 'ProbePurgeWorker'))
-    execute = extract(service, 'void ExecuteArchivePurge(')
-    execute = execute.replace('ExecuteArchivePurge(', 'ExecuteProbePurge(', 1).replace('Main::Session', 'ProbePurgeSession').replace('Retired', 'PurgeRetired').replace('For(session)', 'PurgeFor(session)').replace('crl::on_main', 'HarnessOnMain')
-    (work / 'archive-purge-execute.inc').write_text(execute)
-    bind = extract((repo / 'Telegram/SourceFiles/purple/purple_archive_purge_box.cpp').read_text(), 'void BindArchivePurgeScopeChanges(')
-    (work / 'archive-purge-migration-bind.inc').write_text(bind.replace('Main::Session', 'ProbeMigrationSession'))
-    native_changes = (repo / 'Telegram/SourceFiles/data/data_changes.cpp').read_text()
-    (work / 'archive-native-peer-manager.inc').write_text(native_changes[native_changes.index('namespace Data {'):native_changes.index('Changes::Changes(')] + '}\n')
-    media = extract(service, 'void OpenArchiveMedia(').replace('Main::Session', 'RetirementSession').replace('crl::on_main', 'RetirementOnMain')
-    (work / 'archive-retirement-open.inc').write_text(media)
-    deleted = (repo / 'Telegram/SourceFiles/purple/purple_archive_purge_box.cpp').read_text()
-    menu = (repo / 'Telegram/SourceFiles/purple/purple_archive_menu.cpp').read_text()
-    (work / 'archive-purge-route.inc').write_text(extract(deleted, 'const auto current = [=]') + ';\n')
-    (work / 'archive-purge-scope.inc').write_text(extract(menu, 'bool SameArchiveViewScope('))
-if args.handoff:
-    (work / 'archive-failure-toast.inc').write_text(extract(service, 'bool ArchiveFailureNeedsToast('))
-    (work / 'archive-capture-incidents.inc').write_text(extract(service, 'bool AccumulateArchiveCaptureIncidents('))
-    bodies = ''.join(extract(service, sign) for sign in ('void QueueArchiveRetentionGap(', 'void QueueArchiveJournalWrite(', 'void QueueArchiveLifecycleFact(', 'void QueueArchiveObservation('))
-    (work / 'archive-capture-queue.inc').write_text(bodies.replace('Main::Session', 'ProbeSession').replace('crl::on_main', 'CaptureOnMain'))
-    post = extract(service, 'bool Post(Task task, bool cleanup = false)')
-    (work / 'archive-worker-post.inc').write_text(post.replace('bool Post(', 'bool ProbeWorker::Post(', 1).replace(' = false', ''))
-    startup = extract(service, 'bool PostStartupCapture(ArchiveEvent event, int byteLimit)')
-    (work / 'archive-worker-startup.inc').write_text(startup.replace('bool PostStartupCapture(', 'bool ProbeWorker::PostStartupCapture(', 1))
-    execute = extract(service, 'void ExecuteArchivePurge(').replace('ExecuteArchivePurge(', 'NativeExecuteArchivePurge(', 1).replace('Main::Session', 'ProbeSession').replace('For(session)', 'NativeFor(session)').replace('crl::on_main', 'StartupOnMain')
-    (work / 'archive-startup-purge.inc').write_text(execute)
-    (work / 'archive-native-worker.inc').write_text(extract(service, 'class ArchiveWorker final').replace('ArchiveWorker', 'NativeStartupWorker') + ';\n')
-    (work / 'archive-native-capture-queue.inc').write_text(bodies.replace('Main::Session', 'ProbeSession').replace('crl::on_main', 'CaptureOnMain').replace('QueueArchive', 'NativeQueueArchive').replace('For(session)', 'NativeFor(session)'))
-if args.passive:
-    acquired = (repo / 'Telegram/SourceFiles/purple/purple_archive_acquired_source.cpp').read_text()
-    def adapt(text):
-        return text.replace('Main::Session', 'ProbeSession').replace('Media::Streaming::Reader', 'ProbeReader').replace('Media::Streaming::Loader', 'ProbeLoader').replace('Media::Streaming::Document', 'ProbeDocument').replace('For(session).streams', 'StreamRegistryFor(session).streams').replace('For(session).documents', 'StreamRegistryFor(session).documents')
-    (work / 'archive-passive-registry.inc').write_text(adapt(acquired[acquired.index('struct StreamBindings'):acquired.index('std::map<Main::Session*, Registry>')]))
-    (work / 'archive-passive-sink.inc').write_text(adapt(extract(service, 'Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(')))
-    bridge = acquired[acquired.index('class ArchiveStreamBridge final'):acquired.index('namespace {')]
-    (work / 'archive-passive-bridge.inc').write_text(adapt(bridge))
-    (work / 'archive-passive-source.inc').write_text(adapt(extract(acquired, 'void Stream(')))
-    binder = extract(acquired, 'void BindArchiveStreamDocument(').replace('BindArchiveStreamDocument(', 'BindDocument(', 1)
-    (work / 'archive-passive-document.inc').write_text(adapt(binder + extract(acquired, 'void ReusedDocument(')))
-    native = (repo / 'Telegram/SourceFiles/data/data_streaming.cpp').read_text()
-    a = native.index('template <typename Data>\n[[nodiscard]] std::shared_ptr<Streaming::Reader>')
-    b = native.index('template <typename Data>\n[[nodiscard]] std::shared_ptr<Streaming::Document>', a)
-    c = native.index('template <typename Data>\nvoid Streaming::keepAlive', b)
-    def native_port(text):
-        return text.replace('Streaming::', 'StreamingProbe::').replace('FileOrigin origin', '::Data::FileOrigin origin')
-    (work / 'archive-passive-reader.inc').write_text(native_port(native[a:b]))
-    (work / 'archive-passive-shared-document.inc').write_text(native_port(native[b:c]))
 base = 'Telegram/CMakeFiles/Telegram.dir/'
 recipe_source = repo / 'Telegram/SourceFiles/purple/purple_config_file.cpp'
 recipes = subprocess.check_output(['ninja', '-C', str(build), '-t', 'commands', base + 'SourceFiles/purple/purple_config_file.cpp.o'], text=True)
 recipe = next(shlex.split(line) for line in recipes.splitlines() if ' -c ' in line and shlex.split(line)[shlex.split(line).index('-c') + 1] == str(recipe_source))
 objects = []
 commands = []
-markdown_units = ['purple_article_markdown', 'purple_copy'] if args.markdown else ['purple_compose_receipt', 'purple_markdown_current', 'purple_markdown_delivery'] if args.markdown_source else []
-if args.markdown:
-    recipe = [value for value in recipe if not value.startswith('-DLANG_KEYS_SUBSET=')]
-markdown_objects = [build / 'Telegram/CMakeFiles/td_iv.dir/SourceFiles/iv/markdown/iv_markdown_prepare_serialize.cpp.o', build / (base + 'SourceFiles/iv/iv_rich_page.cpp.o'), build / (base + 'SourceFiles/iv/iv_rich_page_quote.cpp.o'), build / 'Telegram/lib_ui/liblib_ui.a'] if args.markdown else []
-root = work / 'root' if args.markdown or args.markdown_source else None
-if root:
-    shutil.rmtree(root, ignore_errors=True)
-    root.mkdir()
 with (work / 'build.log').open('w') as log:
     def compile(source, name):
         target = work / (name + '.o')
@@ -174,26 +52,19 @@ with (work / 'build.log').open('w') as log:
         commands.append(command)
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
         return target
-    fixture = 'purple/test_music_index.cpp' if args.music_index else (
-        'purple/test_archive_markdown.cpp' if args.markdown else 'purple/test_markdown_source.cpp' if args.markdown_source else 'purple/test_archive_purge.cpp' if args.purge else 'purple/test_archive_views.cpp' if args.views else 'purple/test_archive_handoff.cpp' if args.handoff else 'purple/test_archive_passive.cpp' if args.passive else 'purple/test_archive_access.cpp' if args.access else 'purple/test_archive_lifecycle.cpp' if args.lifecycle else 'purple/test_archive.cpp')
+    fixture = 'purple/test_music_index.cpp' if args.music_index else 'purple/test_archive.cpp'
     objects += [compile(repo / fixture, 'test')]
-    for name in ['purple_desktop_archive_store', 'purple_archive_maintenance', 'purple_archive_queries', 'purple_archive_sqlite', 'purple_archive_crypto', 'purple_archive_files', 'purple_archive_media', 'purple_archive_journal', 'purple_archive_capture_snapshot', 'purple_archive_attention', 'purple_archive_stream', 'purple_archive_media_access', 'purple_archive_media_loader', 'purple_archive_markdown', 'purple_markdown_publication', 'purple_markdown_source', *markdown_units]:
-        objects.append(build / (base + 'SourceFiles/purple/' + name + '.cpp.o') if args.use_build_objects else compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name))
-    if fixture == 'purple/test_archive.cpp':
-        for unit in ('schema', 'storage', 'store', 'writer', 'acquisition', 'quota', 'views'):
-            objects += [compile(repo / ('Telegram/SourceFiles/purple/purple_archive_v2_' + unit + '.cpp'),
-                                'archive-v2-' + unit)]
-    objects += [build / (base + 'SourceFiles/purple/purple_archive_backup_mac.mm.o')]
-    objects += markdown_objects
-    if args.markdown_source:
-        # Upstream's RichPage carries a quote model slot and compares markup
-        # buttons; link the slot and compile the button equality on its own.
-        markup = (repo / 'Telegram/SourceFiles/history/history_item_reply_markup.cpp').read_text()
-        (work / 'markdown-source-markup.cpp').write_text('#include "history/history_item_reply_markup.h"\n'
-            + extract(markup, 'bool operator==(\n\t\tconst HistoryMessageMarkupButton &a,'))
-        objects += [compile(work / 'markdown-source-markup.cpp', 'markdown-source-markup'),
-            build / (base + 'SourceFiles/iv/iv_rich_page_quote.cpp.o')]
-    objects += [build / (base + 'ThirdParty/purple_core/purple/' + source.name + '.o') for source in sorted((repo / 'Telegram/ThirdParty/purple_core/purple').glob('*.cpp'))]
+    units = ['purple_archive_sqlite']
+    if not args.music_index:
+        units += ['purple_archive_previous', 'purple_archive_crypto', 'purple_archive_files']
+        units += ['purple_archive_v2_' + unit for unit in ('schema', 'storage', 'store', 'writer', 'acquisition', 'quota', 'views')]
+    for name in units:
+        target = build / (base + 'SourceFiles/purple/' + name + '.cpp.o')
+        source = repo / ('Telegram/SourceFiles/purple/' + name + '.cpp')
+        objects.append(target if args.use_build_objects else compile(source, name))
+    if not args.music_index:
+        objects += [build / (base + 'SourceFiles/purple/purple_archive_backup_mac.mm.o')]
+    objects += sorted((build / (base + 'ThirdParty/purple_core/purple')).glob('*.cpp.o'))
     objects += [build / (base + 'SourceFiles/data/data_peer_id.cpp.o'), build / (base + 'SourceFiles/data/data_types.cpp.o'), build / 'Telegram/CMakeFiles/td_scheme.dir/gen/scheme.cpp.o']
     objects += [build / 'Telegram/lib_tl/CMakeFiles/lib_tl.dir/tl/tl_basic_types.cpp.o']
     objects += [build / 'Telegram/libpurple_sqlite.a', build / 'Telegram/lib_base/liblib_base.a']
@@ -210,20 +81,12 @@ with (work / 'build.log').open('w') as log:
 (work / 'inputs.json').write_text(json.dumps({
     'compile': commands, 'link': link,
     'objects_sha256': {str(path): hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in objects},
-    'page_callback_boundary': 'unchanged production delivery lambda body with real weak lifetime and controlled retirement, ticket and UI endpoints',
-    'media_callback_boundary': 'Exact production OpenArchiveMedia body; only session type and main-queue dispatcher are substituted. Controlled weak-session lifetime, Work Mode/source authority, worker/journal scheduling; real encrypted store, reader endpoint and loader.' if args.access else None,
-    'history_lease_callback_sha256': hashlib.sha256(history_callback.encode()).hexdigest() if args.access else None,
-    'media_callback_sha256': hashlib.sha256(callback.encode()).hexdigest() if args.access else None,
 }, indent=2) + '\n')
 if args.build_only:
     raise SystemExit(0)
 with (work / 'run.log').open('w') as log:
-    result = subprocess.run([str(work / 'test_archive')] + (['pagination-only'] if args.pagination_only else ['capture-only'] if args.capture_only else [str(root)] if root else []), stdout=log, stderr=subprocess.STDOUT)
+    result = subprocess.run([str(work / 'test_archive')], stdout=log, stderr=subprocess.STDOUT)
 (work / 'run.exit').write_text(str(result.returncode) + '\n')
 output = (work / 'run.log').read_text()
 print(output)
-if args.handoff and result.returncode == 0:
-    completion = re.search(r'(?m)^(\d+) checks, (\d+) failures$', output)
-    if not completion or int(completion[1]) < 445 or int(completion[2]) != 0:
-        raise SystemExit('Archive handoff completion checks missing or below floor')
 raise SystemExit(result.returncode)

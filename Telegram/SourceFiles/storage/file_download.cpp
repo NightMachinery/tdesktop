@@ -111,7 +111,8 @@ FileLoader::FileLoader(
 	LoadToCacheSetting toCache,
 	LoadFromCloudSetting fromCloud,
 	bool autoLoading,
-	uint8 cacheTag)
+	uint8 cacheTag,
+	bool externalDestination)
 : _session(session)
 , _autoLoading(autoLoading)
 , _cacheTag(cacheTag)
@@ -123,7 +124,7 @@ FileLoader::FileLoader(
 , _fullSize(fullSize)
 , _locationType(locationType) {
 	Expects(_loadSize <= _fullSize);
-	Expects(!_filename.isEmpty() || (_fullSize <= Storage::kMaxFileInMemory));
+	Expects(externalDestination || !_filename.isEmpty() || (_fullSize <= Storage::kMaxFileInMemory));
 }
 
 FileLoader::~FileLoader() {

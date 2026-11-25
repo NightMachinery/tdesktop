@@ -18,7 +18,7 @@ constexpr auto kPartSize = 1024 * 1024;
 constexpr auto kOne = ArchiveSqlExpectation::OneChange;
 constexpr auto kRows = ArchiveSqlExpectation::Rows;
 constexpr auto kMediaReasons = std::array{ u"policy_description_only", u"over_allowance", u"expired",
-	u"over_file_limit", u"copy_incomplete", u"quota_unreclaimable", u"disk_full", u"store_busy" };
+	u"over_file_limit", u"copy_incomplete", u"quota_unreclaimable", u"disk_full", u"store_busy", u"no_source", u"transfer_failed" };
 
 QByteArray Number(int64 number) {
 	auto bytes = QByteArray(8, Qt::Uninitialized);
@@ -211,15 +211,17 @@ std::vector<StoreEffect> Store::captureBatch(std::span<const CapturedEvent> even
 	}
 	const auto failure = current() && bytes ? reservePages(bytes, false) : u"scope_retired"_q;
 	if (!failure.isEmpty()) return std::vector<StoreEffect>(events.size(), StoreEffect{ failure });
+	auto processed = size_t(0);
 	const auto result = _db.ExecuteV2([&](const DesktopArchiveSqlite::Write &put) {
 		_batch = &put;
 		const auto clear = gsl::finally([&] { _batch = nullptr; });
-		for (auto i = size_t(0); i != events.size(); ++i) effects[i] = captureOne(events[i]);
+		for (; processed != events.size(); ++processed) effects[processed] = captureOne(events[processed]);
 		return true;
 	}, [this] { return current() && step(Phase::BeforeSqlCommit) && current(); });
 	if (!result.committed) {
-		for (auto &effect : effects) {
-			if (effect.committed || effect.reason == u"text_write_failed"_q) {
+		for (auto i = size_t(0); i != effects.size(); ++i) {
+			auto &effect = effects[i];
+			if (i >= processed || effect.committed || effect.reason == u"text_write_failed"_q) {
 				effect = SqlFailure(result, current() ? u"text_write_failed"_q : u"scope_retired"_q);
 			}
 		}
@@ -230,10 +232,25 @@ std::vector<StoreEffect> Store::captureBatch(std::span<const CapturedEvent> even
 	return effects;
 }
 
+std::optional<MessageIdentity> Store::resolveDelete(uint64_t message) {
+	const auto lookup = token("nonchannel", QByteArray::number(qulonglong(message)));
+	const auto result = _db.Read({ u"SELECT message_key FROM messages WHERE nonchannel_lookup=? LIMIT 2"_q,
+		{ lookup }, kRows });
+	if (!result.ok || result.rows.size() != 1 || lookup.isEmpty()) return std::nullopt;
+	const auto key = Column<QByteArray>(result.rows.front(), 0);
+	const auto row = key ? readHead(*key, {}) : std::nullopt;
+	const auto identity = row ? parseIdentity(row->identity) : std::nullopt;
+	return identity && identity->message == message && identity->peer.kind != PeerTokenKind::Channel
+		? identity : std::nullopt;
+}
+
 StoreEffect Store::captureOne(const CapturedEvent &event) {
 	if (!current() || event.storeId != id()) return { u"scope_retired"_q };
-	const auto identity = encodeIdentity(event.identity);
-	const auto chat = PeerTokenText(event.identity.peer);
+	const auto target = !event.identity.peer.id && event.event == Observation::Delete
+		? resolveDelete(event.identity.message) : std::optional(event.identity);
+	if (!target) return { u"delete_unresolved"_q };
+	const auto identity = encodeIdentity(*target);
+	const auto chat = PeerTokenText(target->peer);
 	if (identity.isEmpty() || !chat || event.eventId.isEmpty() || event.observedAt < 0
 		|| int(event.kind) < 0 || event.kind > ChatClass::Unknown) return { u"text_encode_failed"_q };
 	const auto key = token("message", identity);
@@ -255,6 +272,7 @@ StoreEffect Store::captureOne(const CapturedEvent &event) {
 	if (!header) return { u"text_encode_failed"_q };
 	sql.push_back({ u"UPDATE meta SET serial=?,sealed_header=? WHERE store_id=? AND serial=?"_q,
 		{ serial, *header, id(), *previous }, kOne });
+	const auto kind = old->head && event.kind == ChatClass::Unknown ? old->kind : int64(event.kind);
 	const auto day = std::max(old->activity, event.observedAt / 86400);
 	const auto message = [&](MessageStatus status, int64 seq, const QByteArray &tag,
 			int64 stamp, int64 days, int64 kind) {
@@ -264,12 +282,12 @@ StoreEffect Store::captureOne(const CapturedEvent &event) {
 	};
 	if (!old->head) {
 		const auto chatKey = token("chat", chat->toLatin1());
-		const auto nonChannel = event.identity.peer.kind == PeerTokenKind::Channel ? ArchiveSqlValue(nullptr)
+		const auto nonChannel = target->peer.kind == PeerTokenKind::Channel ? ArchiveSqlValue(nullptr)
 			: ArchiveSqlValue(token("nonchannel", QByteArray::number(qulonglong(event.identity.message))));
-		const auto initial = message(MessageStatus::Live, 0, {}, event.observedAt, day, int64(event.kind));
+		const auto initial = message(MessageStatus::Live, 0, {}, event.observedAt, day, kind);
 		if (chatKey.isEmpty() || !initial) return { u"key_unavailable"_q };
 		sql.push_back({ u"INSERT INTO messages VALUES(?,?,?,?,?,?,NULL,?,?,0)"_q,
-			{ key, chatKey, nonChannel, int64(event.kind), int64(0), day, *initial, serial }, kOne });
+			{ key, chatKey, nonChannel, kind, int64(0), day, *initial, serial }, kOne });
 	}
 	auto sequence = old->sequence;
 	const auto append = [&](const QByteArray &body, const QByteArray &tokenKey, const QByteArray &tag) {
@@ -288,16 +306,16 @@ StoreEffect Store::captureOne(const CapturedEvent &event) {
 			tag = token("body-tag", event.preimage);
 			if (!append(event.preimage, token("preimage", eventKey), tag)) return { u"text_encode_failed"_q };
 		}
-		const auto sealed = message(status, sequence, tag, event.observedAt, day, int64(event.kind));
+		const auto sealed = message(status, sequence, tag, event.observedAt, day, kind);
 		if (!sealed) return { u"text_encode_failed"_q };
 		sql.push_back({ u"UPDATE messages SET status=?,last_activity=?,class=?,sealed_identity=?,serial=?,head_seq=? "
-			"WHERE message_key=?"_q, { int64(status), day, int64(event.kind), *sealed, serial,
+			"WHERE message_key=?"_q, { int64(status), day, kind, *sealed, serial,
 				sequence ? ArchiveSqlValue(sequence) : ArchiveSqlValue(nullptr), key }, kOne });
 		return write(std::move(program));
 	}
 	if (action == Mutation::FillMissing) {
 		if (sequence <= 0 || event.body.isEmpty()) return { u"text_encode_failed"_q };
-		const auto original = body(event.identity, sequence);
+		const auto original = body(*target, sequence);
 		if (!original) return { u"store_unreadable"_q };
 		const auto data = seal(u"body", associated("version", key + Number(sequence) + Number(serial)), Number(original->observedAt) + event.body);
 		const auto sealed = message(MessageStatus::Live, sequence, bodyTag, old->observedAt, old->activity, old->kind);
@@ -319,10 +337,10 @@ StoreEffect Store::captureOne(const CapturedEvent &event) {
 		sql.push_back({ u"INSERT INTO media VALUES(?,?,?,?,?,?,0,0,?,NULL,NULL)"_q,
 			{ key, sequence, int64(i), media, int64(entry.kind), int64(entry.timed), *data }, kOne });
 	}
-	const auto sealed = message(MessageStatus::Live, sequence, bodyTag, event.observedAt, day, int64(event.kind));
+	const auto sealed = message(MessageStatus::Live, sequence, bodyTag, event.observedAt, day, kind);
 	if (!sealed) return { u"text_encode_failed"_q };
 	sql.push_back({ u"UPDATE messages SET head_seq=?,last_activity=?,class=?,sealed_identity=?,serial=? WHERE message_key=?"_q,
-		{ sequence, day, int64(event.kind), *sealed, serial, key }, kOne });
+		{ sequence, day, kind, *sealed, serial, key }, kOne });
 	return write(std::move(program));
 }
 
@@ -400,6 +418,26 @@ std::optional<std::vector<MediaStatus>> Store::media(const MessageIdentity &iden
 	return current() ? std::optional(std::move(results)) : std::nullopt;
 }
 
+std::optional<int64> Store::mediaSequence(const MessageIdentity &identity, const QByteArray &source, bool timed) {
+	const auto raw = encodeIdentity(identity);
+	if (!current() || raw.isEmpty()) return std::nullopt;
+	const auto key = token("message", raw);
+	const auto head = readHead(key, raw);
+	if (!head || !head->head || !head->sequence) return std::nullopt;
+	const auto media = token("media", source);
+	const auto result = _db.Read({ u"SELECT ordinal,kind,sealed_descriptor FROM media WHERE message_key=? "
+		"AND seq=? AND timed=? AND media_key=? AND blob_key IS NULL"_q,
+		{ key, head->sequence, int64(timed), media }, kRows });
+	if (!result.ok || result.rows.size() != 1) return std::nullopt;
+	const auto &row = result.rows.front();
+	const auto ordinal = Column<int64>(row, 0);
+	const auto kind = Column<int64>(row, 1);
+	const auto descriptor = Column<QByteArray>(row, 2);
+	const auto aad = key + Number(head->sequence) + Number(0) + media + Number(kind ? *kind : 0) + Number(timed);
+	return ordinal && *ordinal == 0 && kind && descriptor && unseal(u"body", associated("media", aad), *descriptor)
+		? std::optional(head->sequence) : std::nullopt;
+}
+
 bool Store::readSaved(const QByteArray &expected, const MessageIdentity &identity, int64 sequence,
 		int64 ordinal, const std::function<bool(const QByteArray &)> &sink) {
 	if (!current() || expected != id() || !sink || sequence <= 0 || ordinal < 0) return false;
@@ -426,6 +464,20 @@ bool Store::readSaved(const QByteArray &expected, const MessageIdentity &identit
 	return current() && !remaining && hash.result() == saved->digest;
 }
 
+void Store::noteMediaFailure(const BlobInput &input, QStringView reason) {
+	if (!current() || input.storeId != id() || input.revision != _options.lease->mediaRevision.load()) return;
+	const auto found = std::find_if(kMediaReasons.begin(), kMediaReasons.end(),
+		[&](auto value) { return reason == QStringView(value); });
+	if (found == kMediaReasons.end() || !physicalLimit(0).isEmpty()) return;
+	auto program = Program();
+	program.statements.push_back({ u"UPDATE media SET reason=? WHERE message_key=? AND seq=? AND ordinal=? "
+		"AND media_key=? AND blob_key IS NULL"_q, { int64(found - kMediaReasons.begin()),
+			token("message", encodeIdentity(input.identity)), input.sequence, input.ordinal, token("media", input.source) },
+		ArchiveSqlExpectation::AnyChanges });
+	program.statements.push_back({ u"COMMIT"_q });
+	(void)_db.Execute(program, [&] { return current() && input.revision == _options.lease->mediaRevision.load(); });
+}
+
 StoreEffect Store::writeBlob(const BlobInput &input, const std::function<void()> &betweenParts) {
 	if (!current() || input.storeId != id() || input.revision != _options.lease->mediaRevision.load()) {
 		return { u"scope_retired"_q };
@@ -450,16 +502,7 @@ StoreEffect Store::writeBlob(const BlobInput &input, const std::function<void()>
 		+ Number(*kind) + Number(*timed));
 	if (!unseal(u"body", aad, *sealed)) return { u"scope_retired"_q };
 	const auto describe = [&](QString reason) {
-		const auto found = std::find_if(kMediaReasons.begin(), kMediaReasons.end(),
-			[&](auto value) { return reason == QStringView(value); });
-		if (found != kMediaReasons.end() && current() && physicalLimit(0).isEmpty()) {
-			auto program = Program();
-			program.statements.push_back({ u"UPDATE media SET reason=? WHERE message_key=? AND seq=? AND ordinal=? "
-				"AND media_key=? AND blob_key IS NULL"_q, { int64(found - kMediaReasons.begin()), key,
-					input.sequence, input.ordinal, media }, ArchiveSqlExpectation::AnyChanges });
-			program.statements.push_back({ u"COMMIT"_q });
-			static_cast<void>(_db.Execute(program, [this] { return current(); }));
-		}
+		noteMediaFailure(input, reason);
 		return StoreEffect{ std::move(reason) };
 	};
 	if (old->activity <= today() - _options.policy.daysFor(ChatClass(old->kind))) return describe(u"expired"_q);

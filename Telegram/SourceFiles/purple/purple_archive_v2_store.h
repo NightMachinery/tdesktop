@@ -3,6 +3,7 @@
 #include "purple/purple_archive_crypto.h"
 #include "purple/purple_archive_sqlite.h"
 #include "purple/purple_archive_v2.h"
+#include "purple/purple_archive_v2_attention.h"
 
 #include <QtCore/QLockFile>
 #include <atomic>
@@ -29,6 +30,9 @@ struct StoreOptions {
 	AccountKey account;
 	QByteArray profileKey;
 	QByteArray loginSecret;
+	QString profilePath;
+	QByteArray profileNamespace;
+	std::vector<std::pair<QByteArray, QByteArray>> loginKeys;
 	std::shared_ptr<Lease> lease = std::make_shared<Lease>();
 	std::function<bool(Phase)> checkpoint;
 	Policy policy;
@@ -39,6 +43,8 @@ struct StoreOptions {
 struct StoreEffect {
 	QString reason;
 	bool committed = false;
+	IncidentStage stage = IncidentStage::Capture;
+	uint64_t count = 1;
 	[[nodiscard]] explicit operator bool() const { return reason.isEmpty(); }
 };
 
@@ -199,6 +205,7 @@ public:
 	[[nodiscard]] StoreEffect open();
 	[[nodiscard]] StoreEffect capture(const CapturedEvent &event);
 	[[nodiscard]] std::vector<StoreEffect> captureBatch(std::span<const CapturedEvent> events);
+	void noteMediaFailure(const BlobInput &input, QStringView reason);
 	[[nodiscard]] StoreEffect writeBlob(const BlobInput &input, const std::function<void()> &betweenParts = {});
 	[[nodiscard]] bool maintenancePending() const;
 	using ResetCheck = std::variant<ResetReview, QString>;
@@ -208,6 +215,8 @@ public:
 	[[nodiscard]] StoreEffect recover();
 	[[nodiscard]] std::optional<StoredBody> body(const MessageIdentity &identity, int64 sequence);
 	[[nodiscard]] std::optional<std::vector<MediaStatus>> media(const MessageIdentity &identity, int64 sequence);
+	[[nodiscard]] std::optional<int64> mediaSequence(const MessageIdentity &identity,
+		const QByteArray &source, bool timed);
 	[[nodiscard]] bool readSaved(const QByteArray &expected, const MessageIdentity &identity, int64 sequence,
 		int64 ordinal, const std::function<bool(const QByteArray &)> &sink);
 	[[nodiscard]] QByteArray id() const;
@@ -255,6 +264,8 @@ private:
 	[[nodiscard]] bool ownsPointer() const;
 	[[nodiscard]] bool publish(const Pointer &next);
 	[[nodiscard]] bool makeActive(Pointer &next);
+	[[nodiscard]] std::optional<QByteArray> nativeWrap(const QByteArray &id,
+		const QByteArray &wrapped, const QByteArray *dataKey = nullptr);
 	[[nodiscard]] QString cleanup();
 	[[nodiscard]] StoreEffect retire(const QByteArray &expectedId, const ResetReview *review);
 	[[nodiscard]] QString archivePath(const QByteArray &id, bool detached = false) const;
@@ -271,6 +282,8 @@ private:
 		int64 parts = 0;
 	};
 	[[nodiscard]] std::optional<SavedBlob> savedBlob(const QByteArray &key, int64 sequence, int64 ordinal);
+	[[nodiscard]] static std::optional<MessageIdentity> parseIdentity(const QByteArray &identity);
+	[[nodiscard]] std::optional<MessageIdentity> resolveDelete(uint64_t message);
 	[[nodiscard]] static QByteArray encodeIdentity(const MessageIdentity &identity);
 	[[nodiscard]] std::optional<Row> readHead(const QByteArray &key, const QByteArray &identity);
 	[[nodiscard]] std::optional<QByteArray> sealMessage(const QByteArray &key, const Row &row);

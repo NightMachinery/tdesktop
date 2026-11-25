@@ -11,14 +11,6 @@
     },
     "purple/test_archive.py": {
       "": "purple/test_archive.cpp",
-      "--lifecycle": "purple/test_archive_lifecycle.cpp",
-      "--access": "purple/test_archive_access.cpp",
-      "--views": "purple/test_archive_views.cpp",
-      "--purge": "purple/test_archive_purge.cpp",
-      "--handoff": "purple/test_archive_handoff.cpp",
-      "--passive": "purple/test_archive_passive.cpp",
-      "--markdown": "purple/test_archive_markdown.cpp",
-      "--markdown-source": "purple/test_markdown_source.cpp",
       "--music-index": "purple/test_music_index.cpp"
     },
     "purple/test_cases.py": {
@@ -258,142 +250,6 @@
       ]
     },
     {
-      "name": "archive-lifecycle",
-      "driver": "purple/test_archive.py",
-      "compiles": true,
-      "args": [
-        "--build-dir",
-        "{build}",
-        "--output-dir",
-        "{out}",
-        "--lifecycle",
-        "--reuse-from",
-        "{out:archive-files}"
-      ],
-      "fixtures": [
-        "purple/test_archive_lifecycle.cpp"
-      ]
-    },
-    {
-      "name": "archive-access",
-      "driver": "purple/test_archive.py",
-      "compiles": true,
-      "args": [
-        "--build-dir",
-        "{build}",
-        "--output-dir",
-        "{out}",
-        "--access",
-        "--reuse-from",
-        "{out:archive-files}"
-      ],
-      "fixtures": [
-        "purple/test_archive_access.cpp"
-      ]
-    },
-    {
-      "name": "archive-views",
-      "driver": "purple/test_archive.py",
-      "compiles": true,
-      "args": [
-        "--build-dir",
-        "{build}",
-        "--output-dir",
-        "{out}",
-        "--views",
-        "--reuse-from",
-        "{out:archive-files}"
-      ],
-      "fixtures": [
-        "purple/test_archive_views.cpp"
-      ]
-    },
-    {
-      "name": "archive-purge",
-      "driver": "purple/test_archive.py",
-      "compiles": true,
-      "args": [
-        "--build-dir",
-        "{build}",
-        "--output-dir",
-        "{out}",
-        "--purge",
-        "--reuse-from",
-        "{out:archive-files}"
-      ],
-      "fixtures": [
-        "purple/test_archive_purge.cpp"
-      ]
-    },
-    {
-      "name": "archive-handoff",
-      "driver": "purple/test_archive.py",
-      "compiles": true,
-      "args": [
-        "--build-dir",
-        "{build}",
-        "--output-dir",
-        "{out}",
-        "--handoff",
-        "--reuse-from",
-        "{out:archive-files}"
-      ],
-      "fixtures": [
-        "purple/test_archive_handoff.cpp"
-      ]
-    },
-    {
-      "name": "archive-passive",
-      "driver": "purple/test_archive.py",
-      "compiles": true,
-      "args": [
-        "--build-dir",
-        "{build}",
-        "--output-dir",
-        "{out}",
-        "--passive",
-        "--reuse-from",
-        "{out:archive-files}"
-      ],
-      "fixtures": [
-        "purple/test_archive_passive.cpp"
-      ]
-    },
-    {
-      "name": "archive-markdown",
-      "driver": "purple/test_archive.py",
-      "compiles": true,
-      "args": [
-        "--build-dir",
-        "{build}",
-        "--output-dir",
-        "{out}",
-        "--markdown",
-        "--reuse-from",
-        "{out:archive-files}"
-      ],
-      "fixtures": [
-        "purple/test_archive_markdown.cpp"
-      ]
-    },
-    {
-      "name": "archive-markdown-source",
-      "driver": "purple/test_archive.py",
-      "compiles": true,
-      "args": [
-        "--build-dir",
-        "{build}",
-        "--output-dir",
-        "{out}",
-        "--markdown-source",
-        "--reuse-from",
-        "{out:archive-files}"
-      ],
-      "fixtures": [
-        "purple/test_markdown_source.cpp"
-      ]
-    },
-    {
       "name": "music-index",
       "driver": "purple/test_archive.py",
       "coverage": "Physical SQLite music pagination, alias visibility, restart of head and history scans, scope transitions and revocation rollback",
@@ -412,15 +268,19 @@
       ]
     },
     {
-      "name": "test_archive_retirement",
-      "driver": "purple/test_archive_retirement.py",
+      "name": "archive-render",
+      "driver": "purple/test_archive_render.py",
       "compiles": true,
       "args": [
+        "--build-dir",
+        "{build}",
+        "--qt",
+        "{qt}",
         "--output-dir",
         "{out}"
       ],
       "fixtures": [
-        "purple/test_archive_retirement.cpp"
+        "purple/test_archive_render.cpp"
       ]
     },
     {

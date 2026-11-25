@@ -182,7 +182,9 @@ void QuotaDiskAndAge() {
 	CHECK(reader.EndRead() && reader.Close());
 	CHECK(store.capture(blocked).committed);
 
-	const auto low = MediaRow(id, 90, false, at);
+	// Keep the rewind probe newer than the pressure candidates. Their same-day
+	// order depends on the store's random HMAC key.
+	const auto low = MediaRow(id, 90, false, at + 86400);
 	space = 0;
 	CHECK(store.capture(low).reason == u"disk_full"_q);
 	CHECK(!store.body(low.identity, 1));
@@ -195,7 +197,10 @@ void QuotaDiskAndAge() {
 	failAfter = false;
 	space = 64 * kMiB;
 	now -= 10 * 86400;
-	CHECK(store.maintain() && store.body(low.identity, 1));
+	const auto rewound = store.maintain();
+	if (!rewound) std::cerr << "Clock rewind maintenance: " << rewound.reason.toStdString() << '\n';
+	CHECK(rewound);
+	CHECK(store.body(low.identity, 1));
 	now = at + 2 * 86400;
 	auto shorter = options.policy;
 	shorter.classDays[int(ChatClass::Direct)] = 1;
@@ -428,8 +433,8 @@ void IncomingDuringBlob() {
 	auto ready = state->opened.get_future();
 	auto result = state->saved.get_future();
 	const auto worker = std::make_shared<Writer>(Options(temp->path()), [state, temp, done = false](StoreEffect effect, QByteArray id) mutable {
-		if (++state->reports == 1) state->opened.set_value(id);
-		else if (!done && state->count > 0 && (!effect || state->reports == 43)) {
+		if (effect.stage == IncidentStage::Startup) state->opened.set_value(id);
+		else if (!done && effect.stage == IncidentStage::WholeFile) {
 			done = true;
 			state->saved.set_value(bool(effect));
 		}

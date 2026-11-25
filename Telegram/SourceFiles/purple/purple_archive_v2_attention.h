@@ -1,6 +1,7 @@
 #pragma once
 
 #include "purple/purple_archive_v2_media.h"
+#include <algorithm>
 #include <utility>
 
 namespace Purple::ArchiveV2 {
@@ -45,6 +46,10 @@ public:
 				u"delete_unresolved", u"media_queue_full", u"pointer_changed", u"reset_review_stale" }) {
 			if (reason == detail) return { detail };
 		}
+		if (stage == IncidentStage::Cleanup && reason.startsWith(u"discard-") && reason.size() < 80
+			&& std::all_of(reason.begin(), reason.end(), [](QChar ch) {
+				return (ch >= u'a' && ch <= u'z') || ch == u'-';
+			})) return { reason };
 		return { u"archive_operation_failed" };
 	}
 private:

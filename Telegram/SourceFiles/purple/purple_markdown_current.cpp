@@ -1,6 +1,5 @@
 #include "purple/purple_markdown_current.h"
 
-#include "api/api_text_entities.h"
 #include "base/unixtime.h"
 #include "data/data_document.h"
 #include "data/data_media_types.h"
@@ -10,10 +9,6 @@
 #include "history/history_item.h"
 #include "history/history_item_components.h"
 #include "main/main_session.h"
-#include "purple/purple_archive_capture.h"
-#include "purple/purple_config.h"
-#include <QtCore/QJsonArray>
-#include <QtCore/QCryptographicHash>
 #include <map>
 #include <deque>
 
@@ -113,34 +108,10 @@ bool DesktopRichWireExtends(const MTPRichMessage &preview, const MTPRichMessage 
 
 
 DesktopMarkdownBody DesktopMarkdownBodyForItem(not_null<HistoryItem*> item) {
-	auto body = DesktopMarkdownBody();
-	body.key = {SessionAccountKey(&item->history()->session()),
-		DesktopArchiveChat(item->history()->peer->id), item->id.bare};
-	body.content.text = item->originalText().text;
-	body.serverTime = item->date();
-	const auto edited = item->Get<HistoryMessageEdited>();
-	body.editDate = edited ? edited->date : 0;
-	const auto wire = Api::EntitiesToMTP(&item->history()->session(),
-		item->originalText().entities, Api::ConvertOption::SkipLocal);
-	for (const auto &entity : wire.v) {
-		auto buffer = mtpBuffer();
-		entity.write(buffer);
-		body.content.entities.push_back(QJsonObject{{u"tl"_q,
-			QString::fromLatin1(QByteArray(reinterpret_cast<const char*>(buffer.constData()),
-				buffer.size() * sizeof(mtpPrime)).toBase64())}});
-	}
-	if (const auto media = item->media()) {
-		if (const auto document = media->document()) {
-			body.document = u"document:"_q + QString::number(document->id);
-			body.name = document->filename();
-			body.mime = document->mimeString();
-			body.size = document->size >= 0 ? uint64_t(document->size) : uint64_t(-1);
-		} else {
-			body.content.opaqueFormat = u"non-document-medium"_q;
-			body.content.opaque = "unavailable";
-		}
-	}
-	return body;
+	const auto media = item->media();
+	const auto doc = media ? media->document() : nullptr;
+	return doc ? DesktopMarkdownBody{ QString::number(doc->id), doc->filename(), doc->mimeString(),
+		doc->size >= 0 ? uint64_t(doc->size) : uint64_t(-1) } : DesktopMarkdownBody();
 }
 
 bool DesktopRichPageExtends(const Iv::RichPage &preview, const Iv::RichPage &full) {

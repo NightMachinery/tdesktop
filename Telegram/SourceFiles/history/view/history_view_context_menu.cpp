@@ -8,7 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_context_menu.h"
 
 #include "purple/purple_copy.h"
-#include "purple/purple_archive_history_box.h"
+#include "purple/purple_archive_v2_boxes.h"
 #include "purple/purple_user_control.h"
 
 #include "api/api_attached_stickers.h"

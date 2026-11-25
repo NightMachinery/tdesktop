@@ -14,6 +14,7 @@ class mtpFileLoader final
 	: public FileLoader
 	, private Storage::DownloadMtprotoTask {
 public:
+	using Destination = Fn<bool(int64, const QByteArray &)>;
 	mtpFileLoader(
 		not_null<Main::Session*> session,
 		const StorageFileLocation &location,
@@ -25,7 +26,8 @@ public:
 		LoadToCacheSetting toCache,
 		LoadFromCloudSetting fromCloud,
 		bool autoLoading,
-		uint8 cacheTag);
+		uint8 cacheTag,
+		Destination destination = {});
 	mtpFileLoader(
 		not_null<Main::Session*> session,
 		const WebFileLocation &location,
@@ -68,6 +70,7 @@ private:
 	void cancelOnFail() override;
 	bool setWebFileSizeHook(int64 size) override;
 
+	Destination _destination;
 	bool _lastComplete = false;
 	int64 _nextRequestOffset = 0;
 

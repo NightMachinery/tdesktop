@@ -1525,95 +1525,34 @@ entry to one Purple action that distinguishes whole messages from fragments.
 Full-page resolution, lifetime validation and structural export stay in
 `purple_copy_messages.cpp` and `purple_article_markdown.cpp`.
 
-## M3B2 encrypted archive storage
+## Desktop archive v2
 
-main/main_account.cpp makes one unconditional Purple call in each of normal
-and forced logout. The calls revoke archive keys and deliveries immediately and
-never veto or wait for archive IO. Shared worker state owns eventual handle
-closure and bounded deletion. The per-login authority lives in upstream-reset
-account KV storage, with authenticated admission and wrapping in Purple files.
-No storage/upstream implementation was changed. Quit and session replacement
-preserve the authority. See [archive_storage.md](archive_storage.md).
+`main/main_account.cpp` starts archive capture with the live session and
+revokes its deliveries during normal and forced logout. `core/application.cpp`
+lets the existing quit event loop poll a bounded text drain. Profile and key
+preparation, database work and deletion run on the worker.
 
-## M3B2 durable observations and edit history
+`history/history.cpp` and `data/data_session.cpp` post baseline observations,
+distinguishing arrivals from ordinary history loads for acquisition.
+`api/api_updates.cpp` posts accepted edits, deletes and short acknowledgements.
+`history/history_item.cpp` and `data/data_session.cpp` report actual media and
+whole-message expiry before the original cache or message is cleared.
+`data/data_streaming.cpp` uses stock readers without archive taps. The bounded, no-cache reader still
+serves owned Playlist transfers.
 
-`history/history.cpp` observes incoming creation and refresh facts before item
-replacement. `data/data_session.cpp` has the equivalent hook for an adopted
-streamed draft. `api/api_updates.cpp` tags accepted edit/delete dispatch before
-upstream mutation. Only those explicit delete calls mark archive deletion;
-unload, generic destruction and send acknowledgements do not.
-`history/view/history_view_context_menu.cpp` delegates one menu action to a
-read-only Purple viewer. Archive snapshots never register as live messages.
-The `data/data_session.cpp` full-message send-ack hook supplies metadata rather
-than an additional authored version. The one-call `api/api_updates.cpp` short
-send-ack hook runs after real message-ID adoption and acknowledged-field
-application, capturing a partial observed baseline plus the genuine short-ack
-TL evidence. Later acknowledgements add metadata to the existing version. Effective non-server, scheduled and admin-log IDs
-are excluded from the received-message creation hook.
+`media/view/media_view_overlay_widget.cpp` and
+`data/data_document_resolver.cpp` post timed-media observations after the
+ordinary viewer or explicit playback action. The original receipt call sites
+stay in place. `storage/file_download*.{h,cpp}` lets the existing MTProto
+loader give a bounded part to an asynchronous output consumer. Stock callers
+keep the default downloader output and cache behavior.
 
-## M3B3 expiring-media and passive acquisition hooks
+`history/view/history_view_context_menu.cpp` and `window/window_peer_menu.cpp`
+delegate Archive actions to the owned boxes and menu code. The same message
+context menu continues to expose live Markdown copy. `iv/iv_instance.cpp`
+continues to report rich-page responses for that live copy path.
 
-- history/history_item.cpp: Purple lifecycle call at the top of
-  clearMediaAsExpired and at actual expired refreshMedia replacement. Upstream
-  v7.3.3 replaced the timer service-text path with armMediaDestroy and a
-  Data::Session timer that both end in clearMediaAsExpired, so that one call
-  captures before cache removal and clearLocalCache.
-- data/data_session.cpp: Purple lifecycle call for each explicitly expired TTL item
-  before about-to-destroy notification and destroy. No generic removal observer.
-- data/data_streaming.cpp: Purple registration after Reader construction and on
-  Reader reuse. A weak owned Document-to-Reader association also covers cached
-  Document reuse, without redirecting to another reader-map entry. No download
-  requests or priority changes.
-- media/streaming/media_streaming_reader.h: one friend grants the owned stream
-  bridge access to the existing loader for passive registration only.
-- Existing api_updates/data_session archive entry points route expired placeholders
-  inside Purple. Purple's own user_control consumption hook captures before consume.
-
-Owned attachment Open/Save extends only Purple's existing archive history viewer.
-It never injects live messages or starts network acquisition.
-`media/streaming/media_streaming_reader.h` and `.cpp` add a default-off constructor
-option and two private slice hooks implemented in `purple_archive_media_loader.cpp`.
-Only the archive viewer opts in: requested uncached ranges obey the existing
-two-slice memory budget before bytes arrive, and late parts for retired slices
-are rejected. No plaintext enters the shared cache. Ordinary native readers keep
-their default policy. The constructor and private hooks provide the small extension
-needed to carry this policy through native fill and part delivery.
-
-### Dedicated deleted-messages menu
-
-`window/window_peer_menu.cpp` adds one include and one call to
-`Purple::AddArchiveChatActions` after the existing dialog menu filler. The owned
-menu adapter selects supported parent/topic contexts and captures trusted
-migration links; all read-only archive queries, rendering and authority checks
-live in Purple files. No upstream menu logic is moved or restructured.
-
-The D4b purge layer extends the owned archive menu and Purple settings code.
-It adds no further upstream hunk beyond D4a's include and owned menu hook in
-`window/window_peer_menu.cpp`. Purge policy, dialogs, worker execution and IO
-remain under `purple/`.
-
-## Markdown compose provenance (M3B5)
-
-`Telegram/SourceFiles/api/api_common.h` adds a forward declaration and an opaque
-shared source token to MessageToSend. `history/history_widget.cpp` and
-`history/view/history_view_chat_section.cpp` each add one include and one call
-before sending, while the raw compose field is still available. The helper
-verifies the parsed field matches the actual outgoing parameters.
-
-`Telegram/SourceFiles/apiwrap.cpp` adds one include and a request-bound receipt
-hook in the ordinary send path. Purple owns source capture, bounds, account and
-journal authority, acknowledgement validation and encrypted attachment. No
-parser or send implementation moves into these hooks. Scheduled, split,
-short-send, rich-editor and transformed acknowledgements remain source-less.
-
-`Telegram/SourceFiles/iv/iv_instance.cpp` adds one include and a Purple
-response observation call. It never changes resolver acceptance for viewing,
-editing or export. Each Copy request owns its opening raw snapshot and checks
-native peer/revision metadata, duplicate targets and exact preview prefix/media
-independently, with no networking of its own. `history/view/history_view_context_menu.cpp`
-adds one document-action hook so Markdown files without captions can expose the
-same source-aware copy action. Ordinary action duplication is suppressed inside
-Purple code. No resolver, parser or context-menu implementation moves.
+See [archive storage and configuration](archive_storage.md).
 
 ## Media playback (round PiP, restart, voice queue, round size)
 

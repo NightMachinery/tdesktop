@@ -16,6 +16,9 @@ namespace {
 
 constexpr auto kPointerLimit = 16 * 1024;
 constexpr auto kMagic = "AV2P";
+constexpr auto kWrapBytes = 60;
+constexpr auto kLoginTag = 16;
+constexpr auto kLoginBytes = kLoginTag + 32;
 
 bool Exists(const QString &path) {
 	const auto info = QFileInfo(path);
@@ -35,7 +38,7 @@ QByteArray Bytes(const QJsonValue &value) {
 }
 
 void Lease::revoke() {
-	live.store(false);
+	if (live.exchange(false)) crypto.Revoke();
 }
 
 Store::Store(StoreOptions options) : _options(std::move(options)) {
@@ -50,6 +53,7 @@ Store::~Store() {
 	DesktopArchiveCrypto::Clear(_manifestKey);
 	DesktopArchiveCrypto::Clear(_options.profileKey);
 	DesktopArchiveCrypto::Clear(_options.loginSecret);
+	for (auto &[id, key] : _options.loginKeys) DesktopArchiveCrypto::Clear(key);
 }
 
 bool Store::step(Phase phase) const {
@@ -58,6 +62,21 @@ bool Store::step(Phase phase) const {
 
 QString Store::bind(bool create) {
 	const auto account = AccountKeyText(_options.account.environment, _options.account.userId);
+	if (!_options.profilePath.isEmpty() && account) {
+		const auto profile = DesktopArchivePersistentIdentity(_options.profilePath);
+		if (profile.isEmpty() || QFileInfo(_options.profilePath).canonicalFilePath() != _options.profilePath
+			|| _options.profileKey.size() < 32 || _options.profileNamespace.isEmpty()) return u"key_unavailable"_q;
+		auto key = DesktopArchiveCrypto::Derive(_options.profileKey,
+			{ profile, "archive v2 profile/" + _options.profileNamespace });
+		if (!key) return u"key_unavailable"_q;
+		DesktopArchiveCrypto::Clear(_options.profileKey);
+		_options.profileKey = std::move(*key);
+		const auto scope = DesktopArchiveCrypto::Hmac(_options.profileKey, "profile");
+		const auto slot = DesktopArchiveCrypto::Hmac(_options.profileKey, "account/" + account->toLatin1());
+		if (!scope || !slot) return u"key_unavailable"_q;
+		_options.profileId = scope->first(16);
+		_options.accountSlot = slot->first(16);
+	}
 	if (!account || !_options.lease || _options.profileId.size() != 16 || _options.accountSlot.size() != 16
 		|| _options.profileKey.size() != 32 || !QDir::isAbsolutePath(_options.root)
 		|| QDir::cleanPath(_options.root) != _options.root || _options.root == u"/"_q) {
@@ -129,7 +148,8 @@ QString Store::readPointer() {
 	const auto list = object.value(u"retired"_q);
 	if (object.size() != 6 || next.generation <= 0 || generation != QString::number(next.generation)
 		|| !initialized.isBool() || !list.isArray() || (next.id.isEmpty() ? !next.wrapped.isEmpty() || !next.directory.isEmpty()
-			: next.id.size() != 16 || next.wrapped.size() != 60) || (next.initialized && next.directory.isEmpty())) {
+			: next.id.size() != 16 || next.wrapped.size() != (_options.profilePath.isEmpty()
+				? kWrapBytes : kWrapBytes + kLoginBytes)) || (next.initialized && next.directory.isEmpty())) {
 		return u"store_unreadable"_q;
 	}
 	for (const auto &value : list.toArray()) {
@@ -176,13 +196,42 @@ bool Store::publish(const Pointer &next) {
 	return true;
 }
 
+std::optional<QByteArray> Store::nativeWrap(const QByteArray &id,
+		const QByteArray &wrapped, const QByteArray *dataKey) {
+	if (_options.loginKeys.empty()) return std::nullopt;
+	const auto salt = dataKey ? DesktopArchiveCrypto::Random(32)
+		: wrapped.size() == kWrapBytes + kLoginBytes ? std::optional(wrapped.mid(kLoginTag, 32)) : std::nullopt;
+	if (!salt) return std::nullopt;
+	const auto tag = dataKey ? _options.loginKeys.front().first : wrapped.first(kLoginTag);
+	const auto found = std::find_if(_options.loginKeys.begin(), _options.loginKeys.end(),
+		[&](const auto &key) { return key.first == tag; });
+	if (found == _options.loginKeys.end() || tag.size() != kLoginTag || found->second.size() < 32) return std::nullopt;
+	auto secret = DesktopArchiveCrypto::Derive(found->second, { *salt, "archive v2 login/" + _scope });
+	if (!secret) return std::nullopt;
+	const auto clear = gsl::finally([&] { DesktopArchiveCrypto::Clear(*secret); });
+	auto key = DesktopArchiveCrypto::Derive(_manifestKey, { *secret, _scope + "wrap" });
+	if (!key) return std::nullopt;
+	const auto clearKey = gsl::finally([&] { DesktopArchiveCrypto::Clear(*key); });
+	auto wrap = DesktopArchiveCrypto();
+	const auto revoke = gsl::finally([&] { wrap.Revoke(); });
+	if (!wrap.AddKey(u"wrap"_q, *key)) return std::nullopt;
+	const auto crypto = wrap.callbacks();
+	const auto context = _scope + "wrap/" + id.toHex();
+	if (!dataKey) return crypto.openAes256Gcm(u"wrap"_q, wrapped.mid(kLoginBytes, 12),
+		{ wrapped.mid(kLoginBytes + 28), wrapped.mid(kLoginBytes + 12, 16) }, context);
+	const auto nonce = crypto.random(12);
+	const auto sealed = nonce ? crypto.sealAes256Gcm(u"wrap"_q, *nonce, *dataKey, context) : std::nullopt;
+	return sealed ? std::optional(tag + *salt + *nonce + sealed->tag + sealed->ciphertext) : std::nullopt;
+}
+
 bool Store::makeActive(Pointer &next) {
 	const auto id = DesktopArchiveCrypto::Random(16);
 	auto key = DesktopArchiveCrypto::Random(32);
 	if (!key) return false;
 	const auto clear = gsl::finally([&] { DesktopArchiveCrypto::Clear(*key); });
 	if (!id || Exists(archivePath(*id)) || Exists(archivePath(*id, true))) return false;
-	const auto wrapped = seal(u"wrap", _scope + "wrap/" + id->toHex(), *key);
+	const auto wrapped = _options.profilePath.isEmpty()
+		? seal(u"wrap", _scope + "wrap/" + id->toHex(), *key) : nativeWrap(*id, {}, &*key);
 	if (!wrapped) return false;
 	next.id = *id;
 	next.wrapped = *wrapped;
@@ -191,11 +240,11 @@ bool Store::makeActive(Pointer &next) {
 
 StoreEffect Store::open() {
 	if (_lock || !_options.lease || !_options.lease->live.load()) return { u"key_unavailable"_q };
-	const auto hasLogin = _options.loginSecret.size() == 32;
+	const auto hasLogin = _options.loginSecret.size() == 32 || !_options.loginKeys.empty();
 	_bindFailure = bind(hasLogin);
 	if (!_bindFailure.isEmpty()) return { _bindFailure };
 	if (!hasLogin) return { u"key_unavailable"_q };
-	if (const auto pending = cleanup(); !pending.isEmpty()) return { pending };
+	(void)cleanup();
 	if (_pointer.id.isEmpty()) {
 		if (_pointer.generation == std::numeric_limits<int64>::max()) return { u"store_unreadable"_q };
 		auto next = _pointer;
@@ -203,7 +252,9 @@ StoreEffect Store::open() {
 		if (!makeActive(next)) return { u"key_unavailable"_q };
 		if (!publish(next)) return { u"store_unreadable"_q };
 	}
-	auto key = unseal(u"wrap", _scope + "wrap/" + _pointer.id.toHex(), _pointer.wrapped);
+	auto key = _options.profilePath.isEmpty()
+		? unseal(u"wrap", _scope + "wrap/" + _pointer.id.toHex(), _pointer.wrapped)
+		: nativeWrap(_pointer.id, _pointer.wrapped);
 	if (!key) return { u"key_unavailable"_q };
 	const auto clear = gsl::finally([&] { DesktopArchiveCrypto::Clear(*key); });
 	if (const auto failure = openDatabase(*key); !failure.isEmpty()) return { failure };
@@ -341,7 +392,12 @@ StoreEffect Store::reset(const ResetReview &review) {
 
 StoreEffect Store::logout(const QByteArray &expectedId) {
 	if (!_lock && !_bound) _bindFailure = bind(false);
-	return retire(expectedId, nullptr);
+	if (!expectedId.isEmpty() || _options.profilePath.isEmpty()) return retire(expectedId, nullptr);
+	if (!_bound) return { _bindFailure.isEmpty() ? u"store_unreadable"_q : _bindFailure };
+	auto key = nativeWrap(_pointer.id, _pointer.wrapped);
+	if (!key) return { u"key_unavailable"_q };
+	DesktopArchiveCrypto::Clear(*key);
+	return retire(_pointer.id, nullptr);
 }
 
 QByteArray Store::id() const {

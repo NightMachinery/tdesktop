@@ -13,7 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_focus.h"
 #include "purple/purple_emoji_export.h"
 #include "purple/purple_control.h"
-#include "purple/purple_archive_service.h"
+#include "purple/purple_archive_v2_service.h"
 #include "purple/purple_archive_sqlite.h"
 #include "purple/purple_config.h"
 #include "purple/purple_sync_auto_service.h"
@@ -41,7 +41,7 @@ void StartAppServices() {
 	StartDesktopAccountRouting();
 	StartSyncChatService();
 	StartAutomaticSettingsSync();
-	StartArchiveServices();
+	ArchiveV2::StartServices();
 	StartMediaReplyServices();
 	StartSchedule();
 	StartFocusSync();
@@ -60,6 +60,7 @@ void OnMediaPlayerStarted() {
 
 void OnScreenLockChanged(bool locked) {
 	if (locked) {
+		ArchiveV2::CloseViews();
 		ReportLock(LockKind::Screen);
 		EndPeekOnApplicationLock();
 	} else {
@@ -69,6 +70,7 @@ void OnScreenLockChanged(bool locked) {
 }
 
 void OnAppPasscodeLock() {
+	ArchiveV2::CloseViews();
 	ReportLock(LockKind::App);
 	EndPeekOnApplicationLock();
 }

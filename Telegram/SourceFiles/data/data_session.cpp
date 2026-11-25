@@ -3609,7 +3609,7 @@ HistoryItem *Session::addNewMessage(
 				if (const auto adopted = streamed->adoptIncoming(
 						data.c_message())) {
 					fillMessagePeers(peerId, data);
-					Purple::ObserveArchiveMessage(&session(), data, id, localFlags);
+					Purple::ObserveArchiveMessage(&session(), data, id, localFlags, true);
 					CheckForSwitchInlineButton(adopted);
 					return adopted;
 				}

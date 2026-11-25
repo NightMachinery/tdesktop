@@ -486,8 +486,13 @@ void QueueCancellation() {
 	auto entered = state->entered.get_future();
 	auto logout = state->loggedOut.get_future();
 	auto writer = Writer(std::move(options), [state](StoreEffect effect, QByteArray id) {
-		if (++state->reports == 1) state->opened.set_value(effect ? id : QByteArray());
-		else state->loggedOut.set_value(std::move(effect));
+		if (effect.stage == IncidentStage::Startup) {
+			++state->reports;
+			state->opened.set_value(effect ? id : QByteArray());
+		} else if (effect.stage == IncidentStage::Cleanup) {
+			++state->reports;
+			state->loggedOut.set_value(std::move(effect));
+		}
 	});
 	const auto unblock = gsl::finally([&] {
 		if (released.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) state->release.set_value();
@@ -497,12 +502,17 @@ void QueueCancellation() {
 	const auto id = ready.get();
 	CHECK(id.size() == 16 && writer.post(Sample(id)));
 	CHECK(entered.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
+	const auto item = Sample(id).identity;
+	CHECK(writer.postBlob({ .storeId = id, .revision = lease->mediaRevision.load(), .identity = item,
+		.sequence = 3, .ordinal = 1 }));
+	CHECK(writer.saving(item, 3, 1));
+	CHECK(!writer.saving(item, 2, 1) && !writer.saving(item, 3, 0));
 	CHECK(writer.post(Sample(id, "coalesced")));
 	CHECK(writer.post(Sample(id, "coalesced")));
 	for (auto i = 0; i != 255; ++i) CHECK(writer.post(Sample(id, QByteArray::number(i))));
 	CHECK(writer.post(Sample(id, "overflow")).reason == u"text_queue_full"_q);
 	writer.logout(id);
-	CHECK(!lease->live.load());
+	CHECK(!lease->live.load() && !writer.saving(item, 3, 1));
 	CHECK(writer.post(Sample(id, "stale")).reason == u"scope_retired"_q);
 	state->release.set_value();
 	CHECK(logout.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
@@ -511,6 +521,91 @@ void QueueCancellation() {
 		CHECK(result.committed && state->reports.load() == 2);
 	}
 	CHECK(!QFileInfo::exists(ActivePath(Options(temp.path()), id)));
+}
+
+
+void CutoverCredentialsAndQuit() {
+	Section = "v2 Desktop credential rotation, startup text and bounded normal quit";
+	using namespace std::chrono_literals;
+	const auto temp = QTemporaryDir();
+	const auto root = temp.path();
+	const auto profile = root + u"/profile-native"_q;
+	CHECK(DesktopArchiveDirectory(profile));
+	const auto options = [&] {
+		auto result = Options(root);
+		result.profileKey = QByteArray(256, 'p');
+		result.loginSecret.clear();
+		result.profilePath = profile;
+		result.profileNamespace = "test-fixture";
+		result.loginKeys = { { QByteArray(16, 'a'), QByteArray(256, 'b') },
+			{ QByteArray(16, 'c'), QByteArray(256, 'd') } };
+		return result;
+	};
+	auto expected = QByteArray();
+	const auto stop = std::chrono::steady_clock::now() + 3s;
+	{
+		auto writer = Writer(options(), [&](StoreEffect effect, QByteArray id) {
+			if (effect.stage == IncidentStage::Startup && effect) expected = std::move(id);
+		});
+		CHECK(writer.post(Sample({})));
+		CHECK(writer.drainUntil(stop));
+		CHECK(!writer.post(Sample({}, "too-late")));
+		while (writer.drainUntil(stop)) std::this_thread::sleep_for(2ms);
+	}
+	CHECK(std::chrono::steady_clock::now() < stop && expected.size() == 16);
+	{
+		auto moved = options();
+		std::reverse(moved.loginKeys.begin(), moved.loginKeys.end());
+		auto restored = V2Store(std::move(moved));
+		CHECK(restored.open() && restored.id() == expected);
+		const auto first = Sample(expected);
+		const auto body = restored.body(first.identity, 1);
+		CHECK(body && body->body == first.body);
+	}
+	{
+		auto wrong = options();
+		wrong.loginKeys.front().second = QByteArray(256, 'z');
+		auto otherLogin = V2Store(std::move(wrong));
+		CHECK(otherLogin.open().reason == u"key_unavailable"_q);
+		CHECK(!otherLogin.logout({}).committed);
+	}
+	{
+		auto initialized = V2Store(options());
+		CHECK(initialized.open() && initialized.id() == expected);
+		CHECK(initialized.logout({}).committed);
+	}
+	{
+		auto next = V2Store(options());
+		CHECK(next.open() && next.id() != expected);
+		CHECK(!next.body(Sample(expected).identity, 1));
+	}
+}
+
+void CutoverDeleteResolution() {
+	Section = "v2 non-channel deletes authenticate exact targets and leave collisions alone";
+	const auto temp = QTemporaryDir();
+	auto store = V2Store(Options(temp.path()));
+	CHECK(store.open());
+	auto one = Sample(store.id());
+	auto channel = one;
+	channel.identity.peer = { PeerTokenKind::Channel, 42 };
+	auto two = one;
+	two.identity.peer = { PeerTokenKind::Chat, 43 };
+	CHECK(store.capture(one).committed);
+	CHECK(store.capture(channel).committed);
+	CHECK(store.capture(two).committed);
+	auto deletion = one;
+	deletion.event = Observation::Delete;
+	deletion.eventId = "delete";
+	deletion.identity.peer.id = 0;
+	CHECK(store.capture(deletion).reason == u"delete_unresolved"_q);
+	one.identity.message++;
+	CHECK(store.capture(one).committed);
+	deletion.identity.message++;
+	CHECK(store.capture(deletion).committed);
+	CHECK(store.history(one.identity, 0, 1)->status == MessageStatus::Deleted);
+	CHECK(store.history(channel.identity, 0, 1)->status == MessageStatus::Live);
+	CHECK(store.history(two.identity, 0, 1)->status == MessageStatus::Live);
 }
 
 }

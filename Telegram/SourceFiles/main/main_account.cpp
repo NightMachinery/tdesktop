@@ -7,7 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "main/main_account.h"
 #include "purple/hooks/music_index.h"
-#include "purple/purple_archive_service.h"
+#include "purple/purple_archive_v2_service.h"
+#include "purple/purple_recording_store.h"
 #include "purple/purple_emoji_export.h"
 #include "purple/purple_playlists_service.h"
 
@@ -204,6 +205,7 @@ void Account::createSession(
 	}
 	_sessionValue = _session.get();
 	Purple::StartSessionSettings(_session.get());
+	Purple::ArchiveV2::StartSession(_session.get());
 	Purple::ObserveMusicIndexArrivals(*_session);
 	Purple::RecoverLastSeenPeek(_session.get());
 
@@ -543,7 +545,8 @@ void Account::logOut() {
 	Purple::StopEmojiExportAtLogout(*this);
 	Purple::StopAccountPlaylists(*this);
 	Purple::StopMusicIndex(*this);
-	Purple::RemoveArchiveAtLogout(*this);
+	Purple::ForgetRecordingsAtLogout(*this);
+	Purple::ArchiveV2::Logout(*this);
 	_loggingOut = true;
 	if (_mtp) {
 		_mtp->logout([=] { loggedOut(); });
@@ -562,7 +565,8 @@ void Account::forcedLogOut() {
 		Purple::StopEmojiExportAtLogout(*this);
 		Purple::StopAccountPlaylists(*this);
 		Purple::StopMusicIndex(*this);
-		Purple::RemoveArchiveAtLogout(*this);
+		Purple::ForgetRecordingsAtLogout(*this);
+		Purple::ArchiveV2::Logout(*this);
 		loggedOut();
 		resetAuthorizationKeys();
 	}

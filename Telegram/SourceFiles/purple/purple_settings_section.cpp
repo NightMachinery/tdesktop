@@ -21,8 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "purple/purple_config.h"
-#include "purple/purple_archive_service.h"
-#include "purple/purple_archive_purge_box.h"
+#include "purple/purple_archive_v2_boxes.h"
 #include "purple/purple_birthday_reminders.h"
 #include "purple/purple_account_appwide_removal.h"
 #include "purple/purple_device.h"
@@ -494,118 +493,36 @@ void BuildPurpleScreenTimeSection(SectionBuilder &builder) {
 	};
 }
 
-auto ArchiveSummaryValue(not_null<Main::Session*> session, bool compact = false) {
-	return rpl::single(rpl::empty) | rpl::then(ArchiveStorageChanges())
-		| rpl::map([weak = base::make_weak(session.get()), compact] {
-			const auto live = weak.get();
-			return !live ? QString()
-				: compact ? ArchiveStorageSizeLabel(live) : ArchiveStorageSummary(live);
-		});
-}
-
-void OpenArchiveCleanup(
-		not_null<Window::SessionController*> window,
-		ArchivePurgeKind kind,
-		Fn<Window::SessionController*()> current) {
-	ShowArchivePurgeBox(
-		window,
-		kind,
-		{ SessionAccountKey(&window->session()) },
-		tr::lng_purple_archive_all_chats(tr::now),
-		[current] { return current() != nullptr; });
-}
-
-void ShowCleanupReview(
-		not_null<Window::SessionController*> window,
-		Fn<Window::SessionController*()> current) {
-	window->show(Box<Ui::GenericBox>([=](not_null<Ui::GenericBox*> box) {
-		const auto live = current();
-		if (!live) { return; }
-		box->setTitle(tr::lng_purple_settings_archive_cleanup());
-		box->addRow(object_ptr<Ui::FlatLabel>(
-			box,
-			ArchiveSummaryValue(&live->session()),
-			st::boxLabel));
-		box->addRow(object_ptr<Ui::FlatLabel>(
-			box, tr::lng_purple_archive_purge_scope_notice(), st::boxLabel));
-		const auto guard = QPointer<Ui::GenericBox>(box);
-		for (const auto kind : { ArchivePurgeKind::Trashbin, ArchivePurgeKind::EditHistory }) {
-			box->addButton(
-				kind == ArchivePurgeKind::Trashbin
-					? tr::lng_purple_archive_empty_trash()
-					: tr::lng_purple_archive_clear_edits(),
-				[guard, current, kind] {
-					const auto resolve = current;
-					if (guard) { guard->closeBox(); }
-					if (const auto own = resolve()) {
-						OpenArchiveCleanup(own, kind, resolve);
-					}
-				});
-		}
-		box->addLeftButton(tr::lng_close(), [=] { box->closeBox(); });
-	}));
-}
-
 void BuildArchiveSettings(SectionBuilder &builder) {
 	const auto current = CurrentSettingsWindow(builder);
-	const auto session = builder.session();
 	builder.addSkip();
 	builder.addSubsectionTitle(tr::lng_purple_settings_archive_account(
-		lt_account, rpl::single(session->user()->name())));
-	builder.addDividerText(ArchiveSummaryValue(session));
+		lt_account, rpl::single(builder.session()->user()->name())));
 	builder.addButton({
-		.id = u"purple/archive_cleanup"_q,
-		.title = tr::lng_purple_settings_archive_cleanup(),
+		.id = u"purple/archive_storage"_q,
+		.title = tr::lng_purple_archive_v2_storage(),
 		.icon = { &st::menuIconStorage },
-		.onClick = [=] {
-			if (const auto own = current()) { ShowCleanupReview(own, current); }
-		},
-		.keywords = { u"disk"_q, u"archive"_q, u"cleanup"_q, u"GC"_q, u"reclaim"_q },
+		.onClick = [=] { if (const auto own = current()) OpenArchiveStorage(own); },
+		.keywords = { u"disk"_q, u"archive"_q, u"cleanup"_q, u"previous archive"_q },
 	});
-	for (const auto kind : { ArchivePurgeKind::Trashbin, ArchivePurgeKind::EditHistory }) {
-		const auto trash = (kind == ArchivePurgeKind::Trashbin);
-		builder.addButton({
-			.id = trash ? u"advanced/purple_archive_trash"_q : u"advanced/purple_archive_edits"_q,
-			.title = trash ? tr::lng_purple_archive_empty_trash() : tr::lng_purple_archive_clear_edits(),
-			.onClick = [=] {
-				if (const auto own = current()) { OpenArchiveCleanup(own, kind, current); }
-			},
-			.keywords = trash
-				? QStringList{ u"archive"_q, u"trash"_q, u"deleted"_q }
-				: QStringList{ u"archive"_q, u"edited"_q, u"versions"_q },
-		});
-	}
+	builder.addButton({
+		.id = u"purple/archive_deleted"_q,
+		.title = tr::lng_purple_archive_deleted(),
+		.onClick = [=] { if (const auto own = current()) OpenArchivedMessages(own, {}, true); },
+		.keywords = { u"archive"_q, u"trash"_q },
+	});
+	builder.addButton({
+		.id = u"advanced/purple_archive_discard"_q,
+		.title = tr::lng_purple_archive_discard(),
+		.onClick = [=] { if (const auto own = current()) ReviewArchiveReset(own); },
+		.keywords = { u"archive"_q, u"discard"_q, u"remove"_q, u"disk"_q },
+	});
 	builder.addSectionButton({
 		.title = tr::lng_purple_settings_archive_cache(),
 		.targetSection = ::Settings::LocalStorageId(),
 		.icon = { &st::menuIconStorage },
 	});
 	builder.addDividerText(tr::lng_purple_settings_archive_cache_about());
-	builder.addSkip();
-	builder.addButton({
-		.id = u"advanced/purple_archive_discard"_q,
-		.title = tr::lng_purple_archive_discard(),
-		.onClick = [=] {
-			const auto own = current();
-			if (!own) { return; }
-			const auto discard = ArchiveDiscardAction(&own->session());
-			const auto confirm = own->show(Ui::MakeConfirmBox({
-				.text = tr::lng_purple_archive_discard_confirm(tr::now),
-				.confirmed = [=](Fn<void()> close) {
-					close();
-					if (current()) { discard(); }
-				},
-				.confirmText = tr::lng_purple_archive_discard_button(tr::now),
-			}));
-			if (confirm) {
-				own->window().sessionControllerValue() | rpl::skip(1)
-					| rpl::on_next([=] {
-						if (confirm && !current()) { confirm->closeBox(); }
-					}, confirm->lifetime());
-			}
-		},
-		.keywords = { u"archive"_q, u"discard"_q, u"remove"_q, u"disk"_q },
-	});
 	builder.addSkip();
 }
 
@@ -943,9 +860,7 @@ void BuildPurpleSection(SectionBuilder &builder) {
 			.title = (*page.title)(),
 			.targetSection = page.id,
 			.icon = { page.icon },
-			.label = page.id == ArchiveSettings::Id()
-				? ArchiveSummaryValue(builder.session(), true)
-				: rpl::producer<QString>(),
+
 		});
 	}
 	builder.addDivider();

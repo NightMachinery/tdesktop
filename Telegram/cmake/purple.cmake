@@ -54,10 +54,6 @@ PRIVATE
     purple/purple_control_subscriptions.cpp
     purple/purple_control_server.h
     purple/purple_control_settings.cpp
-    purple/purple_desktop_archive_store.cpp
-    purple/purple_desktop_archive_store.h
-    purple/purple_archive_attention.cpp
-    purple/purple_archive_attention.h
     purple/purple_archive_sqlite.cpp
     purple/purple_archive_sqlite.h
     purple/purple_archive_v2_schema.cpp
@@ -67,46 +63,26 @@ PRIVATE
     purple/purple_archive_v2_store.h
     purple/purple_archive_v2_writer.cpp
     purple/purple_archive_v2_writer.h
+    purple/purple_archive_v2_service.cpp
+    purple/purple_archive_v2_service.h
     purple/purple_archive_v2_acquisition.cpp
     purple/purple_archive_v2_acquisition.h
+    purple/purple_archive_v2_download.cpp
+    purple/purple_archive_previous.cpp
+    purple/purple_archive_previous.h
     purple/purple_archive_v2_quota.cpp
     purple/purple_archive_v2_views.cpp
     purple/purple_archive_v2_ui.cpp
-    purple/purple_archive_deleted_box.cpp
-    purple/purple_archive_deleted_box.h
+    purple/purple_archive_v2_boxes.cpp
+    purple/purple_archive_v2_boxes.h
     purple/purple_archive_menu.cpp
     purple/purple_archive_menu.h
-    purple/purple_archive_maintenance.cpp
-    purple/purple_archive_maintenance.h
-    purple/purple_archive_purge_box.cpp
-    purple/purple_archive_purge_box.h
-    purple/purple_archive_queries.cpp
-    purple/purple_archive_queries.h
     purple/purple_archive_crypto.cpp
     purple/purple_archive_crypto.h
-    purple/purple_archive_history_box.cpp
-    purple/purple_archive_history_box.h
-    purple/purple_archive_capture_snapshot.cpp
     purple/purple_archive_capture.cpp
     purple/purple_archive_capture.h
-    purple/purple_archive_journal.cpp
-    purple/purple_archive_journal.h
-    purple/purple_archive_service.cpp
-    purple/purple_archive_service.h
-    purple/purple_archive_acquired_source.cpp
-    purple/purple_archive_acquired_source.h
     purple/purple_archive_lifecycle_capture.cpp
     purple/purple_archive_lifecycle_capture.h
-    purple/purple_archive_stream.cpp
-    purple/purple_archive_stream.h
-    purple/purple_archive_media.cpp
-    purple/purple_archive_media.h
-    purple/purple_archive_media_access.cpp
-    purple/purple_archive_media_access.h
-    purple/purple_archive_media_loader.cpp
-    purple/purple_archive_media_loader.h
-    purple/purple_archive_media_box.cpp
-    purple/purple_archive_media_box.h
     purple/purple_archive_files.cpp
     purple/purple_archive_files.h
     purple/purple_account_config.cpp
@@ -124,20 +100,12 @@ PRIVATE
     purple/purple_bypass.h
     purple/purple_chat_menus.cpp
     purple/purple_chat_menus.h
-    purple/purple_archive_markdown.cpp
-    purple/purple_archive_markdown.h
-    purple/purple_markdown_publication.cpp
-    purple/purple_markdown_publication.h
     purple/purple_markdown_delivery.cpp
     purple/purple_markdown_delivery.h
     purple/purple_markdown_current.cpp
     purple/purple_markdown_current.h
     purple/purple_markdown_source.cpp
     purple/purple_markdown_source.h
-    purple/purple_compose_receipt.cpp
-    purple/purple_compose_receipt.h
-    purple/purple_compose_source.cpp
-    purple/purple_compose_source.h
     purple/purple_copy.cpp
     purple/purple_copy.h
     purple/purple_copy_messages.cpp
@@ -511,13 +479,9 @@ nice_target_sources(Telegram ${purple_core_loc}
 PRIVATE
     purple/purple_archive_envelope.cpp
     purple/purple_archive_envelope.h
-    purple/purple_archive_lifecycle.cpp
     purple/purple_archive_lifecycle.h
-    purple/purple_archive_staging.cpp
     purple/purple_archive_staging.h
-    purple/purple_archive_media_lifecycle.cpp
     purple/purple_archive_media_lifecycle.h
-    purple/purple_archive_views.cpp
     purple/purple_archive_views.h
     purple/purple_archive_rows.h
     purple/purple_archive_sql.cpp

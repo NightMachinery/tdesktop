@@ -1,4 +1,6 @@
 #include "purple/purple_keys.h"
+#include "purple/purple_archive_v2_boxes.h"
+#include "purple/purple_archive_v2_service.h"
 #include "purple/purple_settings_customize.h"
 
 #include "base/event_filter.h"
@@ -464,6 +466,9 @@ enum class Action {
 	LogClear,
 	OpenSavedMessages,
 	OpenArchive,
+	ArchiveHistory,
+	ArchiveDeleted,
+	ArchiveStorage,
 	OpenContacts,
 	OpenCalls,
 	OpenDownloads,
@@ -651,6 +656,15 @@ const Command kCommands[] = {
 	{ Action::OpenArchive, "open-archived-chats", "open", "",
 		"hidden inbox archived conversations",
 		[] { return tr::lng_shortcuts_archive(tr::now); } },
+	{ Action::ArchiveHistory, "archive-history", "open", "Needs an open chat",
+		"local retained history edited versions",
+		[] { return tr::lng_purple_archive_history(tr::now); } },
+	{ Action::ArchiveDeleted, "archive-deleted", "open", "Needs an unlocked account window",
+		"local retained deleted consumed expired messages",
+		[] { return tr::lng_purple_archive_deleted(tr::now); } },
+	{ Action::ArchiveStorage, "archive-storage", "open", "Needs an unlocked account window",
+		"local disk allowance encryption size",
+		[] { return tr::lng_purple_archive_v2_storage(tr::now); } },
 	{ Action::OpenContacts, "open-contacts", "open", "",
 		"people address book friends",
 		[] { return tr::lng_shortcuts_contacts(tr::now); } },
@@ -1966,6 +1980,9 @@ bool Available(Action action, const Target &target) {
 	case Action::OpenChatVoice:
 	case Action::OpenChatGifs:
 	case Action::OpenChatPolls: return target.chat.peer() != nullptr;
+	case Action::ArchiveHistory: return target.chat.peer() != nullptr;
+	case Action::ArchiveDeleted:
+	case Action::ArchiveStorage: return target.controller != nullptr;
 	case Action::OpenChatMusic: return target.chat.thread() != nullptr;
 	case Action::AttachFiles: return bool(target.attach);
 	case Action::OpenHistoryCalendar: return bool(target.chat);
@@ -4923,6 +4940,18 @@ void Keys::dispatch(Action action, const Target &target, int count, ScrollPress 
 		break;
 	case Action::OpenArchive:
 		launch(Native::ShowArchive);
+		break;
+	case Action::ArchiveHistory:
+		clearPrefix();
+		OpenArchivedMessages(current, ArchiveV2::Peer(target.chat.peer()->id), false);
+		break;
+	case Action::ArchiveDeleted:
+		clearPrefix();
+		OpenArchivedMessages(current, {}, true);
+		break;
+	case Action::ArchiveStorage:
+		clearPrefix();
+		OpenArchiveStorage(current);
 		break;
 	case Action::OpenContacts:
 		launch(Native::ShowContacts);

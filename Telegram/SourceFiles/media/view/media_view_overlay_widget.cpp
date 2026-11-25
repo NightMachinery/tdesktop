@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/view/media_view_overlay_widget.h"
+#include "purple/purple_archive_capture.h"
 #include "purple/purple_sleep_timer.h"
 #include "purple/purple_sleep_timer_ui.h"
 
@@ -4652,6 +4653,9 @@ void OverlayWidget::show(OpenRequest request) {
 			preloadData(0);
 			activateControls();
 		}
+	}
+	if (contextItem && (photo || document) && !request.continueStreaming() && !request.startTime()) {
+		Purple::ObserveArchiveAttachment(contextItem, true);
 	}
 	if (const auto controller = request.controller()) {
 		_openedFrom = base::make_weak(&controller->window());

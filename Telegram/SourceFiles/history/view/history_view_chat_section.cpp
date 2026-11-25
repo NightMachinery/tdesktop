@@ -5,7 +5,6 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "purple/purple_compose_source.h"
 #include "purple/purple_webp_paste_route.h"
 #include "history/view/history_view_chat_section.h"
 
@@ -2630,7 +2629,6 @@ void ChatWidget::sendTextWithTags(
 	const auto justMarkingAsRead = !hasText
 		&& message.webPage.url.isEmpty();
 	_justMarkingAsRead = justMarkingAsRead;
-	Purple::PrepareDesktopCompose(message, _composeControls->fieldForMention());
 	session().api().sendMessage(std::move(message), nextLocalMessageId);
 	_justMarkingAsRead = false;
 

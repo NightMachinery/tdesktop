@@ -268,6 +268,11 @@ void PendingBytesAndMediaOutcome() {
 	const auto described = store.media(event.identity, 1);
 	CHECK(described && described->size() == 1 && !described->front().savedBytes
 		&& described->front().reason == u"copy_incomplete"_q);
+	store.noteMediaFailure(incomplete, u"transfer_failed");
+	CHECK(store.media(event.identity, 1)->front().reason == u"transfer_failed"_q);
+	++incomplete.revision;
+	store.noteMediaFailure(incomplete, u"expired");
+	CHECK(store.media(event.identity, 1)->front().reason == u"transfer_failed"_q);
 	const auto reset = ConfirmReset(store, id);
 	CHECK(reset.committed && reset.reason == u"cleanup_pending"_q);
 	const auto pending = store.pendingBytes();
@@ -282,7 +287,7 @@ void ConfirmedPagesAndNoticeDeduplication() {
 	auto initial = std::promise<QByteArray>();
 	auto options = Options(temp.path());
 	auto writer = Writer(options, [&](StoreEffect result, QByteArray id) {
-		if (result && !result.committed) initial.set_value(std::move(id));
+		if (result.stage == IncidentStage::Startup && result) initial.set_value(std::move(id));
 	});
 	auto ready = initial.get_future();
 	CHECK(ready.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
@@ -336,17 +341,67 @@ std::map<QString, QByteArray> FixtureTree(const QString &root) {
 
 constexpr auto kLegacyFixture = "archive-v2-confirmed-legacy-fixture";
 
+PreviousArchiveOptions LegacyOptions(const QString &root, int64 account = 123) {
+	return { root + u"/archives"_q, root + u"/profile"_q, { 0, account }, {},
+		QByteArray(32, 'a'), QByteArray(16, '1') };
+}
+
+std::pair<QString, QString> SeedPrevious(const PreviousArchiveOptions &first,
+		const PreviousArchiveOptions &second) {
+	const auto root = first.archiveRoot;
+	const auto profileId = QString(32, u'c');
+	const auto profile = root + '/' + profileId;
+	CHECK(DesktopArchiveDirectory(first.profileRoot));
+	for (const auto &directory : { root, root + u"/profile-links"_q, profile, profile + u"/accounts"_q,
+			profile + u"/fences"_q, profile + u"/intents"_q, profile + u"/locks"_q }) {
+		CHECK(DesktopArchiveDirectory(directory));
+	}
+	const auto digest = [](const QByteArray &bytes) {
+		return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+	};
+	const auto write = [&](const QString &path, QJsonObject object) {
+		CHECK(DesktopArchiveWrite(path, QJsonDocument(object).toJson(QJsonDocument::Compact)));
+	};
+	const auto identity = DesktopArchivePersistentIdentity(first.profileRoot);
+	const auto marker = QJsonObject{ { u"version"_q, 1 }, { u"profile"_q, profileId },
+		{ u"identity"_q, QString::fromLatin1(identity) } };
+	write(first.profileRoot + u"/purple-archive-profile.json"_q, marker);
+	write(root + u"/profile-links/"_q + digest(identity) + u".json"_q, marker);
+	auto accounts = QJsonObject();
+	const auto seed = [&](const PreviousArchiveOptions &options, QChar suffix) {
+		const auto name = AccountKeyText(options.account.environment, options.account.userId).value();
+		const auto store = QString(32, suffix);
+		const auto path = profile + u"/accounts/"_q + name;
+		const auto directory = path + '/' + store;
+		CHECK(DesktopArchiveDirectory(path));
+		CHECK(DesktopArchiveDirectory(directory));
+		CHECK(DesktopArchiveWrite(directory + u"/archive.sqlite"_q, "corrupt read-only fixture"));
+		write(profile + u"/fences/"_q + name + u".json"_q, {
+			{ u"version"_q, 1 }, { u"account"_q, name }, { u"store"_q, store },
+			{ u"generation"_q, u"1"_q }, { u"removing"_q, false },
+		});
+		accounts.insert(name, QJsonObject{ { u"store"_q, store }, { u"key"_q, QString(32, u'2') },
+			{ u"generation"_q, u"1"_q }, { u"phase"_q, u"ready"_q },
+			{ u"loginAuthority"_q, digest(options.loginAuthority) },
+			{ u"loginAuthKeys"_q, QString::fromLatin1(options.loginAuthKeyIds) } });
+		return directory;
+	};
+	const auto result = std::pair(seed(first, u'a'), seed(second, u'b'));
+	write(profile + u"/catalogue.json"_q, { { u"version"_q, 1 }, { u"accounts"_q, accounts } });
+	return result;
+}
+
 int LegacyCrashChild(const QString &root, bool detached) {
 	if (QFileInfo(root).canonicalFilePath() != root || Read(root + u"/confirmed-test.marker"_q) != kLegacyFixture) return 2;
-	auto legacy = ::Options(root);
-	const auto review = DesktopArchiveStore::ReviewPreviousArchive(legacy);
+	auto legacy = LegacyOptions(root);
+	const auto review = PreviousArchive::ReviewPreviousArchive(legacy);
 	if (!review.review) return 3;
 	auto checks = 0;
-	legacy.maintenanceAllowed = [&] {
-		if (++checks == (detached ? 3 : 2)) std::_Exit(kCrash);
+	legacy.active = [&] {
+		if (++checks == (detached ? 4 : 3)) std::_Exit(kCrash);
 		return true;
 	};
-	static_cast<void>(DesktopArchiveStore::DeletePreviousArchive(legacy, *review.review));
+	static_cast<void>(PreviousArchive::DeletePreviousArchive(legacy, *review.review));
 	return 4;
 }
 
@@ -354,17 +409,9 @@ void PreviousArchiveRemoval() {
 	for (const auto detached : { false, true }) {
 		Section = "v2 previous archive reviewed without opening and resumed after crash";
 		const auto temp = QTemporaryDir();
-		const auto legacy = ::Options(temp.path());
-		auto other = ::Options(temp.path(), 456);
-		other.slot = u"1"_q;
-		auto a = DesktopArchiveStore();
-		auto b = DesktopArchiveStore();
-		CHECK(a.Open(legacy) == DesktopArchiveStatus::Ready);
-		CHECK(b.Open(other) == DesktopArchiveStatus::Ready);
-		const auto old = a.directory();
-		const auto otherDir = b.directory();
-		CHECK(a.Close() && b.Close());
-		CHECK(DesktopArchiveWrite(old + u"/archive.sqlite"_q, "corrupt read-only fixture"));
+		const auto legacy = LegacyOptions(temp.path());
+		const auto other = LegacyOptions(temp.path(), 456);
+		const auto [old, otherDir] = SeedPrevious(legacy, other);
 		const auto baseline = FixtureTree(temp.path());
 		const auto selected = FixtureTree(QFileInfo(old).absolutePath());
 		const auto neighbors = FixtureTree(QFileInfo(otherDir).absolutePath());
@@ -383,18 +430,21 @@ void PreviousArchiveRemoval() {
 			CHECK(fresh.logout(fresh.id()).committed);
 		}
 		for (const auto &[path, bytes] : baseline) CHECK(Read(path) == bytes && QFileInfo::exists(path));
-		const auto former = DesktopArchiveStore::ReviewPreviousArchive(legacy);
+		const auto former = PreviousArchive::ReviewPreviousArchive(legacy);
 		CHECK(former.review && former.review->bytes() == size && former.reason.isEmpty());
 		if (!former.review) continue;
-		CHECK(DesktopArchiveStore::DeletePreviousArchive(other, *former.review).reason == u"discard-account-changed"_q);
+		CHECK(PreviousArchive::DeletePreviousArchive(other, *former.review).reason == u"discard-account-changed"_q);
+		auto wrong = legacy;
+		wrong.loginAuthority = QByteArray(32, 'z');
+		CHECK(!PreviousArchive::ReviewPreviousArchive(wrong).review);
 		const auto marker = legacy.profileRoot + u"/purple-archive-profile.json"_q;
 		const auto saved = Read(marker);
 		CHECK(!saved.isEmpty() && QFile::remove(marker));
-		CHECK(DesktopArchiveStore::ReviewPreviousArchive(legacy).reason == u"discard-profile-binding-unavailable"_q);
+		CHECK(PreviousArchive::ReviewPreviousArchive(legacy).reason == u"discard-profile-binding-unavailable"_q);
 		CHECK(!QFileInfo::exists(marker));
 		CHECK(DesktopArchiveWrite(marker, saved));
 		CHECK(DesktopArchiveWrite(old + u"/changed-size.fixture"_q, "added bytes"));
-		CHECK(DesktopArchiveStore::DeletePreviousArchive(legacy, *former.review).reason == u"discard-archive-changed"_q);
+		CHECK(PreviousArchive::DeletePreviousArchive(legacy, *former.review).reason == u"discard-archive-changed"_q);
 		CHECK(QFileInfo::exists(old));
 		CHECK(DesktopArchiveRemoveFile(old + u"/changed-size.fixture"_q));
 		CHECK(Put(temp.filePath(u"confirmed-test.marker"_q), kLegacyFixture));
@@ -406,14 +456,12 @@ void PreviousArchiveRemoval() {
 		const auto selectedAccount = QFileInfo(old).absolutePath();
 		CHECK(QFileInfo::exists(selectedAccount + u".discard.json"_q));
 		CHECK(QFileInfo::exists(selectedAccount + u".discard"_q) == detached);
-		CHECK(DesktopArchiveStore::ReviewPreviousArchive(legacy).reason == u"cleanup_pending"_q);
-		CHECK(DesktopArchiveStore::ResumePreviousArchiveDeletion(other));
+		CHECK(PreviousArchive::ReviewPreviousArchive(legacy).reason == u"cleanup_pending"_q);
 		CHECK(QFileInfo::exists(selectedAccount + u".discard.json"_q));
 		auto signedOut = legacy;
 		signedOut.loginAuthority.clear();
 		signedOut.loginAuthKeyIds.clear();
-		CHECK(!DesktopArchiveStore::RetryPreviousArchiveDeletions(signedOut));
-		CHECK(DesktopArchiveStore::ResumePreviousArchiveDeletion(signedOut));
+		CHECK(!PreviousArchive::RetryPreviousArchiveDeletions(signedOut));
 		CHECK(!QFileInfo::exists(selectedAccount) && !QFileInfo::exists(selectedAccount + u".discard"_q));
 		CHECK(!QFileInfo::exists(selectedAccount + u".discard.json"_q));
 		CHECK(FixtureTree(QFileInfo(otherDir).absolutePath()) == neighbors);
