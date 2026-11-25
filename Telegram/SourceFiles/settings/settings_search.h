@@ -31,10 +31,21 @@ struct SearchSectionState {
 	QString query;
 };
 
-class Search : public Section<Search> {
+class Search : public AbstractSection {
 public:
-	Search(QWidget *parent, not_null<Window::SessionController*> controller);
+	struct Scope {
+		Type root;
+		SectionBuildMethod landing;
+	};
 
+	Search(
+		QWidget *parent,
+		not_null<Window::SessionController*> controller,
+		Scope scope = {});
+	~Search() override;
+
+	[[nodiscard]] static Type Id();
+	[[nodiscard]] Type id() const override;
 	[[nodiscard]] rpl::producer<QString> title() override;
 
 	void setInnerFocus() override;
@@ -73,6 +84,8 @@ private:
 	void setupButtonMouseTracking(not_null<Ui::SettingsButton*> button);
 	void addButton(not_null<Ui::SettingsButton*> button);
 
+	Scope _scope;
+	Fn<void(bool)> _showLanding;
 	std::unique_ptr<Ui::SearchFieldController> _searchController;
 	Ui::InputField *_searchField = nullptr;
 	Ui::VerticalLayout *_list = nullptr;

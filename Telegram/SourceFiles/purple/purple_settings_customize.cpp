@@ -2216,7 +2216,9 @@ bool CanCustomizeSettings(Window::Controller *window) {
 		&& !window->maybeSession()->account().loggingOut();
 }
 
-void ShowCustomizeSettings(not_null<Window::Controller*> window) {
+void ShowCustomizeSettings(
+		not_null<Window::Controller*> window,
+		QWidget *returnFocus) {
 	if (!CanCustomizeSettings(window.get()) || Core::App().activeWindow() != window.get()) {
 		return;
 	}
@@ -2233,6 +2235,21 @@ void ShowCustomizeSettings(not_null<Window::Controller*> window) {
 	}
 	const auto layer = QPointer(new CustomizeLayer(window));
 	OpenEditors[host.get()] = layer;
+	if (returnFocus) {
+		const auto row = QPointer(returnFocus);
+		const auto owner = base::make_weak(window.get());
+		const auto session = base::make_weak(window->maybeSession());
+		QObject::connect(layer.data(), &QObject::destroyed, returnFocus, [=] {
+			QTimer::singleShot(0, row.data(), [=] {
+				const auto live = owner.get();
+				if (row && row->isVisible() && CanCustomizeSettings(live)
+					&& live->maybeSession() == session.get()
+					&& Core::App().activeWindow() == live) {
+					row->setFocus(Qt::OtherFocusReason);
+				}
+			});
+		});
+	}
 	layer->open();
 	if (layer) layer->present(anim::type::normal);
 }

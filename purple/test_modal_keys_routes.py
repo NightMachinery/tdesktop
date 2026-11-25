@@ -75,7 +75,7 @@ ordered(section_builder, "SectionBuilder::controller() const",
         "const SearchContext &) -> Window::SessionController*", "return nullptr")
 purple_section = read("purple/purple_settings_section.cpp")
 ordered(purple_section, 'u"advanced/purple_customize_settings"_q',
-        "if (const auto live = weak.get())", "ShowCustomizeSettings(&live->window())")
+        "if (const auto own = current())", "ShowCustomizeSettings(&own->window(), customize)")
 assert not any("builder.controller()->" in source.read_text(encoding="utf-8")
                for source in (SOURCE / "purple").glob("*.cpp"))
 bound("OpenCalls", "SPC o p")
@@ -447,7 +447,7 @@ ordered(diagnostics_ui, "void ShowExport", "CanManage(window)", "FileDialog::Get
         "CurrentWindow(window)", "IsAppDataPath(path)", "QSaveFile(path)", "file.commit()")
 ordered(diagnostics_ui, "void ShowClear", "CanManage(window)", "Ui::MakeConfirmBox",
         "CurrentWindow(window)", "close()", "current()", "Clear()")
-ordered(read("purple/purple_settings_section.cpp"), "diagnosticsWindow = base::make_weak(controller)",
+ordered(read("purple/purple_settings_section.cpp"), "void BuildPurpleDiagnosticsSettings", "CurrentSettingsWindow(builder)",
         "advanced/purple_log_export", "Diagnostics::ShowExport",
         "advanced/purple_log_clear", "Diagnostics::ShowClear")
 ordered(config_cpp, "void Config::reloadFromDisk", "takeEditorGlobalReload", "edited && !editorEcho")

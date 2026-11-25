@@ -276,7 +276,7 @@ on the modal status line and cheatsheet footer.
 
 - **Diagnostics in M-x.** Run `:log-export` to save a redacted bundle or
   `:log-clear` to clear recent Purple diagnostic events after confirmation.
-  Both actions are also available under Purple settings.
+  Both actions are also available under Purple → Diagnostics & logs.
 
 ## Known limits
 

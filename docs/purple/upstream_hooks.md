@@ -2030,6 +2030,15 @@ worker's pending database transactions. The existing playlist menu hook in
 - `logs.cpp`: passes main-log messages to `Purple::Diagnostics::CaptureMainLog`.
   That hook retains a bounded set of allowlisted event labels in memory.
 
+### Purple settings navigation
+
+- `settings/settings_builder.{h,cpp}` supports registry searches rooted at a
+  settings section, section search keywords, optional keyboard tab stops,
+  and a right-hand label on native section rows.
+- `settings/settings_search.{h,cpp}` accepts a root and landing page for
+  scoped search. Purple uses the same pinned search field, result controls,
+  and back-stack state as global Settings search.
+
 ### Per-chat translation exclusion
 
 - `history/view/history_view_translate_bar.cpp`: includes

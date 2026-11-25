@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
+#include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat_helpers.h"
@@ -131,9 +132,21 @@ void SetupCheckIcon(
 
 Search::Search(
 	QWidget *parent,
-	not_null<Window::SessionController*> controller)
-: Section(parent, controller) {
+	not_null<Window::SessionController*> controller,
+	Scope scope)
+: AbstractSection(parent, controller)
+, _scope(std::move(scope)) {
 	setupContent();
+}
+
+Search::~Search() = default;
+
+Type Search::Id() {
+	return SectionFactory<Search>::Instance();
+}
+
+Type Search::id() const {
+	return _scope.root ? _scope.root : Id();
 }
 
 rpl::producer<QString> Search::title() {
@@ -193,30 +206,38 @@ base::weak_qptr<Ui::RpWidget> Search::createPinnedToTop(
 void Search::setupContent() {
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
 
+	if (_scope.landing) {
+		const auto wrap = content->add(object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			content, object_ptr<Ui::VerticalLayout>(content)));
+		build(wrap->entity(), _scope.landing);
+		_showLanding = [=](bool shown) { wrap->toggle(shown, anim::type::instant); };
+	}
 	_list = content->add(object_ptr<Ui::VerticalLayout>(content));
 
 	setupCustomizations();
 	buildIndex();
 	rebuildResults(QString());
 
-	controller()->session().faqSuggestions().loadedValue(
-	) | rpl::filter([](bool loaded) {
-		return loaded;
-	}) | rpl::take(1) | rpl::on_next([=] {
-		for (auto i = _faqStartIndex; i < int(_entries.size()); ++i) {
-			const auto it = _buttonCache.find(i);
-			if (it != _buttonCache.end()) {
-				_trackedButtons.remove(it->second);
-				delete it->second;
-				_buttonCache.erase(it);
+	if (!_scope.root) {
+		controller()->session().faqSuggestions().loadedValue(
+		) | rpl::filter([](bool loaded) {
+			return loaded;
+		}) | rpl::take(1) | rpl::on_next([=] {
+			for (auto i = _faqStartIndex; i < int(_entries.size()); ++i) {
+				const auto it = _buttonCache.find(i);
+				if (it != _buttonCache.end()) {
+					_trackedButtons.remove(it->second);
+					delete it->second;
+					_buttonCache.erase(it);
+				}
 			}
-		}
-		buildIndex();
-		const auto query = _searchController
-			? _searchController->query()
-			: QString();
-		rebuildResults(query);
-	}, lifetime());
+			buildIndex();
+			const auto query = _searchController
+				? _searchController->query()
+				: QString();
+			rebuildResults(query);
+		}, lifetime());
+	}
 
 	Ui::ResizeFitChild(this, content);
 }
@@ -249,7 +270,7 @@ void Search::buildIndex() {
 	_entryIdToIndex.clear();
 
 	const auto &registry = Builder::SearchRegistry::Instance();
-	const auto rawEntries = registry.collectAll(&controller()->session());
+	const auto rawEntries = registry.collectAll(&controller()->session(), _scope.root);
 
 	_entries.reserve(rawEntries.size());
 	for (const auto &entry : rawEntries) {
@@ -267,19 +288,21 @@ void Search::buildIndex() {
 
 	_faqStartIndex = int(_entries.size());
 
-	const auto &faq = controller()->session().faqSuggestions();
-	for (const auto &faqEntry : faq.entries()) {
-		auto entry = Builder::SearchEntry{
-			.title = faqEntry.title,
-		};
-		auto indexed = IndexedEntry{
-			.entry = std::move(entry),
-			.terms = TextUtilities::PrepareSearchWords(faqEntry.title),
-			.depth = 1000,
-			.faqUrl = faqEntry.url,
-			.faqSection = faqEntry.section,
-		};
-		_entries.push_back(std::move(indexed));
+	if (!_scope.root) {
+		const auto &faq = controller()->session().faqSuggestions();
+		for (const auto &faqEntry : faq.entries()) {
+			auto entry = Builder::SearchEntry{
+				.title = faqEntry.title,
+			};
+			auto indexed = IndexedEntry{
+				.entry = std::move(entry),
+				.terms = TextUtilities::PrepareSearchWords(faqEntry.title),
+				.depth = 1000,
+				.faqUrl = faqEntry.url,
+				.faqSection = faqEntry.section,
+			};
+			_entries.push_back(std::move(indexed));
+		}
 	}
 
 	for (auto i = 0; i < int(_entries.size()); ++i) {
@@ -485,10 +508,15 @@ void Search::rebuildResults(const QString &query) {
 	_visibleButtons.clear();
 
 	const auto queryWords = TextUtilities::PrepareSearchWords(query);
+	if (_showLanding) {
+		_showLanding(queryWords.isEmpty());
+	}
 
 	if (queryWords.isEmpty()) {
-		rebuildRecentResults();
-		rebuildFaqResults();
+		if (!_scope.root) {
+			rebuildRecentResults();
+			rebuildFaqResults();
+		}
 		_list->resizeToWidth(_list->width());
 		return;
 	}

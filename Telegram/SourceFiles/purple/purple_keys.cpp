@@ -4430,7 +4430,7 @@ void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder) {
 		.title = tr::lng_purple_keys_settings(),
 		.st = &st::settingsButtonNoIcon,
 		.toggled = rpl::single(Enabled()) | rpl::then(EnabledChanges.events()),
-		.keywords = { u"keyboard"_q, u"modal"_q, u"evil"_q, u"leader"_q },
+		.keywords = { u"keyboard"_q, u"modal"_q, u"evil"_q, u"leader"_q, u"keybindings"_q, u"shortcuts"_q },
 	});
 	if (toggle) {
 		toggle->toggledValue() | rpl::on_next([](bool enabled) {

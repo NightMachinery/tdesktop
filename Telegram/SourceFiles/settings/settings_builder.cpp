@@ -60,6 +60,7 @@ BuildHelper::BuildHelper(
 		.showOther = std::move(showOther),
 		.isPaused = isPaused,
 		.highlights = highlights,
+		.tabStops = _meta.tabStops,
 	});
 	_method(builder);
 
@@ -96,18 +97,23 @@ void SearchRegistry::add(
 }
 
 std::vector<SearchEntry> SearchRegistry::collectAll(
-		not_null<Main::Session*> session) const {
+		not_null<Main::Session*> session,
+		Type root) const {
 	auto result = std::vector<SearchEntry>();
 	for (const auto &[sectionId, meta] : _sections) {
-		if (meta->parentId) {
+		if (meta->parentId && (!root || (sectionId != root && contains(root, sectionId)))) {
 			result.push_back({
 				.title = (*meta->title)(tr::now),
+				.keywords = meta->keywords,
 				.section = sectionId,
 				.icon = { meta->icon },
 			});
 		}
 	}
 	for (const auto &entry : _indexers) {
+		if (root && !contains(root, entry.sectionId)) {
+			continue;
+		}
 		auto entries = entry.indexer(session);
 		result.insert(result.end(), entries.begin(), entries.end());
 	}
@@ -133,6 +139,17 @@ QString SearchRegistry::sectionPath(Type sectionId, bool parentsOnly) const {
 		parts.pop_back();
 	}
 	return parts.join(u" > "_q);
+}
+
+bool SearchRegistry::contains(Type root, Type section) const {
+	while (section) {
+		if (section == root) {
+			return true;
+		}
+		const auto it = _sections.find(section);
+		section = (it != _sections.end()) ? it->second->parentId : nullptr;
+	}
+	return false;
 }
 
 std::vector<SearchEntry> BuildHelper::index(
@@ -260,6 +277,9 @@ Ui::SettingsButton *SectionBuilder::addButton(ButtonArgs &&args) {
 			rpl::duplicate(args.title),
 			st,
 			std::move(args.icon));
+		if (const auto ctx = std::get_if<WidgetContext>(&_context); ctx && ctx->tabStops) {
+			button->setFocusPolicy(Qt::StrongFocus);
+		}
 		if (button && args.onClick) {
 			button->addClickHandler(std::move(args.onClick));
 		}
@@ -294,6 +314,7 @@ Ui::SettingsButton *SectionBuilder::addSectionButton(SectionArgs &&args) {
 	return addButton({
 		.title = std::move(args.title),
 		.icon = std::move(args.icon),
+		.label = std::move(args.label),
 		.onClick = [=] { showOther(target); },
 		.keywords = std::move(args.keywords),
 	});
