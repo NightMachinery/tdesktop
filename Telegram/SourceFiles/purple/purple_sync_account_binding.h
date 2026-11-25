@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "purple/purple_sync_local_state.h"
 
+#include <rpl/producer.h>
+
 #include <cstdint>
 
 namespace Main {
@@ -19,6 +21,7 @@ class Session;
 namespace Purple {
 
 [[nodiscard]] QByteArray AccountSyncBindingToken(Main::Account &account);
+[[nodiscard]] rpl::producer<> AccountSyncBindingChanges();
 [[nodiscard]] SyncAccountBindingVerdict CheckAccountSyncBinding(
 	const SyncLocalState &state,
 	Main::Account &account);

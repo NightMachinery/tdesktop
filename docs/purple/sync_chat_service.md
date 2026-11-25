@@ -80,6 +80,14 @@ happens before automatic sync or first-use review reads the account store.
 This lets a newly logged-in device join that chat without a pre-existing
 `state.json` or automatic-sync record.
 
+Chat discovery and settings linking are separate. Automatic sync is opt-in.
+A verified Magic binding with an absent settings state, no pending records and
+no account binding token shows **Not linked to sync** in **Accounts, files &
+sync**. The row stays visible while offline and offers **Join** for that
+account. A launch can show one notice. Store and chat errors keep their own
+status. The Join review checks the selected chat and waits for confirmation
+before initializing the settings link.
+
 Older cache writes used ordinary directory defaults, which could leave a
 `0755` directory containing only `chat.json`. Recovery discovery rejected it
 before reviewing any cloud records; manual Check could consequently report an

@@ -16,6 +16,7 @@
     },
     "purple/test_cases.py": {
       "chat-palette": "Telegram/SourceFiles/purple/tests/chat_palette_cases.cpp",
+      "sync-merge": "Telegram/SourceFiles/purple/tests/sync_merge_cases.cpp",
       "copy-article": "Telegram/SourceFiles/purple/tests/copy_article_cases.cpp",
       "peek-file": "Telegram/SourceFiles/purple/tests/peek_file_cases.cpp",
       "peek-admission": "Telegram/SourceFiles/purple/tests/peek_admission_cases.cpp",
@@ -58,6 +59,13 @@
       "compiles": true,
       "args": ["--case", "chat-palette", "--build-dir", "{build}", "--output-dir", "{out}"],
       "fixtures": ["Telegram/SourceFiles/purple/tests/chat_palette_cases.cpp"]
+    },
+    {
+      "name": "test_sync_merge",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": ["--case", "sync-merge", "--build-dir", "{build}", "--output-dir", "{out}"],
+      "fixtures": ["Telegram/SourceFiles/purple/tests/sync_merge_cases.cpp"]
     },
     {
       "name": "test_modal_keys_routes",

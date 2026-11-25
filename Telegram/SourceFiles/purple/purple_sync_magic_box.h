@@ -19,6 +19,7 @@ void ShowSyncMagicProblemOnce(
 	std::shared_ptr<Ui::Show> show);
 // Shows a new problem once in the active window of that session, linking to the Sync chat box.
 void ToastSyncMagicProblem(not_null<Main::Session*> session);
+void NoticeUnlinkedSyncSettings(not_null<Main::Session*> session);
 
 void SyncMagicChatBox(
 	not_null<Ui::GenericBox*> box,

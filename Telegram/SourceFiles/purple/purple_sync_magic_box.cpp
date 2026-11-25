@@ -15,6 +15,7 @@
 #include "purple/purple_privacy_screen.h"
 #include "purple/purple_sync_magic_service.h"
 #include "purple/purple_sync_magic_telegram.h"
+#include "purple/purple_sync_setup_box.h"
 #include "settings/settings_common.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
@@ -266,6 +267,37 @@ void ToastSyncMagicProblem(not_null<Main::Session*> session) {
 		.primaryAction = PurpleNoticeAction{
 			.label = tr::lng_purple_magic_problem_open(tr::now),
 			.run = openSettings,
+		},
+	});
+}
+
+void NoticeUnlinkedSyncSettings(not_null<Main::Session*> session) {
+	static auto shown = false;
+	const auto window = Core::App().activeWindow();
+	const auto controller = window ? window->sessionController() : nullptr;
+	if (shown || !controller || &controller->session() != session
+		|| !SyncMagicSettingsUnlinked(session)) {
+		return;
+	}
+	shown = true;
+	const auto weak = base::make_weak(session.get());
+	ShowPurpleNotice({
+		.session = session,
+		.window = &controller->window(),
+		.scope = u"Sync across devices"_q,
+		.summary = u"Not linked to sync. Settings edits stay on this device."_q,
+		.coalesceKey = u"sync:settings-unlinked"_q,
+		.severity = ModalNotices::NoticeSeverity::Warning,
+		.background = true,
+		.primaryAction = PurpleNoticeAction{
+			.label = u"Join"_q,
+			.run = [=](not_null<Window::Controller*> host) {
+				const auto own = host->sessionController();
+				if (own && &own->session() == weak.get() && !host->locked()
+					&& !PrivacyScreenActiveAny() && SyncMagicSettingsUnlinked(&own->session())) {
+					own->show(Box(SyncSetupBoxForAccount, &own->session()));
+				}
+			},
 		},
 	});
 }

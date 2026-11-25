@@ -19,5 +19,6 @@ struct SyncConfigApplyResult;
 void NoteAutomaticSyncApply(not_null<Main::Session*> session, const SyncConfigApplyResult &result);
 
 void SyncSetupBox(not_null<Ui::GenericBox*> box);
+void SyncSetupBoxForAccount(not_null<Ui::GenericBox*> box, Main::Session *preferred);
 
 } // namespace Purple

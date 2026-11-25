@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "purple/purple_config.h"
 #include "purple/purple_sync_config_text.h"
+#include "purple/purple_sync_merge.h"
 #include "settings/settings_common.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/generic_box.h"
@@ -54,6 +55,7 @@ struct ReviewBoxState {
 	Ui::FlatLabel *compare = nullptr;
 	Ui::SlideWrap<Ui::FlatLabel> *newer = nullptr;
 	Ui::SlideWrap<Ui::FlatLabel> *disclosure = nullptr;
+	Ui::SlideWrap<Ui::LinkButton> *merge = nullptr;
 	int selected = -1;
 	bool done = false;
 };
@@ -135,8 +137,11 @@ void SelectReviewOption(not_null<ReviewBoxState*> state, int index) {
 	const auto update = (review.plan.verdict == ConfigSyncVerdict::UpdateReady);
 	state->selected = index;
 	const auto key = state->keys[index];
+	const auto record = key ? OfferedRecord(review, *key) : nullptr;
+	if (state->merge) {
+		state->merge->toggle(record && !record->newerSchema, anim::type::instant);
+	}
 	if (key) {
-		const auto record = OfferedRecord(review, *key);
 		state->compare->setText(update
 			? u"Applying changes this device's settings like this:"_q
 			: u"If you use this version, this device's settings change like "
@@ -185,6 +190,112 @@ void SelectReviewOption(not_null<ReviewBoxState*> state, int index) {
 	state->impact->setText(impacts.join(u"\n\n"_q));
 	state->apply->setDisabled(!choice.impactReady);
 	state->confirmText = SyncConfigChoiceButtonText(review, key);
+}
+
+void ConfirmSettingsMerge(
+		not_null<Ui::GenericBox*> box,
+		AccountTransferReview replacement,
+		AccountListPreviewNotes listNotes,
+		Fn<void(AccountTransferReview)> apply) {
+	box->setTitle(rpl::single(u"Review merged settings"_q));
+	box->setWidth(st::boxWideWidth);
+	const auto container = box->verticalLayout();
+	AddLabel(container, replacement.destination.file.path);
+	AddLabel(container, u"Apply saves the merged file on this device. The original file, "
+		"including its comments and formatting, is kept in Settings History."_q);
+	if (replacement.impact.dangerous && replacement.context.role == ConfigImpactFileRole::Global) {
+		AddLabel(container, tr::lng_purple_transfer_global_warning(tr::now));
+	}
+	AddLabel(container, ConfigImpactDisplayText(replacement.impact));
+	AddChangePreview(container, std::move(listNotes))(
+		replacement.context.current.text, replacement.impact.proposedText);
+	box->addButton(rpl::single(u"Apply merge"_q), [=] {
+		const auto done = apply;
+		auto confirmed = replacement;
+		box->closeBox();
+		done(std::move(confirmed));
+	});
+	const auto cancel = box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	box->setFocusCallback([=] { cancel->setFocus(); });
+}
+
+void SettingsMergeBox(
+		not_null<Ui::GenericBox*> box,
+		SyncMergeReview review,
+		QString device,
+		AccountTransferReview replacement,
+		AccountListPreviewNotes listNotes,
+		Fn<void(AccountTransferReview)> apply) {
+	using Choice = SyncMergeChoice;
+	using Kind = SyncMergeDifference::Kind;
+	box->setTitle(rpl::single(u"Merge settings with %1"_q.arg(device)));
+	box->setWidth(st::boxWideWidth);
+	const auto container = box->verticalLayout();
+	AddLabel(container, u"Shared values are kept. Choose the values and list items to keep."_q);
+	const auto choices = box->lifetime().make_state<std::vector<Choice>>(
+		review.differences.size(), Choice::Unset);
+	for (auto i = size_t(0); i != review.differences.size(); ++i) {
+		const auto &row = review.differences[i];
+		Ui::AddSkip(container);
+		AddLabel(container, row.path);
+		if (!row.local.isEmpty()) {
+			AddLabel(container, u"This device\n%1"_q.arg(row.local))->setSelectable(true);
+		}
+		if (!row.remote.isEmpty()) {
+			AddLabel(container, u"%1\n%2"_q.arg(device, row.remote))->setSelectable(true);
+		}
+		if (row.kind == Kind::Addition) {
+			(*choices)[i] = Choice::Keep;
+			const auto keep = container->add(object_ptr<Ui::Checkbox>(
+				container, u"Keep this value"_q, true), st::boxRowPadding);
+			keep->checkedChanges() | rpl::on_next([=](bool checked) {
+				(*choices)[i] = checked ? Choice::Keep : Choice::Drop;
+			}, keep->lifetime());
+			continue;
+		}
+		const auto order = (row.kind == Kind::Order);
+		const auto group = std::make_shared<Ui::RadiobuttonGroup>(-1);
+		const auto add = [&](Choice value, const QString &label) {
+			container->add(object_ptr<Ui::Radiobutton>(
+				container, group, int(value), label, st::defaultCheckbox), st::boxRowPadding);
+		};
+		add(Choice::Local, order ? u"Use this device's order"_q : u"Use this device's value"_q);
+		add(Choice::Remote, order ? u"Use %1's order"_q.arg(device) : u"Use %1's value"_q.arg(device));
+		if (!order) {
+			add(Choice::Drop, u"Drop this setting"_q);
+		} else {
+			(*choices)[i] = Choice::Local;
+			group->setValue(int(Choice::Local));
+		}
+		group->setChangedCallback([=](int value) { (*choices)[i] = Choice(value); });
+	}
+	const auto status = AddLabel(container, QString());
+	box->addButton(rpl::single(u"Review merge"_q), [=] {
+		if (ranges::contains(*choices, Choice::Unset)) {
+			status->setText(u"Choose a value for each conflict before reviewing the merge."_q);
+			return;
+		}
+		const auto text = BuildSyncMerge(review, *choices);
+		if (!text || !SyncSettingsTextWritable(*text)) {
+			status->setText(u"The merged settings file is too large or could not be generated."_q);
+			return;
+		}
+		auto proposed = replacement;
+		proposed.context.proposed = { *text, true };
+		proposed.impact = AnalyzeConfigChange(proposed.context);
+		if (proposed.impact.status != ConfigImpactStatus::Ready) {
+			status->setText(tr::lng_purple_transfer_unavailable(tr::now));
+			return;
+		}
+		box->uiShow()->showBox(Box(ConfirmSettingsMerge, std::move(proposed), listNotes,
+			crl::guard(box, [=](AccountTransferReview confirmed) {
+				const auto done = apply;
+				box->closeBox();
+				done(std::move(confirmed));
+			})), Ui::LayerOption::KeepOther);
+	});
+	const auto cancel = box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	box->setFocusCallback([=] { cancel->setFocus(); });
 }
 
 } // namespace
@@ -292,7 +403,38 @@ void SyncConfigReviewBox(
 	});
 	Ui::AddSkip(container);
 	state->compare = AddLabel(container, QString());
-	state->preview = AddChangePreview(container, std::move(args.listNotes));
+	state->preview = AddChangePreview(container, args.listNotes);
+	if (!update && args.merge && review.local.status == SyncSettingsFileStatus::Present
+		&& !review.local.usingLastGood) {
+		state->merge = container->add(object_ptr<Ui::SlideWrap<Ui::LinkButton>>(
+			container, object_ptr<Ui::LinkButton>(container, u"Merge with this device"_q)),
+			st::boxRowPadding);
+		state->merge->hide(anim::type::instant);
+		state->merge->entity()->setClickedCallback([=, merge = std::move(args.merge), listNotes = std::move(args.listNotes)] {
+			if (state->selected < 0 || state->done) {
+				return;
+			}
+			const auto key = state->keys[state->selected];
+			const auto record = key ? OfferedRecord(state->review, *key) : nullptr;
+			const auto mergeReview = record && !record->newerSchema
+				? ReviewSyncMerge(state->review.local.text, record->text)
+				: std::nullopt;
+			if (!mergeReview) {
+				box->uiShow()->showToast(u"These settings have no mergeable differences, "
+					"use different schemas, or have too many differences to review."_q);
+				return;
+			}
+			box->uiShow()->showBox(Box(SettingsMergeBox, *mergeReview,
+				SyncDeviceName(*record), state->replacement, listNotes,
+				crl::guard(box, [=](AccountTransferReview confirmed) {
+					const auto done = merge;
+					const auto source = *key;
+					state->done = true;
+					box->closeBox();
+					done(source, std::move(confirmed));
+				})), Ui::LayerOption::KeepOther);
+		});
+	}
 	state->newer = AddHiddenLabel(
 		container,
 		u"Made with a newer Purple. Settings this version does not know "

@@ -25,6 +25,7 @@ struct SyncConfigReviewBoxArgs {
 	AccountListPreviewNotes listNotes;
 	AccountTransferReview replacement;
 	Fn<void(std::optional<QString>, AccountTransferReview)> choose;
+	Fn<void(QString, AccountTransferReview)> merge;
 };
 
 void SyncConfigReviewBox(

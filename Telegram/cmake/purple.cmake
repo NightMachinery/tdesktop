@@ -447,6 +447,8 @@ PRIVATE
     purple/purple_sync_local_store.h
     purple/purple_sync_review_box.cpp
     purple/purple_sync_review_box.h
+    purple/purple_sync_merge.cpp
+    purple/purple_sync_merge.h
     purple/purple_sync_setup_box.cpp
     purple/purple_sync_setup_box.h
     purple/purple_system_unlock.h
@@ -610,6 +612,7 @@ set_source_files_properties(
     ${purple_core_loc}/purple/purple_settings_edit.cpp
     ${purple_core_loc}/purple/purple_splice.cpp
     ${purple_core_loc}/purple/purple_state.cpp
+    ${src_loc}/purple/purple_sync_merge.cpp
     PROPERTIES INCLUDE_DIRECTORIES ${purple_core_loc}/tomlplusplus)
 
 include(${CMAKE_CURRENT_LIST_DIR}/purple_version.cmake)

@@ -24,6 +24,7 @@ void SyncMagicLookup(
 	not_null<Main::Session*> session);
 [[nodiscard]] PeerData *SyncMagicBoundPeer(not_null<Main::Session*> session);
 [[nodiscard]] bool SyncMagicPaused(not_null<Main::Session*> session);
+[[nodiscard]] bool SyncMagicSettingsUnlinked(not_null<Main::Session*> session);
 void SyncMagicJoin(not_null<Main::Session*> session, Fn<void(bool)> done);
 // The magic chat Purple's chat lists leave out; cheap enough for every row.
 [[nodiscard]] bool SyncMagicHidden(not_null<const PeerData*> peer);

@@ -124,6 +124,7 @@ struct SetupBoxState {
 	bool running = false;
 	bool publishing = false;
 	bool asking = false;
+	bool explicitJoin = false;
 	base::weak_ptr<Main::Session> firstUseSession;
 	std::optional<SyncFirstUseOutcome> firstUseOutcome;
 };
@@ -398,6 +399,12 @@ void RefreshFirstUseStatus(SetupBoxState &state) {
 		&& state.review->plan.verdict != ConfigSyncVerdict::Invalid;
 }
 
+[[nodiscard]] bool JoinsEmptyChat(const SetupBoxState &state) {
+	return state.explicitJoin && state.review && !state.review->bound
+		&& state.review->status == SyncConfigReviewStatus::Ready
+		&& state.review->plan.verdict == ConfigSyncVerdict::Empty;
+}
+
 // Choosing settings before joining would initialize a Saved Messages ledger for this chat.
 [[nodiscard]] bool UnboundTypedChoice(const SetupBoxState &state, const SyncConfigReview &review) {
 	return !review.bound && state.route && state.route->peer.chat != PeerToken{};
@@ -419,11 +426,14 @@ void ShowReview(
 		&& state.review->plan.verdict != ConfigSyncVerdict::Invalid) {
 		state.currentAction = Action::Join;
 	}
-	if (JoinsTypedChat(state)) {
+	const auto empty = JoinsEmptyChat(state);
+	if (JoinsTypedChat(state) || empty) {
 		state.currentAction = Action::Join;
 	}
 	++state.generation;
-	SetStatus(state, Joined(prefix, described.text));
+	SetStatus(state, Joined(prefix, empty
+		? u"This sync chat has no settings yet. Join now and publish when you are ready."_q
+		: described.text));
 }
 
 void StopForLostAccount(SetupBoxState &state) {
@@ -626,7 +636,7 @@ void RunAction(
 	if (action == Action::Join && !state->review->bound
 		&& ((state->review->local.status == SyncSettingsFileStatus::Absent
 			&& !state->review->local.usingLastGood && state->review->plan.offered.empty())
-			|| JoinsTypedChat(*state))) {
+			|| JoinsTypedChat(*state) || JoinsEmptyChat(*state))) {
 		auto inventory = *state->completed;
 		ClearReview(*state);
 		StartPublisher(box, state, std::move(inventory), {}, {},
@@ -709,6 +719,8 @@ void ConfirmAction(
 		? u"Join the sync space another device already uses in the selected chat? Nothing is "
 			"sent now. Check again afterwards to choose between its settings and this "
 			"device's. "_q + SyncCloudDisclosureText()
+		: (action == Action::Join && JoinsEmptyChat(*state))
+		? u"Join the selected sync chat? Nothing is sent now. "_q + SyncCloudDisclosureText()
 		: ConfirmText(action, *state->review);
 	box->uiShow()->showBox(Ui::MakeConfirmBox({
 		.text = Joined(text,
@@ -811,7 +823,7 @@ void OnInventory(
 			u"Sharing the chosen settings to the selected sync chat."_q);
 		return;
 	}
-	if (followup == CheckFollowup::None && FirstUse(box, state, result)) {
+	if (followup == CheckFollowup::None && !state->explicitJoin && FirstUse(box, state, result)) {
 		return;
 	}
 	auto recovery = InspectSyncAccountRecovery(*session, &result);
@@ -920,7 +932,8 @@ void ApplyChoice(
 		uint64_t generation,
 		std::optional<QString> key,
 		const AccountTransferReview &replacement,
-		bool prepared = false) {
+		bool prepared = false,
+		SyncConfigChoiceMode mode = SyncConfigChoiceMode::Version) {
 	if (!SelectedAvailable(*state)) {
 		StopForLostAccount(*state);
 		return;
@@ -938,7 +951,7 @@ void ApplyChoice(
 	}
 	if (!prepared && review.bound) {
 		PrepareApply(box, state, generation, [=] {
-			ApplyChoice(box, state, generation, key, replacement, true);
+			ApplyChoice(box, state, generation, key, replacement, true, mode);
 		});
 		return;
 	}
@@ -948,7 +961,9 @@ void ApplyChoice(
 		*state->completed,
 		review,
 		key,
-		&replacement);
+		&replacement,
+		nullptr,
+		mode);
 	const SyncConfigHeadRecord *record = nullptr;
 	for (const auto &head : review.plan.offered) {
 		if (key && head.key == *key) {
@@ -967,6 +982,12 @@ void ApplyChoice(
 		return;
 	}
 	auto prefix = applied.joined ? u"Joined sync."_q : QString();
+	if (mode == SyncConfigChoiceMode::Merge) {
+		ReviewAgain(*state, Joined(prefix, applied.wroteFile
+			? u"Merged settings saved on this device. The previous file is in History."_q
+			: u"The settings already match the reviewed merge."_q));
+		return;
+	}
 	if (applied.wroteFile) {
 		const auto msg = u"Settings updated from %1."_q.arg(device);
 		const auto boxShow = box->uiShow();
@@ -1027,6 +1048,11 @@ void OpenReview(not_null<Ui::GenericBox*> box, SetupBoxState *state) {
 			if (!origin || state->selectedSession.get() != origin.get()
 				|| !ValidateAccountSettingsOpenTarget(origin.get(), *target)) { return; }
 			ApplyChoice(box, state, generation, std::move(key), chosen);
+		}),
+		.merge = crl::guard(box, [=](QString key, AccountTransferReview chosen) {
+			if (!origin || state->selectedSession.get() != origin.get()
+				|| !ValidateAccountSettingsOpenTarget(origin.get(), *target)) { return; }
+			ApplyChoice(box, state, generation, std::move(key), chosen, false, SyncConfigChoiceMode::Merge);
 		}),
 	}));
 }
@@ -1163,6 +1189,10 @@ void NoteAutomaticSyncApply(not_null<Main::Session*> session, const SyncConfigAp
 }
 
 void SyncSetupBox(not_null<Ui::GenericBox*> box) {
+	SyncSetupBoxForAccount(box, nullptr);
+}
+
+void SyncSetupBoxForAccount(not_null<Ui::GenericBox*> box, Main::Session *preferred) {
 	box->setTitle(rpl::single(u"Sync across devices"_q));
 	box->setWidth(st::boxWideWidth);
 	const auto container = box->verticalLayout();
@@ -1174,6 +1204,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		st::boxRowPadding);
 
 	const auto state = box->lifetime().make_state<SetupBoxState>();
+	state->explicitJoin = preferred != nullptr;
 	SyncRequestChanges() | rpl::on_next([=](MTP::Instance *instance) {
 		const auto session = state->selectedSession.get();
 		if (session && &session->mtp() == instance && (state->publishing || state->running)) {
@@ -1187,7 +1218,9 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 	const auto &domain = Core::App().domain();
 	for (const auto &[index, account] : domain.accounts()) {
 		if (const auto session = account->maybeSession()) {
-			EnsureSyncChatResolved(session, true);
+			if (!preferred) {
+				EnsureSyncChatResolved(session, true);
+			}
 			const auto choice = int(state->choices.size());
 			state->choices.push_back({
 				base::make_weak(account.get()),
@@ -1204,11 +1237,15 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		}
 	}
 
-	if (state->choices.size() == 1) {
-		group->setValue(0);
-		state->selectedIndex = 0;
-		state->selectedAccount = state->choices[0].account;
-		state->selectedSession = state->choices[0].session;
+	const auto preferredIndex = ranges::find_if(state->choices, [=](const AccountChoice &choice) {
+		return preferred && choice.session.get() == preferred;
+	});
+	if (state->choices.size() == 1 || preferredIndex != end(state->choices)) {
+		const auto index = (state->choices.size() == 1) ? 0 : int(preferredIndex - begin(state->choices));
+		group->setValue(index);
+		state->selectedIndex = index;
+		state->selectedAccount = state->choices[index].account;
+		state->selectedSession = state->choices[index].session;
 	} else if (state->choices.size() > 1) {
 		container->add(
 			object_ptr<Ui::FlatLabel>(
@@ -1284,7 +1321,7 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 			container,
 			state->choices.empty()
 				? u"Sign in to an account to check the selected sync chat."_q
-				: state->choices.size() > 1
+				: state->selectedIndex < 0
 				? u"Select an account before checking."_q
 				: u"Ready to check the selected sync chat."_q,
 			st::boxLabel),
@@ -1408,6 +1445,13 @@ void SyncSetupBox(not_null<Ui::GenericBox*> box) {
 		}
 	});
 	RefreshButtons(*state);
+	if (state->explicitJoin && state->selectedSession.get() == preferred) {
+		crl::on_main(box, [=] {
+			if (state->selectedSession.get() == preferred && !Busy(*state)) {
+				StartCheck(box, state, CheckFollowup::None);
+			}
+		});
+	}
 
 	for (const auto &choice : state->choices) {
 		if (const auto account = choice.account.get()) {
