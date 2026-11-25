@@ -18,7 +18,7 @@ constexpr auto kPartSize = 1024 * 1024;
 constexpr auto kOne = ArchiveSqlExpectation::OneChange;
 constexpr auto kRows = ArchiveSqlExpectation::Rows;
 constexpr auto kMediaReasons = std::array{ u"policy_description_only", u"over_allowance", u"expired",
-	u"over_file_limit", u"copy_incomplete", u"quota_unreclaimable", u"disk_full", u"store_busy", u"no_source", u"transfer_failed" };
+	u"over_file_limit", u"copy_incomplete", u"quota_unreclaimable", u"disk_full", u"store_busy", u"no_source", u"transfer_failed", u"media_queue_full" };
 
 QByteArray Number(int64 number) {
 	auto bytes = QByteArray(8, Qt::Uninitialized);
@@ -403,7 +403,8 @@ std::optional<std::vector<MediaStatus>> Store::media(const MessageIdentity &iden
 		const auto descriptor = unseal(u"body", associated("media", key + Number(sequence)
 			+ Number(*ordinal) + *media + Number(*kind) + Number(*timed)), *sealed);
 		if (!descriptor) return std::nullopt;
-		auto item = MediaStatus{ *ordinal, *descriptor };
+		if (*kind < int(MediaKind::Photo) || *kind > int(MediaKind::Other)) return std::nullopt;
+		auto item = MediaStatus{ .ordinal = *ordinal, .description = *descriptor, .kind = MediaKind(*kind) };
 		if (Column<QByteArray>(row, 5)) {
 			const auto saved = savedBlob(key, sequence, *ordinal);
 			if (!saved) return std::nullopt;

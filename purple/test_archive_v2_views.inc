@@ -79,6 +79,28 @@ void HistoryAndCleanup() {
 	CHECK(!store.timeline(message.peer, false, cursor, 1));
 	const auto older = store.timeline(message.peer, true, cursor, 1);
 	CHECK(older && older->rows.size() == 1 && older->rows.front().identity != archive->rows.front().identity);
+	for (const auto transition : { Observation::Consume, Observation::Expire, Observation::Delete }) {
+		auto original = Sample(id);
+		original.identity.message += 20 + int(transition);
+		original.identity.peer.id += 20;
+		original.observedAt -= 2 * 86400;
+		CHECK(store.capture(original).committed);
+		auto attachment = SampleBlob(id, "Complete retained media for a terminal message");
+		attachment.identity = original.identity;
+		attachment.revision = options.lease->mediaRevision.load();
+		CHECK(store.writeBlob(attachment).committed);
+		original.event = transition;
+		original.eventId += "/terminal";
+		CHECK(store.capture(original).committed);
+		const auto timeline = store.timeline(original.identity.peer, true, {}, 64);
+		CHECK(timeline && std::ranges::any_of(timeline->rows, [&](const auto &row) { return row.identity == original.identity; }));
+		const auto history = store.history(original.identity, 0, 1);
+		CHECK(history && history->status != MessageStatus::Live && history->rows.size() == 1
+			&& history->rows[0].media.size() == 1 && history->rows[0].media[0].savedBytes == attachment.size);
+		auto bytes = QByteArray();
+		CHECK(store.readSaved(id, original.identity, 1, 0, [&](const QByteArray &part) { bytes += part; return true; }));
+		CHECK(bytes == "Complete retained media for a terminal message");
+	}
 	const auto trash = store.prepareCleanup(CleanupKind::DeletedMessages, message.peer);
 	CHECK(trash);
 	if (!trash) return;
@@ -270,9 +292,11 @@ void PendingBytesAndMediaOutcome() {
 		&& described->front().reason == u"copy_incomplete"_q);
 	store.noteMediaFailure(incomplete, u"transfer_failed");
 	CHECK(store.media(event.identity, 1)->front().reason == u"transfer_failed"_q);
+	store.noteMediaFailure(incomplete, u"media_queue_full");
+	CHECK(store.media(event.identity, 1)->front().reason == u"media_queue_full"_q);
 	++incomplete.revision;
 	store.noteMediaFailure(incomplete, u"expired");
-	CHECK(store.media(event.identity, 1)->front().reason == u"transfer_failed"_q);
+	CHECK(store.media(event.identity, 1)->front().reason == u"media_queue_full"_q);
 	const auto reset = ConfirmReset(store, id);
 	CHECK(reset.committed && reset.reason == u"cleanup_pending"_q);
 	const auto pending = store.pendingBytes();

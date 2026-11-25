@@ -80,6 +80,7 @@ struct MediaStatus {
 	QByteArray description;
 	int64 savedBytes = 0;
 	QString reason;
+	MediaKind kind = MediaKind::Other;
 };
 
 struct HistoryVersion {

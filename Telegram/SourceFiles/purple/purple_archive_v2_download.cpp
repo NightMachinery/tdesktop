@@ -103,21 +103,27 @@ BlobInput Input(const Download &job) {
 		job.request.size, {}, target.source, {}, target.timed };
 }
 
+void RecordFailure(Main::Session *session, const MediaRequest &request, QString reason) {
+	const auto target = request.target;
+	(void)Query(session, [=](Store &store) {
+		const auto sequence = target.sequence ? std::optional(target.sequence)
+			: store.mediaSequence(target.message, target.source, target.timed);
+		if (sequence) store.noteMediaFailure({
+			target.store.isEmpty() ? store.id() : target.store, target.revision, target.message,
+			*sequence, target.ordinal, request.size, {}, target.source, {}, target.timed,
+		}, reason);
+	});
+	crl::async([=] {
+		auto attention = Attention();
+		(void)LogIncident(attention, IncidentStage::WholeFile, reason, false, target.kind, 1, request.size);
+	});
+}
+
 void CompletedMain(Main::Session *session, const std::shared_ptr<Download> &job, std::optional<BlobInput> input,
 		QString reason = u"copy_incomplete"_q) {
 	if (job->current(session) && job->request.target.sequence > 0) {
 		if (input) reason = QueueBlob(session, std::move(*input)).reason;
-		if (!reason.isEmpty()) {
-			const auto failure = Input(*job);
-			const auto kind = job->request.target.kind;
-			(void)Query(session, [=](Store &store) {
-				store.noteMediaFailure(failure, reason);
-			});
-			crl::async([=] {
-				auto attention = Attention();
-				(void)LogIncident(attention, IncidentStage::WholeFile, reason, false, kind, 1, failure.size);
-			});
-		}
+		if (!reason.isEmpty()) RecordFailure(session, job->request, std::move(reason));
 	}
 	Forget(session, job);
 }
@@ -264,9 +270,10 @@ void ObserveArchiveAttachment(not_null<HistoryItem*> item, bool explicitOpen) {
 		job->cancel();
 		return true;
 	});
-	if (jobs.size() == kMediaQueue || std::any_of(jobs.begin(), jobs.end(), [&](const auto &job) {
+	if (std::any_of(jobs.begin(), jobs.end(), [&](const auto &job) {
 		return job->request.target.message == identity && job->request.target.source == request.target.source;
 	})) return;
+	if (jobs.size() >= kMediaQueue) return RecordFailure(session, request, u"media_queue_full"_q);
 	const auto job = std::make_shared<Download>();
 	job->request = std::move(request);
 	job->lease = lease;
