@@ -12,7 +12,7 @@
   "SPC"   "leader"
   "SPC b" "buffer / chat"
   "SPC f" "files"
-  "SPC f e" "edit"
+  "SPC f e" "edit settings"
   "SPC o" "open"
   "SPC n" "new"
   "SPC p" "playback"

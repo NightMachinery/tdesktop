@@ -289,23 +289,63 @@ rules. The operating system may separately hide previews on its lock screen.
 ## Customize settings on Desktop
 
 Open **Settings > Purple > Customize settings…**. With modal keys enabled,
-use `SPC f e d` or the command palette’s `customize-settings` command.
-Filter by setting, source or scope. Select a row to see its effective value,
-default, write destination, and physical values from the captured files.
+use `SPC f e d` or `:customize-settings`. The Settings button also works
+with modal keys off. The editor opens for the account in the active,
+unlocked window. **Account** (or `A`) opens a signed-in account's own
+window and prompts about staged changes before switching.
 
-Scalar and collection forms stage changes in memory. Open an array or named
-collection to add, duplicate, remove, or reorder entries. Chat selectors use
-the settings source's account and accept typed records when that source is
-offline. Use `u` or **Undo** to reverse a staged change.
+Filter by setting, TOML path, source, or scope. Select a row to see the
+effective value, its default, where an edit will write, and the physically
+stored values from the captured files. A value may be inherited or inactive
+under the current account routing. The inspector distinguishes those cases.
 
-Use `d` or **Review** to inspect effects and file lines before applying a
-draft. Each review has one destination. Peek changes continue through the
-existing countdown. If an outside edit changes the source, compare the draft
-with the current file. **Reload and review** replays compatible edits against
-the new bytes. A parse error offers a recovery view and a read-only retry.
+Open a row to edit it. Scalar forms and supported arrays and named tables
+stage changes in memory. Collections offer the controls their format supports,
+such as adding, duplicating, removing, and reordering items. The chat picker
+searches eligible local chats for the account that owns the destination file.
+Use a typed peer record when that account is signed out or the needed peer is
+absent from the picker. Use **Undo** or `u` to reverse a staged edit.
 
-The `core/application.cpp` hook reserves keyboard events for the Customize
-layer so native edits and input-method composition stay in the active field.
+When renaming or removing a named list, list set, folder set, or preset,
+review its recognized references in the destination file and any other routed
+file captured at opening. The preview includes stored member tables, even
+when Follow mode ignores them. Removal with same-file references asks for a
+replacement name. The editor repairs recognized references in the destination
+file. Update references in other files separately.
+
+Choose **Review** (`d`) to read the draft's **Effects** and **Lines**. Check
+the destination path, the before and after lines, and any warnings. **Apply
+changes** uses the guarded writer for that destination. Consequential changes
+ask for confirmation. Peek changes use the existing countdown and Peek
+confirmation. A successful local write gives feedback in Customize. If the
+primary file was saved and its last-good copy could not be refreshed, the
+editor reports both outcomes.
+
+If a source changes on disk, the conflict view compares the opening file,
+current file, and draft when that destination is still available. **Reload
+and review** replays edits when their routes and reviewed dependencies agree.
+If the edit overlaps a disk change or a checked reference changed, discard
+the draft and edit again against the fresh source. For invalid TOML, use the
+recovery view to find the offending location and see whether effective values
+come from a last-good copy. Repair the file in a text editor and select
+**Retry after repair**.
+
+### Known limits
+
+- Each Apply uses one guarded writer for one destination. Review changes for
+  other destinations separately.
+- Reference checks cover the destination and any admitted routed counterpart.
+  Other accounts' files are not checked. The editor reports a missing,
+  unreadable, or invalid counterpart and identifies use of a last-good copy.
+- Some TOML layouts or setting operations have no safe splice. The editor
+  reports those as unsupported. An incomplete trace means some effective reads
+  could not be verified.
+- Chat results come from local data. Signed-out sources and unresolved IDs use
+  the typed record field on supported peer lists. The picker performs no
+  network search.
+
+See [Customize keys](keys.md#customize-settings) for navigation and editing
+shortcuts.
 
 ## Typed Desktop editing backend
 

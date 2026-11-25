@@ -68,7 +68,8 @@ def bound(action, chord, text=defaults):
 bound("CustomizeSettings", "SPC f e d")
 bound("OpenCalls", "SPC o p")
 assert len(re.findall(r'"SPC f e d"\s+:', defaults)) == 1
-assert re.search(r'"SPC f e"\s+"edit"', defaults)
+assert re.search(r'"SPC f e"\s+"edit settings"', defaults)
+assert 'pushRow(leader.rows, rowFor(Action::CustomizeSettings))' in keys
 assert command_ids["CustomizeSettings"] == "customize-settings"
 ordered(keys, "case Action::CustomizeSettings:", "ShowCustomizeSettings")
 ordered(keys, ".onPick = [guard", "Available(action, restoredTarget)", "guard->dispatch(action, restored, 1)")

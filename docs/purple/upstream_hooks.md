@@ -17,10 +17,13 @@ the numbers.
 
 - `core/application.cpp` and `.h`: key admission, shortcut override, paired key
   release, window deactivation, and IME hooks delegate to Purple's per-window
-  state. The Customize filter lets its focused controls handle text and IME
-  input ahead of global chat shortcuts. Shortcut override also lets focused, editable playlist rows claim
-  Alt+Up/Down. The playlist hook accepts delivery through the owning native
-  window on macOS. While Purple's privacy screen is active, `unreadBadge()`
+  state. The Customize hook in `Application::eventFilter()` routes key
+  presses, releases, shortcuts, and IME events for its controls through the
+  Purple filter before global chat shortcuts. Focused fields retain native
+  editing and IME composition. Key presses still update idle state and emit
+  the usual activity event. Shortcut override also lets focused, editable
+  playlist rows claim Alt+Up/Down. The playlist hook accepts delivery through
+  the owning native window on macOS. While Purple's privacy screen is active, `unreadBadge()`
   reports 0, `unreadBadgeChanges()` merges privacy transitions, `tg://` URLs
   and separate-window navigation are gated, new windows inherit the privacy
   overlay, and `closeMediaViewAndPanelsForPrivacy()` closes media view and call
@@ -993,7 +996,9 @@ near 2. Owners: B11 (two mute lines), then B7.
 **`Telegram/SourceFiles/settings/sections/settings_advanced.cpp`** no longer
 includes or builds the Purple controls. `purple/purple_settings_section.cpp`
 owns a stock Settings section, its title, navigation factory and search metadata.
-The existing Purple rows keep their identifiers and behavior.
+The Desktop Customize entry lives in that section and opens the same Purple
+layer as the modal command. The editor and its guarded writers live under
+`Telegram/SourceFiles/purple/`.
 
 **`Telegram/SourceFiles/settings/sections/settings_chat.cpp`**, owner B9:
 - The dash search entry and checkbox move behind two Purple facade calls.

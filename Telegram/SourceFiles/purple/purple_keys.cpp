@@ -3664,11 +3664,12 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		auto leader = ModalUi::HelpSection{ .title = u"LEADER (SPC)"_q };
 		pushRow(leader.rows, rowFor(Action::Run, u"M-x command palette"_q));
 		pushRow(leader.rows, rowFor(Action::ChatPalette, u"Switch chat (palette)"_q, 1));
+		pushRow(leader.rows, rowFor(Action::CustomizeSettings));
 		// Dynamically derive all SPC prefix groups from the live keymap (including SPC s and SPC t).
 		auto seenPrefixKeys = QSet<int>();
 		auto livePrefixes = std::vector<int>();
-		const std::array<int, 9> preferredOrder = {
-			Qt::Key_B, Qt::Key_O, Qt::Key_N, Qt::Key_P,
+		const std::array<int, 10> preferredOrder = {
+			Qt::Key_B, Qt::Key_F, Qt::Key_O, Qt::Key_N, Qt::Key_P,
 			Qt::Key_S, Qt::Key_T, Qt::Key_W, Qt::Key_A, Qt::Key_H,
 		};
 		for (const auto &b : effective) {

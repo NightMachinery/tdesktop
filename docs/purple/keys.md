@@ -54,7 +54,7 @@ status line and swallows the next keystroke.
 
 Every command has a canonical home in a Doom-aligned `SPC` leader group, a Vim
 prefix (`g`, `y`, `[`, `]`, `C-w`), or a localleader context map (`,` / `SPC m`),
-with at most three strokes per chord:
+with at most four strokes per chord:
 
 - **Navigate:** `j` / `k` move the chat cursor (in the chat list) or scroll the
   conversation (in a chat), repeatable with counts (`5j`). `J` / `K` (`C-j` /
@@ -135,6 +135,31 @@ with at most three strokes per chord:
   messages), highlighting matches in both the title and the category/command-id
   subtitle alongside right-aligned live keycaps. Navigate with `C-n`/`C-p`,
   `C-j`/`C-k`, arrows, or `Tab`/`S-Tab`; step input history with `M-p`/`M-n`.
+
+## Customize settings
+
+In Normal mode, press `SPC f e d` or run `:customize-settings` in the
+command palette. Which-key shows **files** after `SPC f`, **edit settings**
+after `SPC f e`, and **Customize Purple settings** on `d`. The cheatsheet
+and binding reference use your active keymap. **Settings > Purple >
+Customize settings…** also opens the editor with modal keys off.
+
+- In the tree, `j` / `k` move between rows, `h` / `l` fold or enter,
+  and `/` filters. Press `F6` to change panels and `?` for editor help.
+- Press `Return` to edit, `t` to toggle a boolean, `+` / `-` to step
+  a number, `r` to reset, and `y` to copy the TOML path. **Account** or
+  `A` selects a signed-in account.
+- Use `Ctrl+Return` to submit a form. In a multiline field, `Return`
+  inserts a newline. The focused field keeps its native text editing keys.
+- In a collection, `a` adds, `Shift+D` duplicates, `x` removes, and
+  `Shift+J` / `Shift+K` reorder where supported. In the chat picker,
+  `/` focuses search and `Space` adds the selected chat.
+- Use `u` to undo staged edits and `d` to review them. In **Lines**,
+  `[` / `]` page through the review when the diff has focus. **Apply
+  changes** is a separate action. `Esc` backs out and asks before
+  discarding typed or staged changes where applicable.
+
+See [Customize settings in the configuration guide](config.md#customize-settings-on-desktop).
 
 ## Custom bindings (`keys.edn`)
 

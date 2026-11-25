@@ -41,10 +41,13 @@ int main() {
 	Check(ActionAt(defaults, u"SPC f e d"_q) == Action::CustomizeSettings, "Customize default");
 	Check(ActionAt(defaults, u"SPC o p"_q) == Action::OpenCalls, "Calls keeps its default");
 	Check(FindActionById(u"customize-settings"_q) == Action::CustomizeSettings, "palette catalog resolves command");
+	const auto editPrefix = std::pair{ MapKind::Normal, ParseChord(u"SPC f e"_q, MapKind::Normal) };
+	Check(defaults.labels[editPrefix] == u"edit settings"_q, "which-key names the settings prefix");
 	auto user = defaults;
 	Check(ParseEdnOverlay(
-		R"({:normal {"SPC f e d" :open-settings "SPC f e u" :customize-settings}})",
+		R"({:normal {"SPC f e" "my settings" "SPC f e d" :open-settings "SPC f e u" :customize-settings}})",
 		user, true, error), "user replaces a default and adds a new four-stroke binding");
+	Check(user.labels[editPrefix] == u"my settings"_q, "which-key accepts a custom prefix label");
 	Check(ActionAt(user, u"SPC f e d"_q) == Action::OpenSettings
 		&& ActionAt(user, u"SPC f e u"_q) == Action::CustomizeSettings
 		&& ActionAt(user, u"SPC o p"_q) == Action::OpenCalls, "overlay wins and Calls stays reachable");

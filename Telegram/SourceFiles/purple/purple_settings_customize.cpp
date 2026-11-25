@@ -1529,7 +1529,12 @@ private:
 		if (row && !row->help.isEmpty()) addSheetWidget(Label(_sheet, row->help));
 		addSheetWidget(Label(_sheet, u"j / k Move · h / l Fold or enter · / Filter · Return Edit\n"
 			"t Toggle · + / − Step · r Reset · u Undo · d Review · y Copy TOML path\n"
-			"F6 Change panel · Esc Back\nEdits are staged in memory."_q));
+			"A Switch account · F6 Change panel · Esc Back"_q));
+		addSheetWidget(Label(_sheet, u"Forms · Ctrl+Return Stage. Return inserts a newline in multiline fields.\n"
+			"Collections · a Add · Shift+D Duplicate · x Remove · Shift+J/K Reorder · u Undo\n"
+			"Chat picker · / Search · Space Add the selected chat"_q));
+		addSheetWidget(Label(_sheet, u"Review · Effects shows what changes. Lines shows the file diff. "
+			"Use [ / ] to page through Lines while it has focus. Apply changes writes this draft to one file."_q));
 		const auto close = Button(_sheet, u"Back"_q);
 		addSheetWidget(close);
 		connect(close, &QPushButton::clicked, this, [this] { returnToTree(); });
