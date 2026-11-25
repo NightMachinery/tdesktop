@@ -5,6 +5,7 @@
 #include "purple/purple_settings_review_display.h"
 
 #include <QtCore/QDir>
+#include <QtCore/QSet>
 #include <QtGui/QKeyEvent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QHBoxLayout>
@@ -576,9 +577,10 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 			host.show();
 			memberLists.front()->setFocus();
 			QApplication::processEvents();
+			Check(host.focusWidget() == memberLists.front(), "Members list starts focused");
 			auto reached = QSet<QWidget*>();
 			for (auto i = 0; i != 32; ++i) {
-				const auto focus = QApplication::focusWidget();
+				const auto focus = host.focusWidget();
 				if (!focus) break;
 				if (std::find(memberActions.begin(), memberActions.end(), focus) != memberActions.end()) {
 					const auto visible = QRect(focus->mapTo(scroll->viewport(), QPoint()), focus->size());
@@ -588,6 +590,9 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 				auto tab = QKeyEvent(QEvent::KeyPress, Qt::Key_Tab, Qt::NoModifier);
 				QApplication::sendEvent(focus, &tab);
 				QApplication::processEvents();
+			}
+			if (reached.size() != qsizetype(memberActions.size())) {
+				std::cerr << "Reached " << reached.size() << " Members actions\n";
 			}
 			Check(reached.size() == qsizetype(memberActions.size()), "Tab reaches every Members action");
 			host.hide();
