@@ -1,4 +1,5 @@
 #include "purple/purple_keys_ui.h"
+#include "purple/purple_hint_targets.h"
 
 #include "purple/purple_keys.h"
 #include "purple/purple_keys_colors.h"
@@ -2745,7 +2746,7 @@ private:
 // TopicPickerLayer (Forum Groups & Threaded Bots)
 // ---------------------------------------------------------------------------
 
-class TopicRowsWidget final : public Ui::RpWidget {
+class TopicRowsWidget final : public Ui::RpWidget, public WindowHintSource {
 public:
 	TopicRowsWidget(
 		not_null<QWidget*> parent,
@@ -2761,6 +2762,31 @@ public:
 
 	static constexpr int kRowHeight = 44;
 	static constexpr int kMoreRowHeight = 34;
+
+	void collectWindowHints(const QRect &clip, std::vector<WindowHintTarget> &out) override {
+		const auto guard = QPointer(this);
+		const auto origin = mapToGlobal(QPoint());
+		for (auto row = 0; row < int(_visible.size()); ++row) {
+			const auto geometry = QRect(0, 4 + row * kRowHeight, width(), kRowHeight);
+			const auto bounds = geometry.translated(origin).intersected(clip);
+			if (bounds.isEmpty()) {
+				continue;
+			}
+			const auto topic = _items[_visible[row]].rootId;
+			out.push_back({
+				.widget = this,
+				.bounds = bounds,
+				.name = _items[_visible[row]].title,
+				.current = [=] {
+					return guard && _session && row < int(_visible.size())
+						&& _items[_visible[row]].rootId == topic
+						&& geometry.translated(mapToGlobal(QPoint()))
+							.intersected(WindowHintClip(this)) == bounds;
+				},
+				.activate = [=] { _onClick(row); },
+			});
+		}
+	}
 
 	void setData(
 			const std::vector<TopicItem> &items,

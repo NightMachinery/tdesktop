@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 class DeleteMessagesBox;
 
 namespace Purple {
+class HintMediaRows;
 struct ImportSettingsHit;
 struct ImportSettingsViewState;
 } // namespace Purple
@@ -78,6 +79,8 @@ class ListWidget final
 	: public Ui::RpWidget
 	, public Overview::Layout::Delegate
 	, public Ui::AbstractTooltipShower {
+	friend class Purple::HintMediaRows;
+
 public:
 	ListWidget(
 		QWidget *parent,

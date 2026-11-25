@@ -35,6 +35,10 @@ namespace MTP {
 class Error;
 } // namespace MTP
 
+namespace Purple {
+class HintDialogRows;
+} // namespace Purple
+
 namespace Lottie {
 class Icon;
 } // namespace Lottie
@@ -268,6 +272,7 @@ public:
 	int accessibilityChildIndexByIdentity(quintptr identity) const override;
 	void accessibilityChildSetFocus(quintptr identity) override;
 	void accessibilityChildActivate(quintptr identity) override;
+	friend class Purple::HintDialogRows;
 
 protected:
 	void visibleTopBottomUpdated(

@@ -210,6 +210,9 @@ PRIVATE
     purple/purple_privacy_state.h
     purple/purple_privacy_weather.h
     purple/purple_message_hint_placement.h
+    purple/purple_hint_labels.h
+    purple/purple_hint_targets.cpp
+    purple/purple_hint_targets.h
     purple/purple_message_hints.cpp
     purple/purple_message_hints.h
     purple/purple_instant_replaces.cpp
