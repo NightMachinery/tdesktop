@@ -326,35 +326,38 @@ object_ptr<Ui::RpWidget> MakeMusicViewControl(
 	const auto title = Ui::CreateChild<Ui::FlatLabel>(
 		group, tr::lng_purple_music_tracks(), st::purpleMusicTitle);
 	const auto toggle = Ui::CreateChild<Ui::RpWidget>(group);
-	const auto mode = group->lifetime().make_state<rpl::variable<bool>>();
-	std::move(tiles) | rpl::on_next([=](bool isTiles) {
-		*mode = isTiles;
-	}, group->lifetime());
-	const auto forView = [&](bool targetTiles) -> MusicKeyHint {
-		return rpl::combine(mode->value(), rpl::duplicate(keys)) | rpl::map(
-			[=](bool isTiles, const QStringList &caps) {
-				return isTiles == targetTiles ? QStringList() : caps;
-			});
-	};
+	const auto hint = Ui::CreateChild<KeyHint>(toggle, keys, toggle);
 	const auto list = Ui::CreateChild<MusicActionButton>(
-		toggle, tr::lng_purple_music_list(), forView(false), [=] { select(false); });
+		toggle, tr::lng_purple_music_list(), rpl::single(QStringList()), [=] { select(false); });
 	const auto grid = Ui::CreateChild<MusicActionButton>(
-		toggle, tr::lng_purple_music_tiles(), forView(true), [=] { select(true); });
+		toggle, tr::lng_purple_music_tiles(), rpl::single(QStringList()), [=] { select(true); });
+	toggle->paintRequest() | rpl::on_next([=] {
+		auto p = Painter(toggle);
+		auto quality = PainterHighQualityEnabler(p);
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::windowBgOver);
+		const auto radius = st::purpleMusicCoverRadius;
+		p.drawRoundedRect(toggle->rect(), radius, radius);
+	}, toggle->lifetime());
 	const auto gap = st::purpleMusicShortcutGap;
 	group->setFixedHeight(std::max(list->height(), grid->height()));
 	const auto place = [=] {
 		const auto height = group->height();
-		const auto width = list->width() + grid->width() + gap;
+		const auto shortcut = hint->width();
+		const auto width = list->width() + grid->width() + gap
+			+ (shortcut ? shortcut + 2 * gap : 0);
 		toggle->resize(width, height);
 		toggle->moveToRight(0, 0);
 		list->moveToLeft(0, (height - list->height()) / 2);
 		grid->moveToLeft(list->width() + gap, (height - grid->height()) / 2);
+		hint->moveToRight(gap, (height - hint->height()) / 2);
 		title->resizeToNaturalWidth(std::max(1, group->width() - width - gap));
 		title->moveToLeft(0, (height - title->height()) / 2);
 	};
-	rpl::combine(group->widthValue(), list->naturalWidthValue(), grid->naturalWidthValue())
-		| rpl::on_next(place, group->lifetime());
-	mode->value() | rpl::on_next([=](bool isTiles) {
+	rpl::combine(group->widthValue(), list->naturalWidthValue(),
+		grid->naturalWidthValue(), hint->widthValue()
+	) | rpl::on_next(place, group->lifetime());
+	std::move(tiles) | rpl::on_next([=](bool isTiles) {
 		const auto brush = std::optional<QBrush>(st::windowBgRipple->b);
 		list->setBrushOverride(isTiles ? std::nullopt : brush);
 		grid->setBrushOverride(isTiles ? brush : std::nullopt);
