@@ -268,6 +268,8 @@ on the modal status line and cheatsheet footer.
   Enter the orderless filter with `i`, `a`, or `/`. The status line shows
   `INSERT` while typing and `UNREAD` in the list. `RET` opens the selected chat
   from either focus. The selection follows the chat as results narrow or move.
+  If it is filtered out, the highlighted row moves to a nearby result.
+  Clearing the query returns to the original chat if it is still listed.
   In the list, navigate with `j`/`k`, `C-n`/`C-p`, `g g`, or `G`, refresh with
   `g r`, mark with `m` / `u` / `U` / `t` / `* d` / `* g` / `* c`, open with `o`,
   and mark read with `r` or `x`. Marking more than one
@@ -340,6 +342,8 @@ on the modal status line and cheatsheet footer.
   still use the status line or a toast. `SPC h e` reopens recent
   per-account notices in a memory-only `*Messages*` list that clears on logout
   and is unavailable while passcode-locked or under the privacy screen.
+  Filtering keeps the selected notice in view when possible. Clearing the
+  query returns to the original notice.
   Archive removal warnings contain no account details and are shared across
   accounts, including after logout. Clearing the displayed history also
   clears its pending notices. Passcode lock, screen lock, and the privacy

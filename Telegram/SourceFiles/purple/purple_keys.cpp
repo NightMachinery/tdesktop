@@ -2964,25 +2964,33 @@ void Keys::showUnreadBuffer(const Target &target) {
 			return std::vector<ModalUnread::BufferItem>();
 		},
 		.onOpenChat = [guard, weakCtrl](PeerId peerId) {
+			if (!guard) {
+				return;
+			}
 			QTimer::singleShot(0, guard.data(), [guard, weakCtrl, peerId] {
 				const auto ctrl = weakCtrl.get();
-				if (!guard || !ctrl || !Enabled()
+				if (!guard || !ctrl || !Enabled() || guard->owner() != ctrl
+					|| Core::App().passcodeLocked()
 					|| Purple::PrivacyScreenActive(guard->_window)) {
 					return;
 				}
-				if (const auto peer = ctrl->session().data().peerLoaded(peerId)) {
+				if (const auto peer = ctrl->session().data().peerLoaded(peerId)
+					; peer && PickerVisible(peer)) {
 					ctrl->showPeerHistory(peer);
 				}
 			});
 		},
-		.onMarkRead = [guard, sessionWeak](std::vector<PeerId> peerIds) {
-			const auto s = sessionWeak.get();
-			if (!s) {
+		.onMarkRead = [guard, weakCtrl](std::vector<PeerId> peerIds) {
+			const auto ctrl = weakCtrl.get();
+			if (!guard || !ctrl || !Enabled() || guard->owner() != ctrl
+				|| Core::App().passcodeLocked()
+				|| Purple::PrivacyScreenActive(guard->_window)) {
 				return;
 			}
+			auto &data = ctrl->session().data();
 			for (const auto peerId : peerIds) {
-				if (const auto peer = s->data().peerLoaded(peerId)) {
-					if (const auto history = s->data().historyLoaded(peer)) {
+				if (const auto peer = data.peerLoaded(peerId); peer && PickerVisible(peer)) {
+					if (const auto history = data.historyLoaded(peer)) {
 						MarkAsReadMenu::MarkAsReadThread(history);
 					}
 				}

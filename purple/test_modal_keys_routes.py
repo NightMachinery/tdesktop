@@ -170,7 +170,7 @@ unread = between(keys_ui, "class UnreadBufferLayer", "class TopicRowsWidget")
 ordered(unread, 'u"i or / to filter"_q', "_filter->submits()", "openRow(_selected)", "InstallListFilter")
 ordered(unread, "void keyPressEvent", "key == Qt::Key_Q", "closeLayer()", "_pendingConfirmTargets.empty()")
 ordered(unread, "_filter->hasFocus()", 'u"RET open · C-n/C-p move · Esc list"_q',
-        "ModalUnread::SelectedPeer", "ModalUnread::RefilteredSelection")
+        "ModalUnread::SelectedPeer", "_selection.refilter")
 notice_history = keys_ui[keys_ui.index("class NoticeHistoryLayer final"):]
 ordered(notice_history, "InstallListFilter(this, _filter", "ListFilter::Exit", "setFocus()",
         "void keyPressEvent", "ClearListFilterOrClose(this, _filter)", "ListFilter::Enter(*e, key)")
@@ -597,6 +597,16 @@ keys_ui = read("purple/purple_keys_ui.cpp")
 ordered(keys_ui, "class TopicPickerLayer final", "_config.actionLabel",
         "_topicAction->setClickedCallback", "Qt::Key_C && !mods && _topicAction", "openTopicAction()")
 ordered(keys_ui, "sends read receipts", "ModalUnread::NeedsMarkReadConfirmation", "executeMarkRead")
+unread_layer = between(keys_ui, "class UnreadBufferLayer final", "class TopicRowsWidget final")
+ordered(unread_layer, "void refilter(uint64_t selectedPeer)", "_selection.refilter(",
+        "_rows->setData", "syncSelection()", "void syncSelection()", "scrollToY(rowTop,")
+ordered(unread_layer, "void openRow(int row)",
+        "_config.items[_visible[row]].peerId", "cb(peerId)")
+notice_history = between(keys_ui, "class NoticeHistoryLayer final",
+                         "std::unique_ptr<Ui::LayerWidget> CreateNoticeHistoryLayer")
+ordered(notice_history, "void refilter()", "Identity(item.accountKey, item.id)", "_selection.refilter(",
+        "_rows->setData", "ensureSelectionVisible()", "void ensureSelectionVisible()", "scrollToY(rowTop,",
+        "void inspectRow(int row)", "_config.items[_visible[row]]", "cb(std::move(rec))")
 ordered(keys_ui, "paintUserpic")
 ordered(keys_ui, "class TopicPickerLayer final", "QTimer::timeout", "_config.pageUpdates",
         "_rootsBeforeLoad.contains", "QTimer::singleShot(0, this, [=] { maybeRequestMore(); })",

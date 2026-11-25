@@ -4,6 +4,7 @@
 #include "purple/purple_keys.h"
 #include "purple/purple_keys_colors.h"
 #include "purple/purple_list_filter_keys.h"
+#include "purple/purple_list_selection.h"
 
 #include "base/event_filter.h"
 #include "data/data_forum_topic.h"
@@ -2204,7 +2205,9 @@ protected:
 		if (_visible.empty()) {
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
-			p.drawText(rect(), Qt::AlignCenter, u"No unread unmuted chats match."_q);
+			p.drawText(rect(), Qt::AlignCenter, _items.empty()
+				? u"No unread unmuted chats."_q
+				: u"No unread unmuted chats match."_q);
 			return;
 		}
 
@@ -2678,12 +2681,17 @@ private:
 	}
 
 	void refilter(uint64_t selectedPeer) {
-		_visible = ModalUnread::FilterBufferItems(_config.items, _filter->getLastText());
-		_selected = ModalUnread::RefilteredSelection(_config.items, _visible, selectedPeer, _selected);
+		const auto query = _filter->getLastText();
+		_visible = ModalUnread::FilterBufferItems(_config.items, query);
+		_selected = _selection.refilter(
+			_visible,
+			selectedPeer ? std::make_optional(selectedPeer) : std::nullopt,
+			_selected,
+			!query.isEmpty(),
+			[&](int index) { return _config.items[index].peerId; });
 		if (_rows) {
 			_rows->setData(_config.items, _visible, _marked, _selected);
 		}
-		_scroll->scrollToY(0);
 		syncSelection();
 	}
 
@@ -2708,12 +2716,9 @@ private:
 		if (_rows) {
 			_rows->setSelectionAndMarks(_selected, _marked);
 		}
-		const auto rowTop = 4 + _selected * UnreadBufferRowsWidget::kRowHeight;
-		const auto rowBottom = rowTop + UnreadBufferRowsWidget::kRowHeight;
-		if (rowTop < _scroll->scrollTop()) {
-			_scroll->scrollToY(rowTop);
-		} else if (rowBottom > _scroll->scrollTop() + _scroll->height()) {
-			_scroll->scrollToY(rowBottom - _scroll->height());
+		if (_selected >= 0) {
+			const auto rowTop = 4 + _selected * UnreadBufferRowsWidget::kRowHeight;
+			_scroll->scrollToY(rowTop, rowTop + UnreadBufferRowsWidget::kRowHeight);
 		}
 		update();
 	}
@@ -2775,6 +2780,7 @@ private:
 	}
 
 	UnreadBufferConfig _config;
+	ListSelection<uint64_t> _selection;
 	std::vector<int> _visible;
 	QSet<uint64_t> _marked;
 	std::vector<PeerId> _pendingConfirmTargets;
@@ -4210,7 +4216,9 @@ protected:
 		if (_visible.empty()) {
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
-			p.drawText(rect(), Qt::AlignCenter, u"No notices recorded in this session."_q);
+			p.drawText(rect(), Qt::AlignCenter, _items.empty()
+				? u"No notices recorded in this session."_q
+				: u"No notices match the filter."_q);
 			return;
 		}
 
@@ -4518,8 +4526,18 @@ protected:
 	}
 
 private:
+	using Identity = std::pair<QString, uint64_t>;
+
 	void refilter() {
-		const auto tokens = ModalMx::ParseTokens(_filter->getLastText());
+		const auto query = _filter->getLastText();
+		const auto tokens = ModalMx::ParseTokens(query);
+		const auto identify = [this](int index) {
+			const auto &item = _config.items[index];
+			return Identity(item.accountKey, item.id);
+		};
+		const auto selected = (_selected >= 0 && _selected < int(_visible.size()))
+			? std::make_optional(identify(_visible[_selected]))
+			: std::nullopt;
 		_visible.clear();
 		for (auto i = 0; i < int(_config.items.size()); ++i) {
 			const auto &it = _config.items[i];
@@ -4535,11 +4553,12 @@ private:
 			}
 			_visible.push_back(i);
 		}
-		_selected = std::clamp(_selected, 0, std::max(0, int(_visible.size()) - 1));
+		_selected = _selection.refilter(
+			_visible, selected, _selected, !query.isEmpty(), identify);
 		if (_rows) {
 			_rows->setData(_config.items, _visible, _selected);
 		}
-		_scroll->scrollToY(0);
+		ensureSelectionVisible();
 		update();
 	}
 
@@ -4552,12 +4571,13 @@ private:
 		if (_rows) {
 			_rows->setSelected(_selected);
 		}
-		const auto rowTop = 4 + _selected * NoticeHistoryRowsWidget::kRowHeight;
-		const auto rowBottom = rowTop + NoticeHistoryRowsWidget::kRowHeight;
-		if (rowTop < _scroll->scrollTop()) {
-			_scroll->scrollToY(rowTop);
-		} else if (rowBottom > _scroll->scrollTop() + _scroll->height()) {
-			_scroll->scrollToY(rowBottom - _scroll->height());
+		ensureSelectionVisible();
+	}
+
+	void ensureSelectionVisible() {
+		if (_selected >= 0) {
+			const auto rowTop = 4 + _selected * NoticeHistoryRowsWidget::kRowHeight;
+			_scroll->scrollToY(rowTop, rowTop + NoticeHistoryRowsWidget::kRowHeight);
 		}
 	}
 
@@ -4575,6 +4595,7 @@ private:
 	}
 
 	NoticeHistoryConfig _config;
+	ListSelection<Identity> _selection;
 	std::vector<int> _visible;
 	Ui::IconButton *_close = nullptr;
 	Ui::InputField *_filter = nullptr;

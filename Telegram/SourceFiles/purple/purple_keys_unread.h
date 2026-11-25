@@ -176,18 +176,6 @@ enum class MarkOp {
 	return (row >= 0 && row < int(visible.size())) ? items[visible[row]].peerId : 0;
 }
 
-[[nodiscard]] inline int RefilteredSelection(
-		const std::vector<BufferItem> &items,
-		const std::vector<int> &visible,
-		uint64_t peer,
-		int previousRow) {
-	const auto found = std::find_if(visible.begin(), visible.end(), [&](int index) {
-		return items[index].peerId == peer;
-	});
-	return (found != visible.end()) ? int(found - visible.begin())
-		: std::clamp(previousRow, 0, std::max(0, int(visible.size()) - 1));
-}
-
 inline void ApplyMarkOp(
 		QSet<uint64_t> &markedPeerIds,
 		const std::vector<BufferItem> &items,

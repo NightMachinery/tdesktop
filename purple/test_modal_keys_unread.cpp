@@ -1,4 +1,5 @@
 #include "purple/purple_keys_unread.h"
+#include "purple/purple_list_selection.h"
 
 #include <iostream>
 #include <string>
@@ -89,19 +90,38 @@ int main() {
 		const auto byHandle = FilterBufferItems(items, QStringLiteral("@alice"));
 		Check(byHandle.size() == 1 && items[byHandle[0]].peerId == 10, "username handle filter");
 		const auto selected = SelectedPeer(items, all, 1);
-		Check(selected == 40 && RefilteredSelection(items, bots, selected, 1) == 0,
+		auto selection = Purple::ListSelection<uint64_t>();
+		const auto peerAt = [&](int index) { return items[index].peerId; };
+		Check(selected == 40 && selection.refilter(bots, selected, 1, true, peerAt) == 0,
 			"narrowing retains the selected chat by peer ID");
-		Check(RefilteredSelection(items, all, selected, 0) == 1,
+		Check(selection.refilter(all, selected, 0, false, peerAt) == 1,
 			"clearing a filter follows the chat to its broader-list row");
-		Check(RefilteredSelection(items, forum, selected, 1) == 0,
-			"selection clamps to the visible range when the chat is filtered out");
+		const auto fourthPeer = SelectedPeer(items, all, 3);
+		auto marks = QSet<uint64_t>();
+		ApplyMarkOp(marks, items, all, 3, MarkOp::MarkOne);
+		const auto dms = FilterBufferItems(items, QStringLiteral("dm"));
+		const auto dmsRow = selection.refilter(dms, fourthPeer, 3, true, peerAt);
+		Check(dms.size() == 2 && SelectedPeer(items, dms, dmsRow) == fourthPeer,
+			"narrowing from row four to two results follows the chat");
+		const auto narrow = selection.refilter(forum, fourthPeer, 3, true, peerAt);
+		Check(SelectedPeer(items, forum, narrow) == 20,
+			"a filtered-out selection falls back to a visible row");
+		const auto clear = selection.refilter(all, uint64_t(20), narrow, false, peerAt);
+		Check(clear == 3 && SelectedPeer(items, all, clear) == fourthPeer,
+			"clearing restores row four and Return opens that peer");
+		Check(marks.contains(fourthPeer) && !marks.contains(20),
+			"filtering keeps the mark on the original peer");
+		Check(selection.refilter({}, fourthPeer, 3, true, peerAt) == -1,
+			"zero matches have no actionable row");
+		Check(selection.refilter(all, {}, -1, false, peerAt) == 3,
+			"clearing zero matches restores the same anchor");
 		std::swap(items[1].lastTimestamp, items[3].lastTimestamp);
 		const auto refreshed = FilterBufferItems(items, QString());
-		Check(RefilteredSelection(items, refreshed, selected, 1) == 0,
+		Check(selection.refilter(refreshed, selected, 1, false, peerAt) == 0,
 			"refresh follows the chat after ordering changes");
 
 		// 4. Mark operations.
-		QSet<uint64_t> marks;
+		marks.clear();
 		ApplyMarkOp(marks, items, all, 0, MarkOp::MarkOne);
 		Check(marks.contains(20) && marks.size() == 1, "mark one");
 		ApplyMarkOp(marks, items, all, 0, MarkOp::ToggleOne);
