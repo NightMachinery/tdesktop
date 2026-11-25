@@ -222,7 +222,8 @@ std::optional<std::vector<MusicIndexEntry>> MusicIndex::page(
 		MusicIndexScope scope,
 		const QString &query,
 		const std::vector<quint64> &visiblePeers,
-		std::optional<MusicIndexCursor> cursor) {
+		std::optional<MusicIndexCursor> cursor,
+		bool tail) {
 	_lastError.clear();
 	const auto result = _database.Read({
 		u"WITH visible(peer) AS (SELECT value FROM json_each(?4)), "
@@ -237,7 +238,8 @@ std::optional<std::vector<MusicIndexEntry>> MusicIndex::page(
 		"AND NOT EXISTS (SELECT 1 FROM terms WHERE instr(a.search_text, term) = 0) "
 		"AND (a.posted_at > t.posted_at OR (a.posted_at = t.posted_at "
 		"AND (a.peer < t.peer OR (a.peer = t.peer AND a.message > t.message))))) "
-		"ORDER BY t.posted_at DESC, t.document LIMIT ?5"_q,
+		"ORDER BY "_q + (tail ? u"t.posted_at, t.document DESC"_q
+			: u"t.posted_at DESC, t.document"_q) + u" LIMIT ?5"_q,
 		{ cursor ? ArchiveSqlValue(int64(cursor->postedAt)) : ArchiveSqlValue(nullptr),
 			cursor ? QString::number(cursor->document) : QString(),
 			QString::fromUtf8(QJsonDocument(QJsonArray::fromStringList(
@@ -262,6 +264,7 @@ std::optional<std::vector<MusicIndexEntry>> MusicIndex::page(
 			.duration = std::get<int64>(row[6]),
 		});
 	}
+	if (tail) std::ranges::reverse(rows);
 	return rows;
 }
 

@@ -1,28 +1,80 @@
 #include "purple/purple_playlist_song_list.h"
 
 #include "base/timer.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "crl/crl_on_main.h"
+#include "data/data_document.h"
+#include "data/data_document_media.h"
+#include "data/data_file_origin.h"
+#include "data/data_session.h"
 #include "lang/lang_keys.h"
+#include "main/main_session.h"
+#include "ui/image/image.h"
 #include "ui/painter.h"
+#include "ui/widgets/buttons.h"
+#include "ui/widgets/labels.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
+#include "ui/wrap/slide_wrap.h"
 
 #include <QtGui/QContextMenuEvent>
 #include <QtGui/QCursor>
 #include <QtGui/QKeySequence>
 #include <QtGui/QWindow>
+#include <QtCore/QTextBoundaryFinder>
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
+#include <cmath>
+#include <map>
 #include <utility>
 
 #include "styles/style_media_player.h"
+#include "styles/style_boxes.h"
+#include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_overview.h"
+#include "styles/style_purple_music.h"
 #include "styles/style_widgets.h"
 
 namespace Purple {
 namespace {
+
+constexpr auto kMusicTilesPref = "purple.music.tiles";
+rpl::event_stream<bool> MusicTilesChanges;
+
+double RelativeLuminance(QColor color) {
+	const auto channel = [](double value) {
+		return (value <= 0.04045)
+			? value / 12.92
+			: std::pow((value + 0.055) / 1.055, 2.4);
+	};
+	return 0.2126 * channel(color.redF()) + 0.7152 * channel(color.greenF())
+		+ 0.0722 * channel(color.blueF());
+}
+
+QColor MusicReadableColor(QColor foreground, QColor background, double minimum) {
+	const auto bg = RelativeLuminance(background);
+	const auto target = (bg > 0.18) ? 0. : 1.;
+	for (auto step = 0; step != 9; ++step) {
+		const auto fg = RelativeLuminance(foreground);
+		if ((std::max(bg, fg) + 0.05) / (std::min(bg, fg) + 0.05) >= minimum) {
+			return foreground;
+		}
+		foreground = QColor::fromRgbF(
+			(foreground.redF() + target) / 2.,
+			(foreground.greenF() + target) / 2.,
+			(foreground.blueF() + target) / 2.);
+	}
+	return QColor::fromRgbF(target, target, target);
+}
+
+QString FirstGrapheme(const QString &text) {
+	const auto trimmed = text.trimmed();
+	auto finder = QTextBoundaryFinder(QTextBoundaryFinder::Grapheme, trimmed);
+	return trimmed.left(std::max(0, int(finder.toNextBoundary())));
+}
 
 QString PlaybackLabel(MusicRowPlayback state) {
 	switch (state) {
@@ -34,7 +86,97 @@ QString PlaybackLabel(MusicRowPlayback state) {
 	Unexpected("Music row playback state.");
 }
 
+class MusicSelectionBar final : public Ui::RpWidget {
+public:
+	MusicSelectionBar(QWidget *parent, MusicSelectionActions actions);
+	void setSummary(const QString &text);
+
+protected:
+	int resizeGetHeight(int width) override;
+
+private:
+	const not_null<Ui::FlatLabel*> _summary;
+	std::vector<not_null<Ui::RoundButton*>> _actions;
+
+};
+
+MusicSelectionBar::MusicSelectionBar(QWidget *parent, MusicSelectionActions actions)
+: Ui::RpWidget(parent)
+, _summary(Ui::CreateChild<Ui::FlatLabel>(this, QString(), st::boxLabel)) {
+	const auto add = [=](rpl::producer<QString> text, Fn<void()> callback) {
+		const auto button = Ui::CreateChild<Ui::RoundButton>(
+			this, std::move(text), st::defaultLightButton);
+		button->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+		button->setClickedCallback(std::move(callback));
+		_actions.push_back(button);
+	};
+	add(tr::lng_purple_playlists_play(), std::move(actions.play));
+	add(rpl::single(u"Queue"_q), std::move(actions.queue));
+	add(tr::lng_purple_playlists_add(), std::move(actions.add));
+	add(tr::lng_context_forward_msg(), std::move(actions.forward));
+	add(rpl::single(u"More"_q), std::move(actions.more));
+	add(rpl::single(u"Clear"_q), std::move(actions.clear));
+}
+
+void MusicSelectionBar::setSummary(const QString &text) {
+	_summary->setText(text);
+	resizeToWidth(width());
+}
+
+int MusicSelectionBar::resizeGetHeight(int width) {
+	const auto gap = st::purpleMusicToolbarGap;
+	const auto buttonHeight = _actions.front()->height();
+	const auto wide = width >= st::purpleChatMusicWidth - 2 * st::purpleMusicMargin;
+	auto buttonsWidth = 0;
+	for (auto index = 0; index < int(_actions.size()); ++index) {
+		const auto button = _actions[index];
+		const auto visible = wide || index == 0 || index >= 4;
+		button->setVisible(visible);
+		if (visible) buttonsWidth += button->width() + gap;
+	}
+	_summary->resizeToWidth(std::max(1, wide ? (width - buttonsWidth) : width));
+	_summary->moveToLeft(0, wide ? (buttonHeight - _summary->height()) / 2 : 0, width);
+	auto right = 0;
+	for (auto i = int(_actions.size()); i > 0;) {
+		const auto button = _actions[--i];
+		if (button->isHidden()) continue;
+		button->moveToRight(right, wide ? 0 : _summary->height(), width);
+		right += button->width() + gap;
+	}
+	return wide ? std::max(buttonHeight, _summary->height())
+		: buttonHeight + _summary->height();
+}
+
 } // namespace
+
+bool MusicTiles() {
+	return Core::App().settings().readPref<bool>(kMusicTilesPref);
+}
+
+rpl::producer<bool> MusicTilesValue() {
+	return rpl::single(MusicTiles()) | rpl::then(MusicTilesChanges.events());
+}
+
+void ToggleMusicTiles() {
+	const auto tiles = !MusicTiles();
+	Core::App().settings().writePref<bool>(kMusicTilesPref, tiles);
+	Core::App().saveSettingsDelayed();
+	MusicTilesChanges.fire_copy(tiles);
+}
+
+object_ptr<Ui::RpWidget> MakeMusicSelectionBar(
+		QWidget *parent,
+		rpl::producer<QString> summary,
+		MusicSelectionActions actions) {
+	auto result = object_ptr<Ui::SlideWrap<MusicSelectionBar>>(
+		parent, object_ptr<MusicSelectionBar>(parent, std::move(actions)));
+	const auto wrap = result.data();
+	std::move(summary) | rpl::on_next([=](const QString &text) {
+		wrap->entity()->setSummary(text);
+		wrap->toggle(!text.isEmpty(), anim::type::instant);
+	}, wrap->lifetime());
+	return result;
+}
 
 class PlaylistSongList::Rows final : public Ui::RpWidget {
 public:
@@ -54,12 +196,19 @@ public:
 	void setKeyHandler(Fn<bool(QKeyEvent*)> handler);
 	void setContextActions(Fn<void(not_null<Ui::PopupMenu*>, uint64_t)> actions);
 	void showActions();
+	void setArtworkSession(not_null<Main::Session*> session);
+	int setTiles(bool tiles);
+	bool cancelRangeMark();
+	[[nodiscard]] int contentHeight(int width) const;
 	void setPlayback(uint64_t current, uint64_t checked, QString state, bool unavailable);
 	void setMusicPlayback(uint64_t current, MusicRowPlayback state, uint64_t loading);
 	void setVerifiedDownloads(std::set<uint64_t> documents);
 	void cancelInteraction();
 	void focusSelected();
-	void setSelectionActions(Fn<void(uint64_t)> toggle, Fn<bool()> playSelection);
+	void setSelectionActions(
+		Fn<void(uint64_t)> toggle,
+		Fn<bool()> playSelection,
+		Fn<void(std::vector<uint64_t>)> mark);
 	void setCopyOrgLinkAction(Fn<void(uint64_t)> copy);
 	void setChosenSongs(std::set<uint64_t> songs);
 	[[nodiscard]] int rowHeight() const;
@@ -91,12 +240,29 @@ protected:
 	bool eventHook(QEvent *e) override;
 
 private:
+	struct Cover {
+		std::shared_ptr<Data::DocumentMedia> media;
+		QImage scaled;
+		qint64 revision = 0;
+		int pixels = 0;
+	};
+
 	[[nodiscard]] int hit(QPoint position) const;
+	[[nodiscard]] int columns(int width) const;
+	[[nodiscard]] int sleeve(int width) const;
+	[[nodiscard]] int rowHeightForWidth(int width) const;
+	[[nodiscard]] QRect itemRect(int index) const;
+	[[nodiscard]] QRect coverRect(QRect item) const;
+	[[nodiscard]] QRect markRect(QRect cover) const;
 	[[nodiscard]] int previewRow(int slot) const;
 	[[nodiscard]] QRect handleRect(int slot) const;
 	[[nodiscard]] QString sourceState(int index) const;
 	[[nodiscard]] MusicRowPlayback musicPlayback(uint64_t id) const;
 	void select(int index, bool scroll = true);
+	void markRange(int first, int last);
+	void refreshArtwork();
+	void paintMusicItem(Painter &p, int index) const;
+	void paintCover(Painter &p, QRect rect, const PlaylistSongListRow &row) const;
 	void updateDrag();
 	void autoscroll();
 	void submitMove(int from, int to);
@@ -107,14 +273,18 @@ private:
 	Fn<void(uint64_t)> _play;
 	Fn<void(std::vector<uint64_t>)> _reorder;
 	Fn<void(uint64_t)> _toggle;
+	Fn<void(std::vector<uint64_t>)> _mark;
 	Fn<bool()> _playSelection;
 	Fn<void(uint64_t)> _copyOrgLink;
 	Fn<bool(QKeyEvent*)> _keyHandler;
 	Fn<void(not_null<Ui::PopupMenu*>, uint64_t)> _contextActions;
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 	std::set<uint64_t> _chosen;
+	std::map<uint64_t, Cover> _cover;
+	Main::Session *_artworkSession = nullptr;
 	Mode _mode = Mode::Playlist;
 	base::Timer _autoscroll;
+	base::Timer _artworkUpdate;
 	QString _checkedState;
 	std::set<uint64_t> _verifiedDownloads;
 	uint64_t _current = 0;
@@ -125,6 +295,10 @@ private:
 	int _hovered = -1;
 	int _pressed = -1;
 	int _target = -1;
+	int _pressAnchor = -1;
+	int _rangeAnchor = -1;
+	int _desiredColumn = -1;
+	bool _tiles = false;
 	bool _handlePressed = false;
 	bool _dragging = false;
 	bool _unavailable = false;
@@ -146,7 +320,8 @@ PlaylistSongList::Rows::Rows(
 , _play(std::move(play))
 , _reorder(std::move(reorder))
 , _mode(mode)
-, _autoscroll([=] { autoscroll(); }) {
+, _autoscroll([=] { autoscroll(); })
+, _artworkUpdate([=] { refreshArtwork(); }) {
 	setFocusPolicy(Qt::StrongFocus);
 	setMouseTracking(true);
 	setAccessibleName(_mode == Mode::Library
@@ -162,6 +337,16 @@ PlaylistSongList::Rows::Rows(
 }
 
 int PlaylistSongList::Rows::rowHeight() const {
+	return rowHeightForWidth(width());
+}
+
+int PlaylistSongList::Rows::rowHeightForWidth(int width) const {
+	if (_mode == Mode::Library) {
+		return _tiles
+			? sleeve(width) + st::purpleMusicTileGap * 2
+				+ st::semiboldFont->height * 2 + st::normalFont->height
+			: st::purpleMusicTrackHeight;
+	}
 	const auto &layout = st::mediaPlayerFileLayout;
 	return std::max(
 		layout.songPadding.top() + layout.songThumbSize + layout.songPadding.bottom(),
@@ -169,14 +354,68 @@ int PlaylistSongList::Rows::rowHeight() const {
 			* st::normalFont->height + layout.songPadding.bottom());
 }
 
-int PlaylistSongList::Rows::resizeGetHeight(int) {
-	return int(_data.size()) * rowHeight();
+int PlaylistSongList::Rows::columns(int width) const {
+	return _tiles ? std::max(1, (width + st::purpleMusicTileGap)
+		/ (st::purpleMusicTileMin + st::purpleMusicTileGap)) : 1;
+}
+
+int PlaylistSongList::Rows::sleeve(int width) const {
+	const auto count = columns(width);
+	return std::max(1, std::min(st::purpleMusicTileMax,
+		(width - (count - 1) * st::purpleMusicTileGap) / count));
+}
+
+int PlaylistSongList::Rows::contentHeight(int width) const {
+	const auto count = columns(width);
+	return ((int(_data.size()) + count - 1) / count) * rowHeightForWidth(width);
+}
+
+int PlaylistSongList::Rows::resizeGetHeight(int width) {
+	if (_artworkSession) _artworkUpdate.callOnce(0);
+	return contentHeight(width);
+}
+
+QRect PlaylistSongList::Rows::itemRect(int index) const {
+	const auto height = rowHeight();
+	if (!_tiles) return QRect(0, index * height, width(), height);
+	const auto count = columns(width());
+	const auto side = sleeve(width());
+	const auto gap = st::purpleMusicTileGap;
+	const auto leading = (width() - (count * side + (count - 1) * gap)) / 2;
+	return style::rtlrect(
+		leading + (index % count) * (side + gap),
+		(index / count) * height,
+		side,
+		height - gap,
+		width());
+}
+
+QRect PlaylistSongList::Rows::coverRect(QRect item) const {
+	if (_tiles) {
+		const auto inset = std::min(st::purpleMusicTrackInset, item.width() / 4);
+		return QRect(item.x() + inset, item.y() + inset,
+			item.width() - 2 * inset, item.width() - 2 * inset);
+	}
+	const auto side = st::purpleMusicCoverSize;
+	return style::rtlrect(st::purpleMusicTrackInset,
+		item.y() + (item.height() - side) / 2, side, side, width());
+}
+
+QRect PlaylistSongList::Rows::markRect(QRect cover) const {
+	const auto side = std::min(st::purpleMusicBadgeSize, cover.width());
+	return QRect(rtl() ? cover.left() : (cover.right() - side + 1),
+		cover.top(), side, side);
 }
 
 int PlaylistSongList::Rows::hit(QPoint position) const {
 	if (!rect().contains(position)) return -1;
-	const auto index = position.y() / rowHeight();
-	return index < int(_data.size()) ? index : -1;
+	const auto count = columns(width());
+	const auto first = (position.y() / rowHeight()) * count;
+	const auto last = std::min(first + count, int(_data.size()));
+	for (auto index = first; index < last; ++index) {
+		if (itemRect(index).contains(position)) return index;
+	}
+	return -1;
 }
 
 int PlaylistSongList::Rows::previewRow(int slot) const {
@@ -207,6 +446,198 @@ QString PlaylistSongList::Rows::sourceState(int index) const {
 	return result;
 }
 
+void PlaylistSongList::Rows::setArtworkSession(not_null<Main::Session*> session) {
+	_artworkSession = session;
+	rpl::merge(
+		_scroll->scrollTopChanges() | rpl::to_empty,
+		session->downloaderTaskFinished(),
+		sizeValue() | rpl::to_empty
+	) | rpl::on_next([=] { _artworkUpdate.callOnce(0); }, lifetime());
+}
+
+void PlaylistSongList::Rows::refreshArtwork() {
+	if (!_artworkSession || Core::App().passcodeLocked() || _data.empty()) return;
+	const auto count = columns(width());
+	const auto firstRow = std::max(0, _scroll->scrollTop() / rowHeight() - 1);
+	const auto lastRow = (_scroll->scrollTop() + _scroll->viewport()->height())
+		/ rowHeight() + 2;
+	const auto last = std::min(int(_data.size()), lastRow * count);
+	auto wanted = std::set<uint64_t>();
+	for (auto i = firstRow * count; i < last; ++i) {
+		const auto &row = _data[i];
+		const auto doc = row.audioDocument;
+		if (!doc || !wanted.insert(doc).second) continue;
+		const auto document = _artworkSession->data().document(doc);
+		auto active = document->activeMediaView();
+		if (!active && !document->hasThumbnail()) continue;
+		auto &cover = _cover[doc];
+		if (!cover.media) {
+			cover.media = active ? std::move(active) : document->createMediaView();
+			if (!cover.media->thumbnail() && document->hasThumbnail()) {
+				cover.media->thumbnailWanted(Data::FileOrigin(row.message));
+			}
+		}
+		const auto thumbnail = cover.media->goodThumbnail()
+			? cover.media->goodThumbnail()
+			: cover.media->thumbnail() ? cover.media->thumbnail()
+			: cover.media->thumbnailInline();
+		if (!thumbnail) continue;
+		const auto image = thumbnail->original();
+		const auto pixels = int(std::ceil(coverRect(itemRect(i)).width() * devicePixelRatioF()));
+		if (!image.isNull() && pixels > 0
+			&& (cover.revision != image.cacheKey() || cover.pixels != pixels)) {
+			cover.revision = image.cacheKey();
+			cover.pixels = pixels;
+			const auto side = std::min(image.width(), image.height());
+			cover.scaled = image.copy((image.width() - side) / 2,
+				(image.height() - side) / 2, side, side).scaled(
+					pixels, pixels, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+			update(itemRect(i));
+		}
+	}
+	std::erase_if(_cover, [&](const auto &entry) { return !wanted.contains(entry.first); });
+}
+
+void PaintMusicSleeve(
+		Painter &p,
+		QRect rect,
+		const QString &title,
+		const QString &artist,
+		const QImage &image) {
+	auto clip = QPainterPath();
+	clip.addRoundedRect(rect, st::purpleMusicCoverRadius, st::purpleMusicCoverRadius);
+	p.save();
+	p.setClipPath(clip, Qt::IntersectClip);
+	if (!image.isNull()) {
+		p.drawImage(rect, image);
+	} else {
+		const auto seed = (artist.isEmpty() ? title : artist)
+			.normalized(QString::NormalizationForm_C).toCaseFolded();
+		auto hash = uint32_t(2166136261U);
+		for (const auto ch : seed) hash = (hash ^ ch.unicode()) * 16777619U;
+		const auto hue = int(hash % 360);
+		auto gradient = QLinearGradient(rect.topLeft(), rect.bottomRight());
+		gradient.setColorAt(0., QColor::fromHsl(hue, 105, 80));
+		gradient.setColorAt(1., QColor::fromHsl((hue + 32) % 360, 130, 45));
+		p.fillRect(rect, gradient);
+		p.setPen(Qt::NoPen);
+		p.setBrush(QColor(255, 255, 255, 30));
+		p.drawEllipse(rect.translated(rect.width() / 2, rect.height() / 3));
+		const auto letters = FirstGrapheme(title) + FirstGrapheme(artist);
+		auto font = st::semiboldFont->f;
+		font.setPixelSize(std::max(st::semiboldFont->height, rect.height() / 3));
+		p.setFont(font);
+		p.setPen(Qt::white);
+		p.drawText(rect, Qt::AlignCenter, letters.isEmpty() ? u"♪"_q : letters);
+	}
+	p.restore();
+}
+
+void PlaylistSongList::Rows::paintCover(
+		Painter &p,
+		QRect rect,
+		const PlaylistSongListRow &row) const {
+	const auto found = _cover.find(row.audioDocument);
+	PaintMusicSleeve(p, rect, row.title, row.performer,
+		found == _cover.end() ? QImage() : found->second.scaled);
+}
+
+void PlaylistSongList::Rows::paintMusicItem(Painter &p, int index) const {
+	const auto &row = _data[index];
+	const auto item = itemRect(index);
+	const auto art = coverRect(item);
+	const auto playback = musicPlayback(row.documentId);
+	const auto preview = _rangeAnchor >= 0
+		&& index >= std::min(_rangeAnchor, _selected)
+		&& index <= std::max(_rangeAnchor, _selected);
+	const auto chosen = _chosen.contains(row.documentId) || preview;
+	const auto accent = st::windowActiveTextFg->c;
+	const auto bg = chosen ? st::windowBgRipple->c
+		: index == _hovered ? st::windowBgOver->c : st::windowBg->c;
+	const auto radius = st::purpleMusicCoverRadius;
+	auto hq = PainterHighQualityEnabler(p);
+	p.setPen(Qt::NoPen);
+	p.setBrush(bg);
+	p.drawRoundedRect(item, radius, radius);
+	paintCover(p, art, row);
+	if (playback != MusicRowPlayback::Idle) {
+		const auto side = std::min(st::purpleMusicBadgeSize, art.width());
+		const auto badge = QRect(rtl() ? art.right() - side + 1 : art.left(),
+			art.bottom() - side + 1, side, side);
+		p.setBrush(QColor(20, 20, 26, 232));
+		p.drawRoundedRect(badge, radius, radius);
+		p.setBrush(Qt::white);
+		const auto stroke = std::max(st::lineWidth, side / 9);
+		const auto bars = (playback == MusicRowPlayback::Playing) ? 3 : 2;
+		for (auto i = 0; i != bars; ++i) {
+			const auto bar = (bars == 3 && i == 1) ? side / 2 : side / 3;
+			p.drawRect(badge.center().x() + (i * 2 - bars + 1) * stroke - stroke / 2,
+				badge.bottom() - side / 4 - bar, stroke, bar);
+		}
+	}
+	if (chosen || index == _hovered || (hasFocus() && index == _selected)) {
+		const auto mark = markRect(art);
+		p.setBrush(chosen ? MusicReadableColor(accent, Qt::white, 3.) : QColor(20, 20, 26, 232));
+		p.setPen(QPen(Qt::white, st::lineWidth));
+		p.drawEllipse(mark.adjusted(0, 0, -st::lineWidth, -st::lineWidth));
+		if (chosen) {
+			const auto center = mark.center();
+			const auto wing = mark.width() / 4;
+			p.drawLine(center - QPoint(wing, 0), center + QPoint(0, wing / 2));
+			p.drawLine(center + QPoint(0, wing / 2), center + QPoint(wing, -wing));
+		}
+	}
+	const auto leading = rtl() ? Qt::AlignRight : Qt::AlignLeft;
+	const auto trailing = rtl() ? Qt::AlignLeft : Qt::AlignRight;
+	const auto gap = st::purpleMusicTrackGap;
+	const auto textLeft = st::purpleMusicTrackInset + art.width() + gap;
+	const auto durationWidth = st::normalFont->width(row.duration) + gap;
+	const auto sourceWidth = width() >= 4 * st::purpleMusicTileMin && !row.source.isEmpty()
+		? st::purpleMusicTileMin : 0;
+	const auto nameTop = item.y() + (item.height()
+		- st::semiboldFont->height - st::normalFont->height) / 2;
+	const auto textWidth = std::max(0, width() - textLeft - durationWidth - sourceWidth);
+	const auto title = _tiles
+		? QRect(art.left(), art.bottom() + st::purpleMusicTrackInset,
+			art.width(), 2 * st::semiboldFont->height)
+		: style::rtlrect(textLeft, nameTop, textWidth, st::semiboldFont->height, width());
+	const auto sub = QRect(title.x(), title.bottom() + 1, title.width(), st::normalFont->height);
+	p.setFont(st::semiboldFont);
+	p.setPen(MusicReadableColor(playback == MusicRowPlayback::Idle
+		? st::windowFg->c : accent, bg, 4.5));
+	if (_tiles) {
+		p.save();
+		p.setClipRect(title, Qt::IntersectClip);
+		p.drawText(title, leading | Qt::AlignTop | Qt::TextWordWrap, row.title);
+		p.restore();
+	} else {
+		p.drawText(title, leading | Qt::AlignTop, st::semiboldFont->elided(row.title, title.width()));
+	}
+	p.setFont(st::normalFont);
+	p.setPen(MusicReadableColor(st::windowSubTextFg->c, bg, 4.5));
+	const auto state = PlaybackLabel(playback);
+	const auto details = state.isEmpty() ? row.performer : state + u" · "_q + row.performer;
+	p.drawText(sub, leading | Qt::AlignTop, st::normalFont->elided(details, sub.width()));
+	if (!_tiles) {
+		const auto duration = style::rtlrect(width() - durationWidth, item.top(),
+			durationWidth - st::purpleMusicTrackInset, item.height(), width());
+		p.drawText(duration, trailing | Qt::AlignVCenter | Qt::TextForceLeftToRight, row.duration);
+		if (sourceWidth) {
+			const auto source = style::rtlrect(width() - durationWidth - sourceWidth,
+				item.top(), sourceWidth - gap, item.height(), width());
+			p.drawText(source,
+				leading | Qt::AlignVCenter,
+				st::normalFont->elided(row.source, source.width()));
+		}
+	}
+	if (index == _selected && hasFocus()) {
+		const auto line = st::lineWidth;
+		p.setPen(QPen(MusicReadableColor(accent, bg, 3.), line));
+		p.setBrush(Qt::NoBrush);
+		p.drawRoundedRect(item.adjusted(line, line, -line, -line), radius, radius);
+	}
+}
+
 void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 	auto p = Painter(this);
 	const auto visible = e->rect().intersected(QRect(
@@ -215,8 +646,13 @@ void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 	p.setClipRect(visible);
 	p.fillRect(visible, st::windowBg);
 	const auto height = rowHeight();
-	const auto first = std::max(0, visible.top() / height);
-	const auto last = std::min(int(_data.size()), visible.bottom() / height + 1);
+	const auto cols = columns(width());
+	const auto first = std::max(0, (visible.top() / height) * cols);
+	const auto last = std::min(int(_data.size()), (visible.bottom() / height + 1) * cols);
+	if (_mode == Mode::Library) {
+		for (auto index = first; index < last; ++index) paintMusicItem(p, index);
+		return;
+	}
 	const auto &layout = st::mediaPlayerFileLayout;
 	const auto left = layout.songPadding.left() + layout.songThumbSize + layout.songPadding.right();
 	const auto available = std::max(0, width() - left
@@ -227,14 +663,7 @@ void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 		const auto &row = _data[index];
 		const auto top = slot * height;
 		const auto selected = index == _selected;
-		const auto library = _mode == Mode::Library;
-		const auto chosen = library && _chosen.contains(row.documentId);
-		const auto hovered = library && index == _hovered;
-		if (chosen || hovered || (!library && selected)) {
-			p.fillRect(0, top, width(), height,
-				chosen ? st::windowBgRipple : st::windowBgOver);
-		}
-		const auto playback = musicPlayback(row.documentId);
+		if (selected) p.fillRect(0, top, width(), height, st::windowBgOver);
 		const auto thumb = style::rtlrect(
 			layout.songPadding.left(),
 			top + layout.songPadding.top(),
@@ -245,13 +674,10 @@ void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 		p.setBrush(row.documentId == _current || _chosen.contains(row.documentId)
 			? st::mediaPlayerActiveFg : layout.songIconBg);
 		p.drawEllipse(thumb);
-		(playback == MusicRowPlayback::Playing ? layout.songPause : layout.songPlay
-		).paintInCenter(p, thumb);
+		layout.songPlay.paintInCenter(p, thumb);
 		p.setFont(st::semiboldFont);
 		p.setPen(row.documentId == _checked && _unavailable
-			? st::windowSubTextFg
-			: playback != MusicRowPlayback::Idle ? st::windowActiveTextFg
-			: st::windowFg);
+			? st::windowSubTextFg : st::windowFg);
 		p.drawTextLeft(
 			left,
 			top + layout.songNameTop,
@@ -259,11 +685,8 @@ void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 			st::semiboldFont->elided(row.title, available));
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
-		auto details = row.performer.isEmpty()
+		const auto details = row.performer.isEmpty()
 			? row.duration : row.performer + u" · "_q + row.duration;
-		if (const auto label = PlaybackLabel(playback); !label.isEmpty()) {
-			details = label + u" · "_q + details;
-		}
 		p.drawTextLeft(
 			left,
 			top + layout.songStatusTop,
@@ -280,12 +703,6 @@ void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 				st::normalFont->elided(state, available));
 		}
 		if (_reorder) st::menuIconReorder.paintInCenter(p, handleRect(slot));
-		if (library && selected && hasFocus()) {
-			const auto line = st::lineWidth;
-			p.setPen(QPen(st::windowActiveTextFg->c, line));
-			p.setBrush(Qt::NoBrush);
-			p.drawRect(QRect(line, top + line, width() - 2 * line, height - 2 * line));
-		}
 		if (_dragging && slot == _target) {
 			p.fillRect(0, top, width(), st::lineWidth, st::mediaPlayerActiveFg);
 		}
@@ -296,7 +713,8 @@ void PlaylistSongList::Rows::select(int index, bool scroll) {
 	if (index < 0 || index >= int(_data.size())) return;
 	const auto previous = _selected;
 	_selected = index;
-	if (scroll) _scroll->scrollToY(index * rowHeight(), (index + 1) * rowHeight());
+	const auto rect = itemRect(index);
+	if (scroll) _scroll->scrollToY(rect.top(), rect.bottom() + 1);
 	update();
 	if (previous != index) {
 		if (previous >= 0) accessibilityChildSelectionChanged(previous);
@@ -310,6 +728,8 @@ void PlaylistSongList::Rows::mousePressEvent(QMouseEvent *e) {
 	cancelInteraction();
 	_pressed = hit(e->pos());
 	if (_pressed < 0) return;
+	_pressAnchor = _selected;
+	_desiredColumn = -1;
 	setFocus(Qt::MouseFocusReason);
 	select(_pressed, false);
 	_pressPosition = e->pos();
@@ -321,8 +741,9 @@ void PlaylistSongList::Rows::mouseMoveEvent(QMouseEvent *e) {
 	if (_mode == Mode::Library) {
 		const auto hovered = hit(e->pos());
 		if (_hovered != hovered) {
-			_hovered = hovered;
-			update();
+			const auto previous = std::exchange(_hovered, hovered);
+			if (previous >= 0) update(itemRect(previous));
+			if (hovered >= 0) update(itemRect(hovered));
 		}
 	}
 	if (_pressed < 0 || !_handlePressed || !isEnabled()) return;
@@ -399,7 +820,10 @@ void PlaylistSongList::Rows::mouseReleaseEvent(QMouseEvent *e) {
 		submitMove(from, to);
 	} else if (play) {
 		const auto id = _data[from].documentId;
-		if (_toggle && (e->modifiers() & Qt::ControlModifier)) {
+		if (_toggle && (e->modifiers() & Qt::ShiftModifier) && _pressAnchor >= 0) {
+			markRange(_pressAnchor, from);
+		} else if (_toggle && ((e->modifiers() & Qt::ControlModifier)
+			|| markRect(coverRect(itemRect(from))).contains(e->pos()))) {
 			const auto callback = _toggle;
 			callback(id);
 		} else {
@@ -421,8 +845,8 @@ void PlaylistSongList::Rows::mouseDoubleClickEvent(QMouseEvent *e) {
 void PlaylistSongList::Rows::contextMenuEvent(QContextMenuEvent *e) {
 	const auto keyboard = e->reason() == QContextMenuEvent::Keyboard;
 	const auto index = keyboard ? _selected : hit(e->pos());
-	if (!showActionsFor(index, keyboard
-		? mapToGlobal(QPoint(0, (index + 1) * rowHeight()))
+	if (index < 0 || !showActionsFor(index, keyboard
+		? mapToGlobal(itemRect(index).bottomLeft())
 		: e->globalPos())) {
 		RpWidget::contextMenuEvent(e);
 		return;
@@ -432,7 +856,7 @@ void PlaylistSongList::Rows::contextMenuEvent(QContextMenuEvent *e) {
 
 void PlaylistSongList::Rows::showActions() {
 	if (_selected >= 0) {
-		showActionsFor(_selected, mapToGlobal(QPoint(0, (_selected + 1) * rowHeight())));
+		showActionsFor(_selected, mapToGlobal(itemRect(_selected).bottomLeft()));
 	}
 }
 
@@ -449,6 +873,28 @@ bool PlaylistSongList::Rows::showActionsFor(int index, QPoint globalPosition) {
 			&st::menuIconCopy);
 	}
 	_contextMenu->popup(globalPosition);
+	return true;
+}
+
+void PlaylistSongList::Rows::markRange(int first, int last) {
+	if (!_toggle || first < 0 || last < 0) return;
+	auto keys = std::vector<uint64_t>();
+	for (auto i = std::min(first, last), end = std::max(first, last); i <= end; ++i) {
+		const auto id = _data[i].documentId;
+		if (!_chosen.contains(id)) keys.push_back(id);
+	}
+	if (const auto mark = _mark) {
+		mark(std::move(keys));
+	} else {
+		const auto toggle = _toggle;
+		for (const auto key : keys) toggle(key);
+	}
+}
+
+bool PlaylistSongList::Rows::cancelRangeMark() {
+	if (_rangeAnchor < 0) return false;
+	_rangeAnchor = -1;
+	update();
 	return true;
 }
 
@@ -488,19 +934,50 @@ void PlaylistSongList::Rows::navigate(TrackListAction action, int repeat) {
 	cancelInteraction();
 	const auto page = std::max(1, _scroll->viewport()->height() / rowHeight());
 	const auto half = std::max(1, _scroll->viewport()->height() / (2 * rowHeight()));
+	const auto count = columns(width());
+	const auto size = int(_data.size());
 	auto next = std::max(0, _selected);
 	switch (action) {
-	case TrackListAction::Up: next -= repeat; break;
-	case TrackListAction::Down: next += repeat; break;
-	case TrackListAction::HalfUp: next -= half * repeat; break;
-	case TrackListAction::HalfDown: next += half * repeat; break;
-	case TrackListAction::PageUp: next -= page * repeat; break;
-	case TrackListAction::PageDown: next += page * repeat; break;
-	case TrackListAction::First: next = 0; break;
-	case TrackListAction::Last: next = int(_data.size()) - 1; break;
+	case TrackListAction::Up:
+	case TrackListAction::Down:
+	case TrackListAction::HalfUp:
+	case TrackListAction::HalfDown:
+	case TrackListAction::PageUp:
+	case TrackListAction::PageDown: {
+		const auto step = (action == TrackListAction::Up || action == TrackListAction::Down)
+			? 1 : (action == TrackListAction::HalfUp || action == TrackListAction::HalfDown)
+			? half : page;
+		const auto up = action == TrackListAction::Up
+			|| action == TrackListAction::HalfUp || action == TrackListAction::PageUp;
+		if (_desiredColumn < 0) _desiredColumn = next % count;
+		const auto line = std::clamp(next / count + (up ? -step : step) * repeat,
+			0, (size - 1) / count);
+		next = line * count + std::min(_desiredColumn, count - 1);
+	} break;
+	case TrackListAction::Left:
+	case TrackListAction::Right: {
+		if (!_tiles) return;
+		const auto step = ((action == TrackListAction::Left) != rtl()) ? -1 : 1;
+		const auto start = next / count * count;
+		next = std::clamp(next + step * repeat, start, std::min(size, start + count) - 1);
+		_desiredColumn = -1;
+	} break;
+	case TrackListAction::First: next = 0; _desiredColumn = -1; break;
+	case TrackListAction::Last: next = size - 1; _desiredColumn = -1; break;
 	case TrackListAction::Mark:
 		if (const auto toggle = _toggle) toggle(_data[next].documentId);
 		return;
+	case TrackListAction::RangeMark:
+		if (_rangeAnchor >= 0) markRange(std::exchange(_rangeAnchor, -1), next);
+		else _rangeAnchor = next;
+		update();
+		return;
+	case TrackListAction::MarkPage: {
+		const auto begin = _scroll->scrollTop() / rowHeight() * count;
+		const auto end = (_scroll->scrollTop() + _scroll->viewport()->height() - 1)
+			/ rowHeight() * count + count;
+		markRange(begin, std::min(size, end) - 1);
+	} return;
 	case TrackListAction::Play: {
 		const auto playSelection = _playSelection;
 		if (playSelection && playSelection()) return;
@@ -508,7 +985,7 @@ void PlaylistSongList::Rows::navigate(TrackListAction action, int repeat) {
 		play(_data[next].documentId);
 	} return;
 	}
-	select(std::clamp(next, 0, int(_data.size()) - 1));
+	select(std::clamp(next, 0, size - 1));
 }
 
 void PlaylistSongList::Rows::keyPressEvent(QKeyEvent *e) {
@@ -541,6 +1018,8 @@ void PlaylistSongList::Rows::keyPressEvent(QKeyEvent *e) {
 		? (half ? TrackListAction::HalfUp : TrackListAction::Up)
 		: (key == Qt::Key_Down)
 		? (half ? TrackListAction::HalfDown : TrackListAction::Down)
+		: (_tiles && key == Qt::Key_Left) ? TrackListAction::Left
+		: (_tiles && key == Qt::Key_Right) ? TrackListAction::Right
 		: (key == Qt::Key_Home) ? TrackListAction::First
 		: (key == Qt::Key_End) ? TrackListAction::Last
 		: (key == Qt::Key_PageUp) ? TrackListAction::PageUp
@@ -563,11 +1042,25 @@ void PlaylistSongList::Rows::setRows(
 	_contextMenu.reset();
 	_data = std::move(rows);
 	_hovered = -1;
+	_rangeAnchor = -1;
+	_desiredColumn = -1;
 	const auto found = std::ranges::find(_data, cursor, &PlaylistSongListRow::documentId);
 	_selected = _data.empty() ? -1 : found == _data.end() ? 0 : int(found - _data.begin());
 	resizeToWidth(width());
+	if (_artworkSession) _artworkUpdate.callOnce(0);
 	if (_selected >= 0 && hasFocus()) accessibilityChildFocused(_selected);
 	update();
+}
+
+int PlaylistSongList::Rows::setTiles(bool tiles) {
+	const auto current = _scroll->scrollTop();
+	if (_tiles == tiles || _mode != Mode::Library) return current;
+	const auto anchor = current / rowHeight() * columns(width());
+	_tiles = tiles;
+	_desiredColumn = -1;
+	resizeToWidth(width());
+	update();
+	return itemRect(anchor).top();
 }
 
 void PlaylistSongList::Rows::setKeyHandler(Fn<bool(QKeyEvent*)> handler) {
@@ -634,9 +1127,11 @@ void PlaylistSongList::Rows::setPlayback(
 
 void PlaylistSongList::Rows::setSelectionActions(
 		Fn<void(uint64_t)> toggle,
-		Fn<bool()> playSelection) {
+		Fn<bool()> playSelection,
+		Fn<void(std::vector<uint64_t>)> mark) {
 	_toggle = std::move(toggle);
 	_playSelection = std::move(playSelection);
+	_mark = std::move(mark);
 }
 
 MusicRowPlayback PlaylistSongList::Rows::musicPlayback(uint64_t id) const {
@@ -732,6 +1227,8 @@ QAccessible::State PlaylistSongList::Rows::accessibilityChildState(int index) co
 		? _chosen.contains(_data[index].documentId)
 		: index == _selected;
 	state.multiSelectable = bool(_toggle);
+	state.checkable = bool(_toggle);
+	state.checked = state.checkable && state.selected;
 	state.focusable = true;
 	state.focused = hasFocus() && index == _selected;
 	state.disabled = !isEnabled();
@@ -749,7 +1246,7 @@ QRect PlaylistSongList::Rows::accessibilityChildRect(int index) const {
 		else if (_pressed < _target && index > _pressed && index <= _target) --slot;
 		else if (_pressed > _target && index >= _target && index < _pressed) ++slot;
 	}
-	return QRect(0, slot * rowHeight(), width(), rowHeight());
+	return itemRect(slot);
 }
 
 bool PlaylistSongList::Rows::accessibilityChildSupportsActions(int index) const {
@@ -757,11 +1254,12 @@ bool PlaylistSongList::Rows::accessibilityChildSupportsActions(int index) const 
 }
 
 quintptr PlaylistSongList::Rows::accessibilityChildIdentity(int index) const {
-	return index >= 0 && index < int(_data.size()) ? quintptr(index + 1) : 0;
+	return index >= 0 && index < int(_data.size()) ? quintptr(_data[index].documentId) : 0;
 }
 
 int PlaylistSongList::Rows::accessibilityChildIndexByIdentity(quintptr identity) const {
-	return identity && identity <= _data.size() ? int(identity - 1) : -1;
+	const auto found = std::ranges::find(_data, uint64_t(identity), &PlaylistSongListRow::documentId);
+	return found == _data.end() ? -1 : int(found - _data.begin());
 }
 
 void PlaylistSongList::Rows::accessibilityChildSetFocus(quintptr identity) {
@@ -814,7 +1312,7 @@ PlaylistSongList::~PlaylistSongList() {
 int PlaylistSongList::resizeGetHeight(int width) {
 	const auto height = std::min(
 		_viewportLimit > 0 ? _viewportLimit : st::mediaPlayerListHeightMax,
-		_rows->rowHeight() * _rows->accessibilityChildCount());
+		_rows->contentHeight(width));
 	_scroll->setGeometry(0, 0, width, height);
 	// Qt can defer the viewport resize while the scroll area is hidden.
 	_rows->resizeToWidth(width);
@@ -871,6 +1369,19 @@ void PlaylistSongList::showActions() {
 	_rows->showActions();
 }
 
+void PlaylistSongList::setArtworkSession(not_null<Main::Session*> session) {
+	_rows->setArtworkSession(session);
+}
+
+void PlaylistSongList::setTiles(bool tiles) {
+	_restoreScrollTop = _rows->setTiles(tiles);
+	resizeToWidth(width());
+}
+
+bool PlaylistSongList::cancelRangeMark() {
+	return _rows->cancelRangeMark();
+}
+
 void PlaylistSongList::setPlayback(
 		uint64_t current, uint64_t checked, QString state, bool unavailable) {
 	_rows->setPlayback(current, checked, std::move(state), unavailable);
@@ -897,8 +1408,9 @@ void PlaylistSongList::focusSelected() {
 
 void PlaylistSongList::setSelectionActions(
 		Fn<void(uint64_t)> toggle,
-		Fn<bool()> playSelection) {
-	_rows->setSelectionActions(std::move(toggle), std::move(playSelection));
+		Fn<bool()> playSelection,
+		Fn<void(std::vector<uint64_t>)> mark) {
+	_rows->setSelectionActions(std::move(toggle), std::move(playSelection), std::move(mark));
 }
 
 void PlaylistSongList::setCopyOrgLinkAction(Fn<void(uint64_t)> copy) {

@@ -55,6 +55,7 @@ void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder);
 
 [[nodiscard]] bool ModalKeysEnabled();
 [[nodiscard]] bool ModalKeysInNormal(not_null<MainWindow*> window);
+void AcceptMusicFilter(not_null<MainWindow*> window);
 [[nodiscard]] rpl::producer<bool> ModalKeysEnabledChanges();
 [[nodiscard]] bool MxShortcutInStockMode();
 [[nodiscard]] rpl::producer<QString> MxShortcutInStockModeLabel();

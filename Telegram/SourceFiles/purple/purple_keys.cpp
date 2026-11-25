@@ -321,6 +321,15 @@ enum class Action {
 	OpenMusic,
 	MusicFirstTrack,
 	MusicMarkTrack,
+	MusicRangeMark,
+	MusicMarkPage,
+	MusicToggleTiles,
+	MusicForwardTracks,
+	MusicGoToMessage,
+	MusicAddToPlaylist,
+	MusicQueueTracks,
+	MusicCopyMessageLink,
+	MusicTrackMenu,
 	OpenPlaylists,
 	OpenChatInfo,
 	OpenChatMedia,
@@ -468,6 +477,24 @@ const Command kCommands[] = {
 		[] { return u"First track"_q; } },
 	{ Action::MusicMarkTrack, "music-mark-track", "playback", "Needs Music",
 		[] { return u"Mark track"_q; } },
+	{ Action::MusicRangeMark, "music-mark-range", "playback", "Needs Music",
+		[] { return u"Mark range of tracks"_q; } },
+	{ Action::MusicMarkPage, "music-mark-page", "playback", "Needs Music",
+		[] { return u"Mark visible tracks"_q; } },
+	{ Action::MusicToggleTiles, "music-toggle-view", "playback", "Needs Music",
+		[] { return u"Toggle Music List or Tiles"_q; } },
+	{ Action::MusicForwardTracks, "music-forward-tracks", "playback", "Needs Music",
+		[] { return tr::lng_context_forward_msg(tr::now); } },
+	{ Action::MusicGoToMessage, "music-go-to-message", "playback", "Needs Music",
+		[] { return tr::lng_context_to_msg(tr::now); } },
+	{ Action::MusicAddToPlaylist, "music-add-to-playlist", "playback", "Needs Music",
+		[] { return tr::lng_purple_playlists_add(tr::now); } },
+	{ Action::MusicQueueTracks, "music-queue-tracks", "playback", "Needs Music",
+		[] { return u"Add tracks to queue"_q; } },
+	{ Action::MusicCopyMessageLink, "music-copy-message-link", "playback", "Needs Music",
+		[] { return tr::lng_context_copy_link(tr::now); } },
+	{ Action::MusicTrackMenu, "music-track-menu", "playback", "Needs Music",
+		[] { return u"Track actions"_q; } },
 	{ Action::OpenPlaylists, "open-playlists", "playback", "",
 		[] { return tr::lng_purple_playlists_title(tr::now); } },
 	{ Action::OpenChatInfo, "open-chat-info", "chat", "Needs an open chat",
@@ -503,7 +530,7 @@ const Command kCommands[] = {
 		[] { return tr::lng_shortcuts_show_chat_preview(tr::now); } },
 	{ Action::MessageMenu, "message-hint-menu", "messages", "Needs visible messages",
 		[] { return tr::lng_purple_keys_message_menu(tr::now); } },
-	{ Action::TogglePlayback, "playback-toggle", "playback", "Needs active audio in this account",
+	{ Action::TogglePlayback, "playback-toggle", "music playback", "Needs active audio in this account",
 		[] { return tr::lng_shortcuts_media_play_pause(tr::now); } },
 	{ Action::StopPlayback, "playback-stop", "playback", "Needs active audio in this account",
 		[] { return tr::lng_shortcuts_media_stop(tr::now); } },
@@ -1555,15 +1582,37 @@ std::optional<TrackListAction> MusicNavigation(Action action) {
 	case Action::LatestMessages: return TrackListAction::Last;
 	case Action::OpenChat: return TrackListAction::Play;
 	case Action::MusicMarkTrack: return TrackListAction::Mark;
+	case Action::MusicRangeMark: return TrackListAction::RangeMark;
+	case Action::MusicMarkPage: return TrackListAction::MarkPage;
+	case Action::FocusChats:
+		return MusicTiles() ? std::optional(TrackListAction::Left) : std::nullopt;
+	case Action::FocusConversation:
+		return MusicTiles() ? std::optional(TrackListAction::Right) : std::nullopt;
+	default: return std::nullopt;
+	}
+}
+
+std::optional<MusicTrackAction> MusicAction(Action action) {
+	switch (action) {
+	case Action::MusicForwardTracks: return MusicTrackAction::Forward;
+	case Action::MusicGoToMessage: return MusicTrackAction::GoTo;
+	case Action::MusicAddToPlaylist: return MusicTrackAction::AddToPlaylist;
+	case Action::MusicQueueTracks: return MusicTrackAction::Queue;
+	case Action::MusicCopyMessageLink: return MusicTrackAction::CopyMessageLink;
+	case Action::MusicTrackMenu: return MusicTrackAction::Menu;
 	default: return std::nullopt;
 	}
 }
 
 bool Available(Action action, const Target &target) {
+	if (MusicAction(action)) return target.contextMap == MapKind::Music;
 	if (target.contextMap == MapKind::Music && MusicNavigation(action)) return true;
 	switch (action) {
 	case Action::MusicFirstTrack:
-	case Action::MusicMarkTrack: return false;
+	case Action::MusicMarkTrack:
+	case Action::MusicRangeMark:
+	case Action::MusicMarkPage: return false;
+	case Action::MusicToggleTiles: return target.contextMap == MapKind::Music;
 	case Action::MoveUp:
 	case Action::MoveDown:
 		return target.list != nullptr || HistoryScroll(target) != nullptr;
@@ -1744,6 +1793,12 @@ std::vector<EffectiveBinding> EffectiveBindings(
 	}
 	if (contextMap == MapKind::Music) {
 		result.push_back({ Action::MusicMarkTrack, { Qt::Key_M }, MapKind::Music, false });
+		result.push_back({ Action::MusicRangeMark, { Qt::Key_V }, MapKind::Music, false });
+		result.push_back({ Action::MusicMarkPage,
+			{ QKeyCombination(Qt::ShiftModifier, Qt::Key_V).toCombined() }, MapKind::Music, false });
+		result.push_back({ Action::NextTrack, { Qt::Key_N }, MapKind::Music, false });
+		result.push_back({ Action::PreviousTrack,
+			{ QKeyCombination(Qt::ShiftModifier, Qt::Key_N).toCombined() }, MapKind::Music, false });
 	}
 	return result;
 }
@@ -1816,6 +1871,7 @@ public:
 #endif // Q_OS_MAC
 	[[nodiscard]] bool ownsChatListFocus() const;
 	[[nodiscard]] bool isNormal() const { return _normal; }
+	void acceptMusicFilter() { enterNormal(true, false); }
 	[[nodiscard]] int statusBarHeight() const;
 	void updateLayout(QRect body);
 	void raiseChrome();
@@ -1841,7 +1897,7 @@ private:
 		int key,
 		const Target &target) const;
 	void clearPrefix(bool keepChatNavigation = false);
-	void enterNormal(bool silent = true);
+	void enterNormal(bool silent = true, bool clearMusicFilter = true);
 	void enterInsert(bool silent = true);
 	void showFeedback(QString text, bool isError = false, int durationMs = 0);
 	void schedulePendingNoticeFlush();
@@ -2848,11 +2904,13 @@ void Keys::stepTopic(const Target &target, int delta, bool unreadOnly) {
 	current->showThread(topics[nextIdx]);
 }
 
-void Keys::enterNormal(bool silent) {
+void Keys::enterNormal(bool silent, bool clearMusicFilter) {
 	clearPrefix();
 	_normal = true;
-	if (const auto current = owner()) {
-		FocusMusicSearch(current, windowFocusWidget(), false);
+	if (clearMusicFilter) {
+		if (const auto current = owner()) {
+			FocusMusicSearch(current, windowFocusWidget(), false);
+		}
 	}
 	if (!silent) {
 		showFeedback(tr::lng_purple_keys_normal(tr::now));
@@ -3625,6 +3683,10 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		? std::clamp(count, 1, kMaxCount)
 		: 1;
 	if (target.contextMap == MapKind::Music) {
+		if (const auto trackAction = MusicAction(action)) {
+			ActOnMusic(current, target.focus, *trackAction);
+			return;
+		}
 		if (const auto navigation = MusicNavigation(action)) {
 			NavigateMusic(current, target.focus, *navigation, repeat);
 			return;
@@ -3660,6 +3722,17 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 	switch (action) {
 	case Action::MusicFirstTrack:
 	case Action::MusicMarkTrack:
+	case Action::MusicRangeMark:
+	case Action::MusicMarkPage:
+	case Action::MusicForwardTracks:
+	case Action::MusicGoToMessage:
+	case Action::MusicAddToPlaylist:
+	case Action::MusicQueueTracks:
+	case Action::MusicCopyMessageLink:
+	case Action::MusicTrackMenu:
+		break;
+	case Action::MusicToggleTiles:
+		ToggleMusicTiles();
 		break;
 	case Action::EnterNormalMode:
 		enterNormal(false);
@@ -4861,6 +4934,12 @@ bool ModalKeysEnabled() {
 bool ModalKeysInNormal(not_null<MainWindow*> window) {
 	const auto keys = FindKeys(window.get());
 	return Enabled() && (!keys || keys->isNormal());
+}
+
+void AcceptMusicFilter(not_null<MainWindow*> window) {
+	if (const auto keys = FindKeys(window.get()); Enabled() && keys) {
+		keys->acceptMusicFilter();
+	}
 }
 
 rpl::producer<bool> ModalKeysEnabledChanges() {

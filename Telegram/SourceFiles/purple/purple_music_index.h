@@ -51,7 +51,8 @@ public:
 		MusicIndexScope scope,
 		const QString &query,
 		const std::vector<quint64> &visiblePeers,
-		std::optional<MusicIndexCursor> cursor);
+		std::optional<MusicIndexCursor> cursor,
+		bool tail = false);
 	[[nodiscard]] std::optional<qint64> count(
 		MusicIndexScope scope,
 		const std::vector<quint64> &visiblePeers);

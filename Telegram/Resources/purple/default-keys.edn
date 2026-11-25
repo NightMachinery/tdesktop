@@ -210,6 +210,13 @@
   "N" :playback-previous-track
   "f" :playback-seek-forward
   "b" :playback-seek-backward
+  "t" :music-toggle-view
+  "F" :music-forward-tracks
+  "g" :music-go-to-message
+  "a" :music-add-to-playlist
+  "q" :music-queue-tracks
+  "y" :music-copy-message-link
+  "." :music-track-menu
   "l" :open-playlists}
 
  :insert

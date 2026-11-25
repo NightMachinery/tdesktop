@@ -4,6 +4,7 @@
 #include "purple/hooks/media_playback.h"
 
 #include "purple/purple_config.h"
+#include "purple/purple_playlists_menu.h"
 #include "purple/purple_playlists_ops.h"
 #include "purple/purple_playlists_policy.h"
 #include "purple/purple_playlists_resolver.h"
@@ -33,6 +34,7 @@
 #include <QtCore/QThread>
 
 #include <algorithm>
+#include <deque>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -42,7 +44,6 @@ namespace {
 
 using Type = AudioMsgId::Type;
 constexpr auto kResolveWindow = std::size_t(4);
-
 [[nodiscard]] bool SamePlaylistPlaybackSource(
 		const AudioMsgId &a,
 		const AudioMsgId &b) {
@@ -485,6 +486,27 @@ private:
 
 std::shared_ptr<PlaylistPlayback> Active;
 rpl::event_stream<> Changes;
+
+std::map<Main::Session*, std::deque<PlaylistMessage>> MusicQueues;
+
+bool PlayQueuedMusic(not_null<Main::Session*> session) {
+	if (Core::App().passcodeLocked() || session->account().loggingOut()) return false;
+	const auto found = MusicQueues.find(session.get());
+	if (found == MusicQueues.end()) return false;
+	auto &queue = found->second;
+	while (!queue.empty()) {
+		const auto message = queue.front();
+		queue.pop_front();
+		if (!CapturePlaylistSong(session, message)) continue;
+		const auto item = session->data().message(message.id);
+		if (!item || !item->media() || !item->media()->document()) continue;
+		Media::Player::instance()->play(
+			AudioMsgId(item->media()->document(), message.id),
+			Media::Player::PlaylistContext{ item->topicRootId() });
+		return true;
+	}
+	return false;
+}
 bool PlayerFinished = false;
 uint64_t StartGeneration = 0;
 const auto Handoffs = std::make_shared<PlaylistHandoffState>();
@@ -1517,6 +1539,10 @@ std::optional<bool> MoveInAccountPlaylist(
 		int delta,
 		bool autonext) {
 	RequireMainThread();
+	if (type == Type::Song && delta > 0 && current.audio()
+		&& PlayQueuedMusic(&current.audio()->session())) {
+		return true;
+	}
 	const auto active = Active;
 	if (type != Type::Song || !active || !active->owns(current)) return std::nullopt;
 	return active->move(delta, autonext);
@@ -1527,9 +1553,37 @@ std::optional<bool> AccountPlaylistStepAvailable(
 		const AudioMsgId &current,
 		int delta) {
 	RequireMainThread();
+	if (type == Type::Song && delta > 0 && current.audio()) {
+		const auto found = MusicQueues.find(&current.audio()->session());
+		if (found != MusicQueues.end() && !found->second.empty()) return true;
+	}
 	const auto active = Active;
 	if (type != Type::Song || !active || !active->owns(current)) return std::nullopt;
 	return active->available(delta);
+}
+
+bool AppendAccountMusicQueue(
+		not_null<Main::Session*> session,
+		const std::vector<PlaylistMessage> &messages) {
+	RequireMainThread();
+	if (messages.empty() || Core::App().passcodeLocked()
+		|| session->account().loggingOut()
+		|| !std::ranges::all_of(messages, [=](const PlaylistMessage &message) {
+			return bool(CapturePlaylistSong(session, message));
+		})) {
+		return false;
+	}
+	const auto [found, created] = MusicQueues.try_emplace(session.get());
+	if (created) {
+		session->lifetime().add([key = session.get()] { MusicQueues.erase(key); });
+	}
+	found->second.insert(found->second.end(), messages.begin(), messages.end());
+	const auto state = Media::Player::instance()->getState(Type::Song);
+	if (Media::Player::IsStoppedOrStopping(state.state)) {
+		return PlayQueuedMusic(session);
+	}
+	Changes.fire({});
+	return true;
 }
 
 } // namespace Purple

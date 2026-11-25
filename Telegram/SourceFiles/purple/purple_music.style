@@ -2,7 +2,8 @@ using "ui/basic.style";
 using "ui/widgets/widgets.style";
 using "ui/layers/layers.style";
 
-purpleMusicMaxWidth: 840px;
+purpleMusicMaxWidth: 1280px;
+purpleChatMusicWidth: 760px;
 purpleMusicHeaderHeight: 64px;
 purpleMusicMargin: 24px;
 purpleMusicToolbarGap: 6px;
@@ -12,6 +13,20 @@ purpleMusicSearchMargin: margins(24px, 4px, 24px, 16px);
 purpleMusicStatusMargin: margins(24px, 0px, 24px, 12px);
 purpleMusicListMargin: margins(12px, 0px, 12px, 0px);
 purpleMusicActionMargin: margins(24px, 0px, 24px, 10px);
+purpleMusicTrackHeight: 66px;
+purpleMusicCoverSize: 48px;
+purpleMusicCoverRadius: 6px;
+purpleMusicTrackInset: 8px;
+purpleMusicTrackGap: 16px;
+purpleMusicBadgeSize: 18px;
+purpleMusicTileMin: 150px;
+purpleMusicTileMax: 180px;
+purpleMusicTileGap: 18px;
+purpleMusicNowCover: 120px;
+purpleMusicNowCoverCompact: 72px;
+purpleMusicNowPadding: 16px;
+purpleMusicNowMargin: margins(24px, 0px, 24px, 12px);
+purpleMusicNowTitle: font(27px semibold);
 
 purpleMusicTitle: FlatLabel(boxTitle) {
 	style: TextStyle(semiboldTextStyle) {

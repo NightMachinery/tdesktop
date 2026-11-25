@@ -161,6 +161,10 @@ int main(int argc, char **argv) {
 			previous = { maximum, {}, 100 * (chunk + 1), true };
 		}
 		auto cursor = std::optional<Purple::MusicIndexCursor>();
+		const auto oldest = index.page(*scope, u"glass"_q, roster, {}, true);
+		Check(oldest && oldest->size() == 100
+			&& oldest->front().message == 100 && oldest->back().message == 1,
+			"filtered tail returns the oldest page in display order");
 		for (auto chunk = 0; chunk != 3; ++chunk) {
 			const auto rows = index.page(*scope, u""_q, roster, cursor);
 			Check(rows && rows->size() == 100, "catalog page fits SQLite limit");
