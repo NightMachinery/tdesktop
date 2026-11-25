@@ -690,7 +690,9 @@ def customize_keymap_include(sources):
     catalog = 'struct Command { Action action; const char *id; };\nconst Command kCommands[] = {\n'
     catalog += ''.join(f'\t{{ Action::{action}, "{name}" }},\n' for action, name in commands)
     catalog += '};\n'
-    parser = keys[catalog_end:keys.index('constexpr auto kStarterKeysTemplate')]
+    parser = keys[catalog_end:keys.index('int KeyStroke(', catalog_end)]
+    parser += keys[keys.index('const Command &FindCommand(', catalog_end):
+        keys.index('constexpr auto kStarterKeysTemplate')]
     fixture = (sources.parent / 'Resources/purple/default-keys.edn').read_text()
     return modifiers + actions + catalog + parser + 'constexpr auto Bundled = R"EDN(' + fixture + ')EDN";\n'
 
