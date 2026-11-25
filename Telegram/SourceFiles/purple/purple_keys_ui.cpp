@@ -1,4 +1,5 @@
 #include "purple/purple_keys_ui.h"
+#include "purple/purple_keys_colors.h"
 
 #include "base/event_filter.h"
 #include "data/data_forum_topic.h"
@@ -125,15 +126,6 @@ constexpr auto kCtrlMod = Qt::ControlModifier;
 	case BadgeKind::Help: return QColor(0x03, 0x69, 0xa1);
 	}
 	return QColor(0x2f, 0x7d, 0x44);
-}
-
-[[nodiscard]] QColor BlendColor(QColor a, QColor b, double ratio) {
-	const auto inv = 1.0 - ratio;
-	return QColor(
-		int(a.red() * inv + b.red() * ratio),
-		int(a.green() * inv + b.green() * ratio),
-		int(a.blue() * inv + b.blue() * ratio),
-		255);
 }
 
 [[nodiscard]] int MeasureChordsWidth(
@@ -307,6 +299,8 @@ void ModalStatusBar::paintEvent(QPaintEvent *) {
 	const auto uiBold = st::semiboldFont;
 	const auto monoFont = MonoFont(11, false);
 	const auto monoBold = MonoFont(11, true);
+	const auto pillBg = st::windowBg->c;
+	const auto pillMuted = ReadableText(st::windowSubTextFg->c, pillBg);
 
 	// Right-side quiet discovery cue (layer-specific when a layer is open).
 	const auto cue = !_state.rightCue.isEmpty()
@@ -365,10 +359,10 @@ void ModalStatusBar::paintEvent(QPaintEvent *) {
 		const auto chipW = std::min(remaining(), textW + 14);
 		const auto chipRect = slotRect(chipW).adjusted(0, 4, 0, -4);
 		p.setPen(QPen(st::boxDividerBg->c, 1));
-		p.setBrush(st::windowBg->c);
+		p.setBrush(pillBg);
 		p.drawRoundedRect(QRectF(chipRect).adjusted(.5, .5, -.5, -.5), 4, 4);
 		p.setFont(monoFont);
-		p.setPen(st::windowSubTextFg);
+		p.setPen(pillMuted);
 		p.drawText(chipRect, Qt::AlignCenter, _state.contextChip);
 		advance(chipW, 10);
 	}
@@ -417,18 +411,19 @@ void ModalStatusBar::paintEvent(QPaintEvent *) {
 		if (pillW <= remaining()) {
 			const auto pillRect = slotRect(pillW).adjusted(0, 4, 0, -4);
 			p.setPen(QPen(st::boxDividerBg->c, 1));
-			p.setBrush(st::windowBg->c);
+			p.setBrush(pillBg);
 			p.drawRoundedRect(QRectF(pillRect).adjusted(.5, .5, -.5, -.5), 4, 4);
+			const auto pillActive = ReadableText(st::windowActiveTextFg->c, pillBg);
 			auto px = pillRect.left() + 7;
 			for (auto i = 0; i < 3; ++i) {
 				if (i > 0) {
 					p.setFont(monoFont);
-					p.setPen(st::windowSubTextFg);
+					p.setPen(pillMuted);
 					p.drawText(QRect(px, pillRect.top(), sepW, pillRect.height()), Qt::AlignCenter, sep);
 					px += sepW;
 				}
 				p.setFont(parts[i].active ? monoBold : monoFont);
-				p.setPen(parts[i].active ? st::windowActiveTextFg : st::windowSubTextFg);
+				p.setPen(parts[i].active ? pillActive : pillMuted);
 				p.drawText(
 					QRect(px, pillRect.top(), partW[i], pillRect.height()),
 					Qt::AlignCenter,
@@ -624,7 +619,9 @@ void WhichKeyOverlay::paintEvent(QPaintEvent *) {
 
 	if (!_state.title.isEmpty()) {
 		p.setFont(st::semiboldFont);
-		p.setPen(_state.isLocal ? BadgeColor(BadgeKind::Local) : st::windowActiveTextFg->c);
+		const auto accent = _state.isLocal
+			? BadgeColor(BadgeKind::Local) : st::windowActiveTextFg->c;
+		p.setPen(ReadableText(accent, st::windowBg->c));
 		const auto fm = QFontMetrics(st::semiboldFont);
 		const auto w = fm.horizontalAdvance(_state.title);
 		const auto drawX = rtl ? (r.width() - hx - w) : hx;
@@ -638,13 +635,13 @@ void WhichKeyOverlay::paintEvent(QPaintEvent *) {
 		const auto bw = bfm.horizontalAdvance(_state.contextBadge) + 14;
 		const auto bx = rtl ? (r.width() - hx - bw) : hx;
 		const auto pill = QRect(bx, hMidY - 10, bw, 20);
-		auto fill = BadgeColor(BadgeKind::Local);
-		fill.setAlpha(28);
+		const auto accent = BadgeColor(BadgeKind::Local);
+		const auto fill = BlendColor(st::windowBg->c, accent, 28. / 255.);
 		p.setPen(Qt::NoPen);
 		p.setBrush(fill);
 		p.drawRoundedRect(pill, 4, 4);
 		p.setFont(bf);
-		p.setPen(BadgeColor(BadgeKind::Local));
+		p.setPen(ReadableText(accent, fill));
 		p.drawText(pill, Qt::AlignCenter, _state.contextBadge);
 	}
 
@@ -1448,8 +1445,7 @@ protected:
 				: (_data.unavailableReason.isEmpty()
 					? u"Unavailable in this view"_q
 					: (u"Unavailable: "_q + _data.unavailableReason));
-			auto fill = statusColor;
-			fill.setAlpha(26);
+			const auto fill = BlendColor(st::windowBg->c, statusColor, 26. / 255.);
 			const auto fm = QFontMetrics(st::semiboldFont);
 			const auto pw = std::min(width() - 2 * kPadX, fm.horizontalAdvance(statusText) + 18);
 			const auto pill = QRect(rtl ? (width() - kPadX - pw) : kPadX, y, pw, 22);
@@ -1457,7 +1453,7 @@ protected:
 			p.setBrush(fill);
 			p.drawRoundedRect(pill, 5, 5);
 			p.setFont(st::semiboldFont);
-			p.setPen(statusColor);
+			p.setPen(ReadableText(statusColor, fill));
 			p.drawText(pill, Qt::AlignCenter, statusText);
 			y += 32;
 		}

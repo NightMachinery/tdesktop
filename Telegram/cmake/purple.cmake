@@ -186,6 +186,7 @@ PRIVATE
     purple/purple_chat_background.h
     purple/purple_keys.cpp
     purple/purple_keys.h
+    purple/purple_keys_colors.h
     purple/purple_keys_mx.h
     purple/purple_keys_ui.cpp
     purple/purple_keys_ui.h
