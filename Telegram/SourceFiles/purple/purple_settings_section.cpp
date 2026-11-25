@@ -738,12 +738,14 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	builder.addSkip();
 
 	BuildModalKeysSetting(builder);
+	const auto controller = builder.controller();
 	builder.addButton({
 		.id = u"advanced/purple_customize_settings"_q,
 		.title = rpl::single(u"Customize settings…"_q),
 		.st = &st::settingsButtonNoIcon,
-		.onClick = [window = base::make_weak(&builder.controller()->window())] {
-			if (const auto live = window.get()) ShowCustomizeSettings(live);
+		.onClick = [weak = controller ? base::make_weak(controller)
+			: base::weak_ptr<Window::SessionController>()] {
+			if (const auto live = weak.get()) ShowCustomizeSettings(&live->window());
 		},
 		.keywords = { u"purple"_q, u"settings"_q, u"customize"_q, u"file"_q },
 	});

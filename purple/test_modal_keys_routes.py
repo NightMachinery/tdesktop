@@ -70,6 +70,14 @@ def bound(action, chord, text=defaults):
 
 # Customize occupies a four-stroke leaf and does not displace Calls.
 bound("CustomizeSettings", "SPC f e d")
+section_builder = read("settings/settings_builder.cpp")
+ordered(section_builder, "SectionBuilder::controller() const",
+        "const SearchContext &) -> Window::SessionController*", "return nullptr")
+purple_section = read("purple/purple_settings_section.cpp")
+ordered(purple_section, 'u"advanced/purple_customize_settings"_q',
+        "if (const auto live = weak.get())", "ShowCustomizeSettings(&live->window())")
+assert not any("builder.controller()->" in source.read_text(encoding="utf-8")
+               for source in (SOURCE / "purple").glob("*.cpp"))
 bound("OpenCalls", "SPC o p")
 assert len(re.findall(r'"SPC f e d"\s+:', defaults)) == 1
 assert re.search(r'"SPC f e"\s+"edit settings"', defaults)
