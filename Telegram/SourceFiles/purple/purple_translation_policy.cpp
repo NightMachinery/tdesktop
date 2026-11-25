@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_translation_policy.h"
+#include "purple/purple_notices.h"
 
 #include "base/algorithm.h"
 #include "base/debug_log.h"
@@ -301,20 +302,34 @@ void SetChatTranslationExcluded(not_null<PeerData*> peer, bool excluded) {
 
 void AddTranslateBarExcludeAction(
 		not_null<Ui::PopupMenu*> menu,
-		not_null<PeerData*> peer,
-		Fn<void(TextWithEntities, const QString&, Fn<void()>)> showToast) {
+		not_null<PeerData*> peer) {
+	const auto session = base::make_weak(&peer->session());
+	const auto id = peer->id;
 	menu->addAction(
 		tr::lng_purple_translate_dont_chat(tr::now),
 		[=] {
-			SetChatTranslationExcluded(peer, true);
-			if (showToast) {
-				showToast(
-					tr::lng_purple_translate_excluded_toast(
-						tr::now,
-						tr::marked),
-					tr::lng_translate_undo(tr::now),
-					[=] { SetChatTranslationExcluded(peer, false); });
+			const auto live = session.get();
+			const auto peer = live ? live->data().peerLoaded(id) : nullptr;
+			if (!peer) {
+				return;
 			}
+			SetChatTranslationExcluded(peer, true);
+			ShowPurpleNotice({
+				.session = live,
+				.scope = u"Translation"_q,
+				.summary = tr::lng_purple_translate_excluded_toast(tr::now),
+				.coalesceKey = u"translation:excluded:"_q + QString::number(id.value),
+				.primaryAction = PurpleNoticeAction{
+					.label = tr::lng_translate_undo(tr::now),
+					.run = [=](not_null<Window::Controller*>) {
+						if (const auto live = session.get()) {
+							if (const auto peer = live->data().peerLoaded(id)) {
+								SetChatTranslationExcluded(peer, false);
+							}
+						}
+					},
+				},
+			});
 		},
 		&st::menuIconBlock);
 }

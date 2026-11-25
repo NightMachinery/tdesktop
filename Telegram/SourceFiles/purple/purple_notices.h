@@ -57,6 +57,7 @@ struct PurpleAckRequest {
 void ShowPurpleNotice(PurpleNoticeRequest request);
 void ShowPurpleAck(PurpleAckRequest request);
 
+void InitPurpleNoticeDelivery();
 void MaybeFlushPendingNotices(not_null<::MainWindow*> window);
 void OpenPurpleNoticeHistory(not_null<::MainWindow*> window);
 [[nodiscard]] int PendingPurpleNoticeCount(Main::Session *session);

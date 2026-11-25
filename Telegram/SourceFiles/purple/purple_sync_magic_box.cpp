@@ -34,7 +34,6 @@
 namespace Purple {
 namespace {
 
-constexpr auto kProblemToastDuration = crl::time(8000);
 
 SyncMagicFrame FrameOf(not_null<Main::Session*> session) {
 	const auto chat = SyncMagicChatOf(session);
@@ -244,7 +243,6 @@ void ToastSyncMagicProblem(not_null<Main::Session*> session) {
 		return;
 	}
 	chat->shown();
-	const auto weak = base::make_weak(controller);
 	const auto statusText = SyncMagicStatusText(session, frame);
 	const auto weakSession = base::make_weak(session.get());
 	const auto openSettings = [=](not_null<Window::Controller*> host) {
@@ -268,21 +266,6 @@ void ToastSyncMagicProblem(not_null<Main::Session*> session) {
 		.primaryAction = PurpleNoticeAction{
 			.label = tr::lng_purple_magic_problem_open(tr::now),
 			.run = openSettings,
-		},
-		.fallbackToast = [=] {
-			if (const auto strong = weak.get()) {
-				strong->uiShow()->showToast({
-					.text = TextWithEntities{ statusText + ' ' }.append(
-						Ui::Text::Link(tr::lng_purple_magic_problem_open(tr::now))),
-					.filter = [=](const ClickHandlerPtr &, Qt::MouseButton) {
-						if (const auto live = weak.get()) {
-							openSettings(&live->window());
-						}
-						return false;
-					},
-					.duration = kProblemToastDuration,
-				});
-			}
 		},
 	});
 }

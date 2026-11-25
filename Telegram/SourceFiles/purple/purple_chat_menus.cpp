@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_last_seen.h"
+#include "purple/purple_notices.h"
 #include "purple/purple_list_menu.h"
 #include "purple/purple_pinned_music.h"
 #include "purple/purple_preset_box.h"
@@ -128,8 +129,12 @@ bool AddPeerTranslateMenuAction(
 			tr::lng_purple_translate_allow_chat(tr::now),
 			[=] {
 				SetChatTranslationExcluded(peer, false);
-				controller->showToast(
-					tr::lng_purple_translate_allowed_toast(tr::now));
+				ShowPurpleAck({
+					.session = &peer->session(),
+					.window = &controller->window(),
+					.scope = u"Translation"_q,
+					.text = tr::lng_purple_translate_allowed_toast(tr::now),
+				});
 			},
 			&st::menuIconTranslate);
 		return true;
@@ -140,8 +145,12 @@ bool AddPeerTranslateMenuAction(
 			tr::lng_purple_translate_dont_chat(tr::now),
 			[=] {
 				SetChatTranslationExcluded(peer, true);
-				controller->showToast(
-					tr::lng_purple_translate_excluded_toast(tr::now));
+				ShowPurpleAck({
+					.session = &peer->session(),
+					.window = &controller->window(),
+					.scope = u"Translation"_q,
+					.text = tr::lng_purple_translate_excluded_toast(tr::now),
+				});
 			},
 			&st::menuIconBlock);
 	}

@@ -119,6 +119,7 @@ struct DeliveryContext {
 	bool inInsertMode = false;
 	bool hasImePreedit = false;
 	bool hasPendingPrefix = false;
+	bool recentTyping = false;
 	bool hasBlockingLayerOrBox = false;
 	bool inZenMode = false;
 	bool statusBarVisible = false;
@@ -141,19 +142,18 @@ struct DeliveryContext {
 	if (ctx.passcodeLocked || ctx.privacyScreenActive) {
 		return DeliveryRoute::QueueSilentUntilAvailable;
 	}
-	if (!ctx.modalEnabled) {
-		return DeliveryRoute::StockToast;
-	}
 	if (kind == NoticeKind::Dialog) {
-		if (background
-			&& (!ctx.canInterruptWindow
-				|| ctx.inInsertMode
-				|| ctx.hasImePreedit
+		if (!ctx.canInterruptWindow || ctx.recentTyping || ctx.hasImePreedit
+			|| (background
+				&& (ctx.inInsertMode
 				|| ctx.hasPendingPrefix
-				|| ctx.hasBlockingLayerOrBox)) {
+				|| ctx.hasBlockingLayerOrBox))) {
 			return DeliveryRoute::QueueDialogWithCue;
 		}
 		return DeliveryRoute::OpenDialogNow;
+	}
+	if (!ctx.modalEnabled) {
+		return DeliveryRoute::StockToast;
 	}
 	// Group B (Ack / single-line error / persistent status cue).
 	if (!ctx.statusBarVisible && !ctx.inZenMode) {
@@ -165,9 +165,9 @@ struct DeliveryContext {
 }
 
 [[nodiscard]] inline bool ShouldFlushPendingDialog(const DeliveryContext &ctx) {
-	return ctx.modalEnabled
-		&& !ctx.passcodeLocked
+	return !ctx.passcodeLocked
 		&& !ctx.privacyScreenActive
+		&& !ctx.recentTyping
 		&& !ctx.inInsertMode
 		&& !ctx.hasImePreedit
 		&& !ctx.hasPendingPrefix
@@ -185,9 +185,12 @@ struct DeliveryContext {
 		const NoticeRecord &record,
 		const DeliveryContext &ctx,
 		bool presentationBusy) {
-	if (presentationBusy || ctx.passcodeLocked || ctx.privacyScreenActive
-		|| (ctx.modalEnabled && record.kind == NoticeKind::Dialog
-			&& !ShouldFlushPendingDialog(ctx))) {
+	if (presentationBusy || ctx.passcodeLocked || ctx.privacyScreenActive) {
+		return std::nullopt;
+	}
+	if (record.kind == NoticeKind::Dialog
+		&& (!ctx.canInterruptWindow || ctx.recentTyping || ctx.hasImePreedit
+			|| ((ctx.modalEnabled || record.background) && !ShouldFlushPendingDialog(ctx)))) {
 		return std::nullopt;
 	}
 	return DecideDelivery(record.kind, false, record.persistent, ctx);
@@ -263,7 +266,7 @@ public:
 		const auto queued = !canPresent || hasPendingKey(rec)
 			|| route == DeliveryRoute::QueueDialogWithCue
 			|| route == DeliveryRoute::QueueSilentUntilAvailable;
-		const auto id = (queued || ctx.modalEnabled)
+		const auto id = (queued || ctx.modalEnabled || rec.kind == NoticeKind::Dialog)
 			? record(rec, queued, queued ? std::move(fallback) : std::function<void()>(), now)
 			: uint64_t(0);
 		return { route, id, queued };

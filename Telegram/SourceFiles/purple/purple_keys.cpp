@@ -4340,6 +4340,7 @@ int CalendarDayKeyOffset(const QKeyEvent &event) {
 }
 
 void EnsureModalKeysAttached(not_null<MainWindow*> window) {
+	InitPurpleNoticeDelivery();
 	EnsureKeys(window);
 }
 
@@ -4484,7 +4485,10 @@ void ShowModalNoticeLayer(
 		not_null<MainWindow*> window,
 		std::unique_ptr<Ui::LayerWidget> layer,
 		bool isHistory) {
-	if (const auto keys = EnsureKeys(window)) {
+	if (!ModalKeysEnabled()) {
+		window->showOrHideBoxOrLayer(
+			std::move(layer), Ui::LayerOption::KeepOther, anim::type::normal);
+	} else if (const auto keys = EnsureKeys(window)) {
 		keys->showNoticeLayer(std::move(layer), isHistory);
 	}
 }

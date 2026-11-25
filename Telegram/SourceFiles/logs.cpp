@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "logs.h"
 
+#include "purple/purple_diagnostics.h"
+
 #include "platform/platform_specific.h"
 #include "core/crash_reports.h"
 #include "core/launcher.h"
@@ -504,6 +506,7 @@ void closeMain() {
 }
 
 void writeMain(const QString &v) {
+	Purple::Diagnostics::CaptureMainLog(v);
 	time_t t = time(NULL);
 	struct tm tm;
 	mylocaltime(&tm, &t);

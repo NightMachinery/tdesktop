@@ -1,4 +1,6 @@
 #include "purple/purple_keys_ui.h"
+
+#include "purple/purple_keys.h"
 #include "purple/purple_keys_colors.h"
 
 #include "base/event_filter.h"
@@ -3650,7 +3652,7 @@ public:
 		if (!_config.primaryActionLabel.isEmpty() && _config.onPrimaryAction) {
 			_buttons.push_back({ ButtonKind::Primary, _config.primaryActionLabel });
 		}
-		_buttons.push_back({ ButtonKind::Copy, u"Copy notice"_q });
+		_buttons.push_back({ ButtonKind::Copy, u"Copy logs"_q });
 		_buttons.push_back({ ButtonKind::Close, u"Close"_q });
 		// Focus Close on arrival so Return is harmless if the notice arrives mid-keypress.
 		_focusedButton = int(_buttons.size()) - 1;
@@ -3664,6 +3666,11 @@ public:
 protected:
 	void doSetInnerFocus() override {
 		setFocus();
+	}
+
+	bool focusNextPrevChild(bool next) override {
+		moveButton(next ? 1 : -1);
+		return true;
 	}
 
 	void parentResized() override {
@@ -3735,7 +3742,26 @@ protected:
 			return;
 		}
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
-		const auto key = PhysicalKeyForNav(*e);
+		const auto modal = ModalKeysEnabled();
+		const auto key = modal ? PhysicalKeyForNav(*e) : e->key();
+		if (!modal) {
+			_pendingG = false;
+			switch (key) {
+			case Qt::Key_Escape:
+			case Qt::Key_Tab:
+			case Qt::Key_Backtab:
+			case Qt::Key_Return:
+			case Qt::Key_Enter:
+			case Qt::Key_Left:
+			case Qt::Key_Right:
+			case Qt::Key_Up:
+			case Qt::Key_Down:
+				break;
+			default:
+				e->ignore();
+				return;
+			}
+		}
 		const auto isActionKey = (key == Qt::Key_Return
 			|| key == Qt::Key_Enter
 			|| key == Qt::Key_O
@@ -3860,7 +3886,7 @@ protected:
 		p.fillRect(0, kHeaderH - 1, width(), 1, st::boxDividerBg->c);
 
 		// Optional ? help strip.
-		if (_showHelp) {
+		if (_showHelp && ModalKeysEnabled()) {
 			const auto helpRect = QRect(0, height() - kActionsH - helpH, width(), helpH);
 			p.fillRect(helpRect, BlendColor(st::windowBg->c, st::windowBgOver->c, 0.45));
 			p.fillRect(0, helpRect.top(), width(), 1, st::boxDividerBg->c);
@@ -3885,7 +3911,7 @@ protected:
 				QRect(16, actionsTop, 140, kActionsH),
 				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
 				_copiedCue);
-		} else {
+		} else if (ModalKeysEnabled()) {
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
 			const auto hint = u"? help"_q;
@@ -3975,11 +4001,12 @@ private:
 	}
 
 	void triggerCopy() {
-		if (_config.onCopy) {
-			_config.onCopy();
+		const auto weak = QPointer(this);
+		const auto copy = _config.onCopy;
+		if (copy && copy() && weak) {
+			_copiedCue = u"Copied"_q;
+			update();
 		}
-		_copiedCue = u"Copied"_q;
-		update();
 	}
 
 	void activateButton(int index) {
