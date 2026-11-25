@@ -738,7 +738,6 @@ void BuildPurpleSection(SectionBuilder &builder) {
 	builder.addSkip();
 
 	BuildModalKeysSetting(builder);
-	const auto controller = builder.controller();
 	builder.addButton({
 		.id = u"advanced/purple_customize_settings"_q,
 		.title = rpl::single(u"Customize settings…"_q),
