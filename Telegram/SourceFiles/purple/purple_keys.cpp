@@ -174,6 +174,7 @@ private:
 namespace {
 
 constexpr auto kEnabledPref = "purple-modal-keys-enabled";
+constexpr auto kStockMxPref = "purple-mx-shortcut-in-stock-mode";
 constexpr auto kWhichKeyDelay = 280;
 constexpr auto kFeedbackDurationMs = 3500;
 constexpr auto kMaxCount = 200;
@@ -187,10 +188,18 @@ constexpr auto kSuper = Qt::MetaModifier;
 #endif // Q_OS_MAC
 
 rpl::event_stream<bool> EnabledChanges;
+rpl::event_stream<bool> StockMxChanges;
 rpl::event_stream<> KeymapChanges;
 
 bool Enabled() {
 	return Core::App().settings().readPref<bool>(kEnabledPref);
+}
+
+void SetEnabled(bool enabled) {
+	if (enabled != Enabled()) {
+		Core::App().settings().writePref<bool>(kEnabledPref, enabled);
+		EnabledChanges.fire_copy(enabled);
+	}
 }
 
 int ModalKey(const QKeyEvent &event) {
@@ -261,6 +270,7 @@ int ModalKey(const QKeyEvent &event) {
 enum class Action {
 	EnterNormalMode,
 	EnterInsertMode,
+	ModalInputToggle,
 	Backgrounds,
 	ToggleNightMode,
 	MoveUp,
@@ -368,6 +378,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_normal(tr::now); } },
 	{ Action::EnterInsertMode, "enter-insert-mode", "mode", "",
 		[] { return tr::lng_purple_keys_insert(tr::now); } },
+	{ Action::ModalInputToggle, "modal-input-toggle", "mode", "",
+		[] { return tr::lng_purple_keys_toggle_modal_input(tr::now); } },
 	{ Action::Backgrounds, "chat-backgrounds-visibility-toggle", "toggle", "",
 		[] { return tr::lng_purple_keys_backgrounds(tr::now); } },
 	{ Action::ToggleNightMode, "toggle-night-mode", "toggle", "",
@@ -1157,7 +1169,10 @@ struct Target {
 	Window::SessionController *controller = nullptr;
 };
 
-Target FindTarget(Window::SessionController *owner, QWidget *focus) {
+Target FindTarget(
+		Window::SessionController *owner,
+		QWidget *focus,
+		bool allowUnmapped = false) {
 	const auto forSection = [=](
 			auto *section,
 			QString paneName,
@@ -1247,7 +1262,7 @@ Target FindTarget(Window::SessionController *owner, QWidget *focus) {
 			return target;
 		}
 	}
-	return {};
+	return allowUnmapped ? Target{ .focus = focus, .controller = owner } : Target();
 }
 
 bool HasPlaybackInSession(Main::Session *session) {
@@ -1577,12 +1592,36 @@ bool Available(Action action, const Target &target) {
 	}
 }
 
-bool IsSearchableAction(Action action) {
-	return action != Action::Help
-		&& action != Action::Cheatsheet
-		&& action != Action::Run
-		&& action != Action::DescribeChord
-		&& action != Action::DescribeCommand;
+bool RequiresModalInput(Action action) {
+	switch (action) {
+	case Action::EnterNormalMode:
+	case Action::EnterInsertMode:
+	case Action::SelectMessage:
+	case Action::CopyMessage:
+	case Action::CopyMessageLink:
+	case Action::CopyMessageUrl:
+	case Action::OpenMessageUrl:
+	case Action::MessageMenu:
+	case Action::ReplyToMessage:
+	case Action::EditMessage:
+	case Action::DescribeChord:
+	case Action::UnreadBuffer:
+	case Action::TopicPalette:
+	case Action::TopicUnreadPalette:
+		return true;
+	default:
+		return false;
+	}
+}
+
+QString CommandUnavailableReason(const Command &command) {
+	return (!Enabled() && RequiresModalInput(command.action))
+		? tr::lng_purple_keys_needs_normal(tr::now)
+		: QString::fromLatin1(command.need);
+}
+
+bool CommandAvailable(Action action, const Target &target) {
+	return (Enabled() || !RequiresModalInput(action)) && Available(action, target);
 }
 
 // Builds the effective binding list for the given mode & active context:
@@ -1705,7 +1744,9 @@ protected:
 private:
 	[[nodiscard]] Window::SessionController *owner() const;
 	[[nodiscard]] QWidget *windowFocusWidget() const;
-	[[nodiscard]] Target currentTarget(QObject *receiver) const;
+	[[nodiscard]] Target currentTarget(
+		QObject *receiver,
+		bool allowUnmapped = false) const;
 	[[nodiscard]] Target activeTarget() const;
 	[[nodiscard]] bool chromeVisible() const;
 	[[nodiscard]] bool zenNeedsTransientBar() const;
@@ -1734,12 +1775,15 @@ private:
 	void showDescribeKeyResult(const Chord &chord, const Target &target);
 	void showDescribeCommandResult(Action action, const Target &target);
 	void showPalette(bool describe, const Target &target, bool fromInsert);
+	void showKeyLayer(std::unique_ptr<Ui::LayerWidget> layer);
+	void closeKeyLayers();
 	void watchUserKeymap();
 
 	const not_null<MainWindow*> _window;
 	QPointer<ModalUi::ModalStatusBar> _statusBar;
 	QPointer<ModalUi::WhichKeyOverlay> _whichKey;
 	QPointer<QTextEdit> _normalComposer;
+	QPointer<QWidget> _preeditInput;
 	int _composerCursorWidth = 0;
 	QTimer _whichKeyTimer;
 	QTimer _feedbackTimer;
@@ -1776,6 +1820,7 @@ private:
 	};
 	[[nodiscard]] ActiveLayer visibleLayer() const;
 	ActiveLayer _activeLayer = ActiveLayer::None;
+	std::vector<QPointer<Ui::LayerWidget>> _keyLayers;
 	std::vector<std::pair<QPointer<Ui::LayerWidget>, ActiveLayer>> _noticeLayers;
 	QPointer<Ui::LayerStackWidget> _pendingFlushLayer;
 	uint64 _noticePresentation = 0;
@@ -1829,6 +1874,9 @@ Keys::Keys(not_null<MainWindow*> window)
 	qApp->installEventFilter(this);
 
 	QObject::connect(qApp, &QApplication::focusChanged, this, [=](QWidget *old, QWidget *now) {
+		if (old != now && old == _preeditInput) {
+			_preeditInput = nullptr;
+		}
 		const auto inThisWindow = (old && old->window() == _window)
 			|| (now && now->window() == _window);
 		if (!inThisWindow) {
@@ -1869,10 +1917,19 @@ Keys::Keys(not_null<MainWindow*> window)
 	Core::App().passcodeLockValue() | rpl::on_next([=](bool locked) {
 		_held.clear();
 		if (locked) {
+			++_revision;
+			const auto guard = QPointer(this);
 			if (_zenMode) {
 				setZenMode(false);
 			}
+			closeKeyLayers();
+			if (!guard) {
+				return;
+			}
 			closeAllNoticeLayers();
+			if (!guard) {
+				return;
+			}
 		}
 		clearPrefix();
 		_window->updateControlsGeometry();
@@ -1885,7 +1942,16 @@ Keys::Keys(not_null<MainWindow*> window)
 	Purple::PrivacyScreenChanges() | rpl::on_next([=](bool active) {
 		_held.clear();
 		if (active) {
+			++_revision;
+			const auto guard = QPointer(this);
+			closeKeyLayers();
+			if (!guard) {
+				return;
+			}
 			closeAllNoticeLayers();
+			if (!guard) {
+				return;
+			}
 		}
 		clearPrefix();
 		_window->updateControlsGeometry();
@@ -1899,16 +1965,28 @@ Keys::Keys(not_null<MainWindow*> window)
 	}, _lifetime);
 
 	EnabledChanges.events() | rpl::on_next([=](bool enabled) {
+		++_revision;
+		_held.clear();
+		const auto guard = QPointer(this);
 		if (enabled) {
 			ReloadKeymapStore();
 			watchUserKeymap();
 			enterNormal(true);
 		} else {
+			setZenMode(false);
+			_feedbackTimer.stop();
+			_feedbackText.clear();
+			closeKeyLayers();
+			if (!guard) {
+				return;
+			}
 			closeAllNoticeLayers();
 		}
-		clearPrefix();
-		_window->updateControlsGeometry();
-		refreshStatusBar();
+		if (guard) {
+			clearPrefix();
+			_window->updateControlsGeometry();
+			refreshStatusBar();
+		}
 	}, _lifetime);
 
 	KeymapChanges.events() | rpl::on_next([=] {
@@ -1935,7 +2013,15 @@ Keys::Keys(not_null<MainWindow*> window)
 	window->controller().sessionControllerValue(
 	) | rpl::on_next([=](Window::SessionController *owner) {
 		++_revision;
+		const auto guard = QPointer(this);
+		closeKeyLayers();
+		if (!guard) {
+			return;
+		}
 		closeAllNoticeLayers();
+		if (!guard) {
+			return;
+		}
 		_feedbackTimer.stop();
 		_feedbackText.clear();
 		_persistentCue.clear();
@@ -2070,14 +2156,20 @@ bool Keys::eventFilter(QObject *watched, QEvent *event) {
 
 Window::SessionController *Keys::owner() const {
 	const auto &window = _window->controller();
-	return (QApplication::activeWindow() == _window
-		&& Core::App().activeWindow() == &window
-		&& !Core::App().passcodeLocked()
-		&& !window.locked()
-		&& !Purple::PrivacyScreenActive(_window)
-		&& !QApplication::activePopupWidget()
-		&& !QApplication::activeModalWidget())
-		? window.sessionController()
+	const auto current = window.sessionController();
+	if (!current || QApplication::activeWindow() != _window
+		|| Core::App().activeWindow() != &window
+		|| Core::App().passcodeLocked() || Core::App().screenIsLocked()
+		|| window.locked() || Purple::PrivacyScreenActiveAny()
+		|| PeekCountdownPending()
+		|| QApplication::activePopupWidget()
+		|| QApplication::activeModalWidget()) {
+		return nullptr;
+	}
+	const auto &session = current->session();
+	const auto &account = session.account();
+	return (!account.loggingOut() && account.maybeSession() == &session)
+		? current
 		: nullptr;
 }
 
@@ -2142,7 +2234,7 @@ void Keys::raiseChrome() {
 	}
 }
 
-Target Keys::currentTarget(QObject *receiver) const {
+Target Keys::currentTarget(QObject *receiver, bool allowUnmapped) const {
 	const auto focus = QApplication::focusWidget();
 	const auto current = owner();
 	return (focus
@@ -2152,7 +2244,7 @@ Target Keys::currentTarget(QObject *receiver) const {
 			&& receiver == focus
 			&& current
 			&& !_window->controller().isLayerShown())
-		? FindTarget(current, focus)
+		? FindTarget(current, focus, allowUnmapped)
 		: Target();
 }
 
@@ -2444,10 +2536,7 @@ void Keys::showUnreadBuffer(const Target &target) {
 			guard->refreshStatusBar();
 		}
 	});
-	_window->showOrHideBoxOrLayer(
-		std::move(layer),
-		Ui::LayerOption::KeepOther,
-		anim::type::normal);
+	showKeyLayer(std::move(layer));
 	refreshStatusBar();
 }
 
@@ -2584,10 +2673,7 @@ void Keys::showTopicPicker(bool unreadOnly, const Target &target) {
 			guard->refreshStatusBar();
 		}
 	});
-	_window->showOrHideBoxOrLayer(
-		std::move(layer),
-		Ui::LayerOption::KeepOther,
-		anim::type::normal);
+	showKeyLayer(std::move(layer));
 	refreshStatusBar();
 }
 
@@ -2991,7 +3077,12 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		return false;
 	} else if (event->type() == QEvent::InputMethod) {
 		clearPrefix();
-		if (static_cast<QInputMethodEvent*>(event)->preeditString().isEmpty()) {
+		if (!static_cast<QInputMethodEvent*>(event)->preeditString().isEmpty()) {
+			_preeditInput = static_cast<QWidget*>(receiver);
+		} else {
+			if (receiver == _preeditInput) {
+				_preeditInput = nullptr;
+			}
 			schedulePendingNoticeFlush();
 		}
 		return false;
@@ -3013,8 +3104,30 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		event->accept();
 		return true;
 	}
+	if (!Enabled()) {
+		if (!ModalMx::StockModeShortcut(
+				key,
+				keyEvent->modifiers(),
+				MxShortcutInStockMode(),
+				receiver == _preeditInput)) {
+			return false;
+		}
+		const auto target = currentTarget(receiver, true);
+		if (!target.focus) {
+			return false;
+		}
+		event->accept();
+		if (event->type() == QEvent::KeyPress && !keyEvent->isAutoRepeat()) {
+			_held.insert(key);
+			showPalette(false, target, false);
+		}
+		return true;
+	}
+	if (receiver == _preeditInput) {
+		return false;
+	}
 	const auto target = currentTarget(receiver);
-	if (!target.focus || !Enabled()) {
+	if (!target.focus) {
 		if (receiver == QApplication::focusWidget()) {
 			clearPrefix();
 		}
@@ -3292,7 +3405,8 @@ void Keys::stroke(int key, const Target &target) {
 
 void Keys::dispatch(Action action, const Target &target, int count) {
 	const auto current = owner();
-	if (!current || !target.focus || !Available(action, target)) {
+	if (!current || current != target.controller || !target.focus
+		|| !CommandAvailable(action, target)) {
 		return;
 	}
 	const auto repeat = FindCommand(action).repeatable ? std::clamp(count, 1, kMaxCount) : 1;
@@ -3331,6 +3445,23 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		enterInsert(false);
 		FocusMusicSearch(current, target.focus, true);
 		break;
+	case Action::ModalInputToggle: {
+		const auto original = base::make_weak(current);
+		const auto guard = QPointer(this);
+		const auto enabled = !Enabled();
+		SetEnabled(enabled);
+		if (guard && original && guard->owner() == original.get()) {
+			ShowPurpleAck({
+				.session = &original->session(),
+				.window = &_window->controller(),
+				.text = enabled
+					? tr::lng_purple_keys_modal_input_on(tr::now)
+					: tr::lng_purple_keys_modal_input_off(tr::now),
+				.coalesceKey = u"modal-input-toggle"_q,
+			});
+		}
+		break;
+	}
 	case Action::Backgrounds:
 		ToggleChatBackgroundVisibility(_window);
 		break;
@@ -3375,7 +3506,9 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		break;
 	case Action::Search:
 		if (target.contextMap == MapKind::Music) {
-			enterInsert(true);
+			if (Enabled()) {
+				enterInsert(true);
+			}
 			FocusMusicSearch(current, target.focus, true);
 		} else {
 			launch(Native::Search);
@@ -3644,7 +3777,9 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		break;
 	case Action::Run:
 	case Action::DescribeCommand:
-		showPalette(action == Action::DescribeCommand, target, !_normal);
+		if (target.focus != _preeditInput) {
+			showPalette(action == Action::DescribeCommand, target, Enabled() && !_normal);
+		}
 		break;
 	case Action::DescribeChord:
 		_inspect = true;
@@ -4009,10 +4144,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 			guard->refreshStatusBar();
 		}
 	});
-	_window->showOrHideBoxOrLayer(
-		std::move(layer),
-		Ui::LayerOption::KeepOther,
-		anim::type::normal);
+	showKeyLayer(std::move(layer));
 	refreshStatusBar();
 }
 
@@ -4105,10 +4237,7 @@ void Keys::showDescribeKeyResult(const Chord &chord, const Target &target) {
 			guard->refreshStatusBar();
 		}
 	});
-	_window->showOrHideBoxOrLayer(
-		std::move(layer),
-		Ui::LayerOption::KeepOther,
-		anim::type::normal);
+	showKeyLayer(std::move(layer));
 	refreshStatusBar();
 }
 
@@ -4123,9 +4252,10 @@ void Keys::showDescribeCommandResult(Action action, const Target &target) {
 		.title = CommandLabel(action, target),
 		.commandId = QString::fromLatin1(cmd.id),
 		.found = true,
-		.availableHere = Available(action, target),
-		.keylessOnPurpose = Keymap().keyless.contains(action),
-		.unavailableReason = QString::fromLatin1(cmd.need),
+		.availableHere = CommandAvailable(action, target),
+		.keylessOnPurpose = action == Action::ModalInputToggle
+			|| Keymap().keyless.contains(action),
+		.unavailableReason = CommandUnavailableReason(cmd),
 		.bindings = CollectCommandBindings(action),
 	};
 	const auto guard = QPointer(this);
@@ -4139,10 +4269,7 @@ void Keys::showDescribeCommandResult(Action action, const Target &target) {
 			guard->refreshStatusBar();
 		}
 	});
-	_window->showOrHideBoxOrLayer(
-		std::move(layer),
-		Ui::LayerOption::KeepOther,
-		anim::type::normal);
+	showKeyLayer(std::move(layer));
 	refreshStatusBar();
 }
 
@@ -4152,7 +4279,7 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 		_feedbackTimer.stop();
 	}
 	const auto current = owner();
-	if (!current) {
+	if (!current || current != target.controller || target.focus == _preeditInput) {
 		return;
 	}
 	const auto effective = EffectiveBindings(true, target.contextMap);
@@ -4162,10 +4289,10 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 		: current->activeChatCurrent().peer();
 	auto items = std::vector<ModalUi::PaletteItem>();
 	for (const auto &cmd : kCommands) {
-		if (!describe && !IsSearchableAction(cmd.action)) {
+		if (!describe && cmd.action == Action::Run) {
 			continue;
 		}
-		const auto avail = Available(cmd.action, target);
+		const auto avail = CommandAvailable(cmd.action, target);
 		auto avatarSession = base::weak_ptr<Main::Session>();
 		auto avatarPeerId = PeerId(0);
 		if (cmd.action == Action::OpenSavedMessages) {
@@ -4189,8 +4316,9 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 			.id = QString::fromLatin1(cmd.id),
 			.label = CommandLabel(cmd.action, target),
 			.category = QString::fromLatin1(cmd.category),
-			.unavailableReason = QString::fromLatin1(cmd.need),
-			.chords = ChordsForAction(cmd.action, effective),
+			.unavailableReason = CommandUnavailableReason(cmd),
+			.chords = Enabled() ? ChordsForAction(cmd.action, effective)
+				: std::vector<QStringList>(),
 			.available = describe ? true : avail,
 			.avatarSession = std::move(avatarSession),
 			.avatarPeerId = avatarPeerId,
@@ -4224,21 +4352,26 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 			raw->closeLayer();
 		}
 	};
-	const auto restoreInsertIfOrigin = [guard, revision, origin, original, fromInsert] {
+	const auto restoreOrigin = [guard, revision, origin, original, fromInsert] {
 		if (!guard) {
 			return;
 		}
 		const auto live = guard->owner();
-		if (Enabled() && live && live == original.get()
-			&& revision == guard->_revision && origin && fromInsert
+		if (live && live == original.get() && revision == guard->_revision
+			&& origin && origin->isVisible() && origin->isEnabled()
+			&& (fromInsert || !Enabled())
 			&& !guard->_window->controller().isLayerShown()) {
+			if (fromInsert && Enabled()) {
+				guard->_normal = false;
+			}
 			origin->setFocus(Qt::OtherFocusReason);
-			guard->_normal = false;
 		}
-		guard->refreshStatusBar();
+		if (guard) {
+			guard->refreshStatusBar();
+		}
 	};
 	auto layer = ModalUi::CreateCommandPaletteLayer({
-		.promptBadge = describe ? u"SPC h f"_q : u"M-x"_q,
+		.promptBadge = (describe && Enabled()) ? u"SPC h f"_q : u"M-x"_q,
 		.placeholder = describe
 			? u"Describe any command (orderless, e.g. \"pin\")..."_q
 			: u"Execute command (orderless, e.g. \"opm\", M-p/n history)..."_q,
@@ -4254,68 +4387,89 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 			}
 			guard->_activeLayer = ActiveLayer::None;
 			const auto action = Action(actionId);
-			MxHistory().record(QString::fromLatin1(FindCommand(action).id), query);
-			SaveMxHistory();
 			// Defer layer destruction until after the input/mouse/event-filter handler unwinds.
-			QTimer::singleShot(0, guard.data(), [guard, closePalettePosted, describe, action, revision, origin, original] {
-				if (!guard) {
+			QTimer::singleShot(0, guard.data(), [=] {
+				if (!guard || revision != guard->_revision) {
 					return;
 				}
 				closePalettePosted();
+				if (!guard) {
+					return;
+				}
 				const auto live = guard->owner();
-				if (!Enabled() || !live || live != original.get()
-					|| revision != guard->_revision || !origin
+				if (!live || live != original.get() || revision != guard->_revision
+					|| !origin || !origin->isVisible() || !origin->isEnabled()
 					|| guard->_window->controller().isLayerShown()) {
 					guard->refreshStatusBar();
 					return;
 				}
-				if (describe) {
-					guard->showDescribeCommandResult(action, FindTarget(live, origin));
+				origin->setFocus(Qt::OtherFocusReason);
+				if (!guard || !origin || guard->owner() != original.get()
+					|| revision != guard->_revision) {
 					return;
 				}
-				const auto restoredTarget = FindTarget(live, origin);
-				if (restoredTarget.focus && Available(action, restoredTarget)) {
-					origin->setFocus(Qt::OtherFocusReason);
-					const auto restored = guard->currentTarget(origin);
-					if (restored.focus && revision == guard->_revision) {
+				const auto restored = guard->currentTarget(origin, !Enabled());
+				if (restored.focus && (describe || CommandAvailable(action, restored))) {
+					MxHistory().record(QString::fromLatin1(FindCommand(action).id), query);
+					SaveMxHistory();
+					if (describe) {
+						guard->showDescribeCommandResult(action, restored);
+					} else {
 						guard->dispatch(action, restored, 1);
 					}
 				}
-				guard->refreshStatusBar();
+				if (guard) {
+					guard->refreshStatusBar();
+				}
 			});
 		},
-		.onCancel = [guard, handled, closePalettePosted, restoreInsertIfOrigin] {
+		.onCancel = [guard, handled, closePalettePosted, restoreOrigin] {
 			*handled = true;
 			if (!guard) {
 				return;
 			}
 			guard->_activeLayer = ActiveLayer::None;
 			// Defer layer destruction until after the key/event-filter handler unwinds.
-			QTimer::singleShot(0, guard.data(), [guard, closePalettePosted, restoreInsertIfOrigin] {
+			QTimer::singleShot(0, guard.data(), [guard, closePalettePosted, restoreOrigin] {
 				if (!guard) {
 					return;
 				}
 				closePalettePosted();
-				restoreInsertIfOrigin();
+				restoreOrigin();
 			});
 		},
 	});
 	*palettePtr = layer.get();
-	layer->lifetime().add([guard, kind, handled, fromInsert, restoreInsertIfOrigin] {
+	layer->lifetime().add([guard, kind, handled, restoreOrigin] {
 		if (!guard) return;
 		if (guard->_activeLayer == kind) {
 			guard->_activeLayer = ActiveLayer::None;
-			if (!*handled && fromInsert) {
-				QTimer::singleShot(0, guard.data(), restoreInsertIfOrigin);
+			if (!*handled) {
+				QTimer::singleShot(0, guard.data(), restoreOrigin);
 				return;
 			}
 			guard->refreshStatusBar();
 		}
 	});
+	showKeyLayer(std::move(layer));
+}
+
+void Keys::showKeyLayer(std::unique_ptr<Ui::LayerWidget> layer) {
+	std::erase_if(_keyLayers, [](const auto &entry) { return !entry; });
+	_keyLayers.emplace_back(layer.get());
 	_window->showOrHideBoxOrLayer(
 		std::move(layer),
 		Ui::LayerOption::KeepOther,
 		anim::type::normal);
+}
+
+void Keys::closeKeyLayers() {
+	const auto layers = std::exchange(_keyLayers, {});
+	for (auto i = layers.rbegin(); i != layers.rend(); ++i) {
+		if (*i) {
+			(*i)->closeLayer();
+		}
+	}
 }
 
 } // namespace
@@ -4332,7 +4486,7 @@ bool HandleModalKeys(QObject *receiver, QEvent *event) {
 	if (const auto existing = FindKeys(window)) {
 		return existing->handle(receiver, event);
 	}
-	if (!Enabled()
+	if ((!Enabled() && !MxShortcutInStockMode())
 		|| (event->type() != QEvent::ShortcutOverride
 			&& event->type() != QEvent::KeyPress)) {
 		return false;
@@ -4439,14 +4593,20 @@ void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder) {
 		.keywords = { u"keyboard"_q, u"modal"_q, u"evil"_q, u"leader"_q, u"keybindings"_q, u"shortcuts"_q },
 	});
 	if (toggle) {
-		toggle->toggledValue() | rpl::on_next([](bool enabled) {
-			if (enabled != Enabled()) {
-				Core::App().settings().writePref<bool>(kEnabledPref, enabled);
-				EnabledChanges.fire_copy(enabled);
-			}
-		}, toggle->lifetime());
+		toggle->toggledValue() | rpl::on_next(SetEnabled, toggle->lifetime());
 	}
 	builder.addDividerText(tr::lng_purple_keys_settings_hint());
+	const auto stockMx = builder.addButton({
+		.id = u"advanced/purple_mx_in_stock_mode"_q,
+		.title = MxShortcutInStockModeLabel(),
+		.st = &st::settingsButtonNoIcon,
+		.toggled = MxShortcutInStockModeValue(),
+		.keywords = { u"M-x"_q, u"command palette"_q, u"Option+X"_q, u"Alt+X"_q },
+	});
+	if (stockMx) {
+		stockMx->toggledValue() | rpl::on_next(
+			SetMxShortcutInStockMode, stockMx->lifetime());
+	}
 	builder.addSkip();
 }
 
@@ -4461,6 +4621,29 @@ bool ModalKeysInNormal(not_null<MainWindow*> window) {
 
 rpl::producer<bool> ModalKeysEnabledChanges() {
 	return EnabledChanges.events();
+}
+
+bool MxShortcutInStockMode() {
+	return Core::App().settings().readPref<bool>(kStockMxPref, true);
+}
+
+rpl::producer<QString> MxShortcutInStockModeLabel() {
+#ifdef Q_OS_MAC
+	return tr::lng_purple_keys_mx_in_stock_mode_mac();
+#else
+	return tr::lng_purple_keys_mx_in_stock_mode_other();
+#endif // Q_OS_MAC
+}
+
+rpl::producer<bool> MxShortcutInStockModeValue() {
+	return rpl::single(MxShortcutInStockMode()) | rpl::then(StockMxChanges.events());
+}
+
+void SetMxShortcutInStockMode(bool enabled) {
+	if (enabled != MxShortcutInStockMode()) {
+		Core::App().settings().writePref<bool>(kStockMxPref, enabled);
+		StockMxChanges.fire_copy(enabled);
+	}
 }
 
 ModalNotices::DeliveryContext ModalDeliveryContext(MainWindow *window) {

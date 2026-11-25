@@ -137,16 +137,31 @@ with at most four strokes per chord:
   subtitle alongside right-aligned live keycaps. Navigate with `C-n`/`C-p`,
   `C-j`/`C-k`, arrows, or `Tab`/`S-Tab`; step input history with `M-p`/`M-n`.
 
+With modal keyboard shortcuts off, **Option+X** on macOS (**Alt+X** elsewhere)
+still opens M-x in an active, unlocked account window. The palette includes
+`:keys-help`, `:cheatsheet`, `:command-describe`, and
+`:toggle-privacy-screen`. Commands that rely on Normal mode show their
+requirement in the results. The shortcut yields to IME composition, popups,
+and dialogs, and is unavailable under the passcode or privacy screen.
+
+Run `:modal-input-toggle` to change **Modal keyboard shortcuts** for all windows.
+It has no default binding. Turning it off closes modal shortcut layers and
+clears pending keys. Drafts are preserved. Turning it on starts Normal mode.
+To type the usual Option+X character while modal input is off, disable
+**Option+X opens commands with modal keys off** under **Settings > Purple >
+Privacy & controls** or in **Customize settings**.
+
 ## Customize settings
 
-In Normal mode, press `SPC f e d` or run `:customize-settings` in the
-command palette. Which-key shows **files** after `SPC f`, **edit settings**
+Press `SPC f e d` in Normal mode or run `:customize-settings` in the command
+palette. Which-key shows **files** after `SPC f`, **edit settings**
 after `SPC f e`, and **Customize Purple settings** on `d`. The cheatsheet
 and binding reference use your active keymap. **Settings > Purple >
 Customize settings…** also opens the editor with modal keys off.
 
-- In the tree, `j` / `k` move between rows, `h` / `l` fold or enter,
-  and `/` filters. Press `F6` to change panels and `?` for editor help.
+- In the tree, use arrows to move or fold and `F6` to change panels. With
+  modal keys enabled, `j` / `k` move, `h` / `l` fold or enter, `/` filters,
+  and `?` opens editor help.
 - Press `Return` to edit, `t` to toggle a boolean, `+` / `-` to step
   a number, `r` to reset, and `y` to copy the TOML path. **Account** or
   `A` selects a signed-in account.

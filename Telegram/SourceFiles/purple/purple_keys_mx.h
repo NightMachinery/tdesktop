@@ -18,6 +18,15 @@ namespace Purple::ModalMx {
 constexpr auto kRecentLimit = 7;
 constexpr auto kInputHistoryLimit = 100;
 
+[[nodiscard]] inline bool StockModeShortcut(
+		int resolvedKey,
+		Qt::KeyboardModifiers modifiers,
+		bool enabled,
+		bool composing) {
+	return enabled && !composing
+		&& modifiers == Qt::AltModifier && resolvedKey == Qt::Key_X;
+}
+
 struct History {
 	QStringList recent;
 	QHash<QString, int> counts;

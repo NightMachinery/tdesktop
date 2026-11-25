@@ -25,6 +25,24 @@ void Expect(bool ok, const char *msg) {
 int main() {
 	using namespace Purple::ModalMx;
 
+	Expect(StockModeShortcut(Qt::Key_X, Qt::AltModifier, true, false),
+		"Alt/Option plus resolved X opens M-x in stock mode");
+	Expect(!StockModeShortcut(Qt::Key_X, Qt::AltModifier, false, false),
+		"the local opt-out frees Alt/Option plus X");
+	Expect(!StockModeShortcut(Qt::Key_X, Qt::AltModifier, true, true),
+		"M-x leaves an active IME composition alone");
+	for (const auto key : { Qt::Key_X, Qt::Key_J, Qt::Key_Space, Qt::Key_Comma }) {
+		Expect(!StockModeShortcut(key, Qt::NoModifier, true, false),
+			"stock mode never intercepts plain keys");
+	}
+	for (const auto modifier : {
+			Qt::ShiftModifier, Qt::ControlModifier, Qt::MetaModifier }) {
+		Expect(!StockModeShortcut(Qt::Key_X, Qt::AltModifier | modifier, true, false),
+			"extra shortcut modifiers do not open M-x");
+	}
+	Expect(!StockModeShortcut(Qt::Key_J, Qt::AltModifier, true, false),
+		"other Alt/Option letters are untouched");
+
 	const std::vector<Candidate> items = {
 		{ 0, Q("open-chat-gifs"), Q("GIFs"), Q("chat media"), Q(", g"), true },
 		{ 1, Q("open-chat-files"), Q("Files"), Q("chat media"), Q(", f"), true },

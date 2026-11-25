@@ -48,6 +48,10 @@ void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder);
 [[nodiscard]] bool ModalKeysEnabled();
 [[nodiscard]] bool ModalKeysInNormal(not_null<MainWindow*> window);
 [[nodiscard]] rpl::producer<bool> ModalKeysEnabledChanges();
+[[nodiscard]] bool MxShortcutInStockMode();
+[[nodiscard]] rpl::producer<QString> MxShortcutInStockModeLabel();
+[[nodiscard]] rpl::producer<bool> MxShortcutInStockModeValue();
+void SetMxShortcutInStockMode(bool enabled);
 [[nodiscard]] ModalNotices::DeliveryContext ModalDeliveryContext(MainWindow *window);
 void SetModalStatusMessage(
 	MainWindow *window,
