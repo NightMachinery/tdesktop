@@ -89,7 +89,7 @@ int CrashChild(const QString &root, const QString &mode, Phase phase) {
 	auto armed = false;
 	auto parts = 0;
 	options.checkpoint = [&](Phase p) {
-		if (armed && p == phase && (p != Phase::BlobPart || ++parts == 2)) std::_Exit(kCrash);
+		if (armed && p == phase && (p != Phase::BlobPart || ++parts == 5)) std::_Exit(kCrash);
 		return true;
 	};
 	auto store = V2Store(std::move(options));
@@ -102,7 +102,7 @@ int CrashChild(const QString &root, const QString &mode, Phase phase) {
 	} else if (mode == u"reset"_q) {
 		static_cast<void>(ConfirmReset(store, store.id()));
 	} else if (mode == u"blob"_q) {
-		static_cast<void>(store.writeBlob(SampleBlob(store.id(), QByteArray(2 * kChunk, 'f'))));
+		static_cast<void>(store.writeBlob(SampleBlob(store.id(), QByteArray(5 * kChunk, 'f'))));
 	}
 	return 4;
 }
@@ -143,12 +143,17 @@ void CrashCuts() {
 		const auto database = original + u"/archive.sqlite"_q;
 		if (mode == u"blob"_q) {
 			const auto committed = phase == Phase::AfterSqlCommit;
-			CHECK(Count(database, u"SELECT count(*) FROM blobs"_q) == (committed ? 1 : 0));
-			CHECK(Count(database, u"SELECT count(*) FROM blob_parts"_q) == (committed ? 2 : 0));
+			CHECK(Count(database, u"SELECT count(*) FROM blobs"_q) == 1);
+			CHECK(Count(database, u"SELECT count(*) FROM blob_parts"_q) == (committed ? 5 : 4));
 			CHECK(Count(database, u"SELECT count(*) FROM media WHERE blob_key IS NOT NULL"_q) == (committed ? 1 : 0));
 		}
 		auto store = V2Store(Options(temp.path()));
 		CHECK(store.open());
+		if (mode == u"blob"_q && phase == Phase::BlobPart) {
+			CHECK(Count(database, u"SELECT count(*) FROM blobs"_q) == 0);
+			CHECK(Count(database, u"SELECT count(*) FROM blob_parts"_q) == 0);
+			CHECK(store.usage() && store.usage()->timed == 0);
+		}
 		const auto replaced = mode == u"reset"_q && phase != Phase::BeforePublish;
 		CHECK((store.id() != id) == replaced);
 		const auto body = store.body(Sample(id).identity, 1);

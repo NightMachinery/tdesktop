@@ -31,31 +31,36 @@ retirements. Separate derived keys seal records and generate lookup tokens.
 SQLite receives ciphertext for message data, descriptors and blob parts.
 An authenticated reference binds a saved copy to its specific version and media row.
 
-Reset publishes a fresh generation under the account lock. Logout publishes
-revocation without opening a replacement. Both retire only the former
-directory identity recorded by the authenticated pointer. Recovery can finish
-that cleanup using the profile key without reopening the old database or
-unwrapping its former login key. The worker keeps live startup and logout
-unwired until cutover.
+Reset reviews the account's active generation and measures its owned directory.
+Confirmation rechecks its identity and size before publishing a fresh
+generation. Logout publishes revocation without opening a replacement.
+Both can retire an unreadable database or one whose old login key cannot
+be unwrapped, if the account pointer authenticates. Recovery resumes deletion
+only for the directory identity recorded by that pointer. The worker keeps
+live startup and logout unwired until cutover.
 
 ### Whole files and space limits
 
 A whole-file completion must match the admitted account generation, message
 version and source. Explicit open preserves the normal viewer and receipt
 sequence before scheduling archive work. Timed arrival and unrelated cache
-completion do not create a request. The writer checks the declared length
-and plaintext digest while it encrypts bounded parts, then publishes the
-whole blob and its attachment in one commit. A queued message can stop a
-media write between parts.
+completion do not create a request. Each account queues up to 32 admitted media targets and saves one file at a
+time. Ready timed files take priority, with FIFO order within each class.
+The writer commits at most four 1 MiB encrypted parts per batch and drains
+queued text between batches. The final transaction verifies the complete
+file and publishes its attachment. Reopening removes incomplete staged files.
 
 Timed and ordinary pressure release copies from their own allowance.
-A blob referenced by timed and ordinary rows is charged once to timed media.
-The active physical usage includes the database, WAL, shared memory and
-owned support files. The page limit reserves space for both the database
-and WAL at checkpoint peak. It is deliberately conservative when a file
-fits its allowance but cannot fit at peak. Cache spill is disabled for
-this bound, so SQLite can keep dirty pages in memory during a whole-file
-transaction. The app encrypts one part at a time.
+A blob referenced by both is charged once to timed media. SQLite updates both
+totals alongside changes to their records. A lower limit schedules bounded
+trim batches, while text can still use physical room already available.
+
+The physical ceiling combines both allowances with fixed SQLite headroom of
+400 MiB. This includes 16 MiB for WAL frames and 384 MiB for page layout,
+indexes, encryption and sidecars, sized for the supported large limits. The app
+allocates these bytes only as needed. The Storage view gives the total,
+allowances, pending deletion and overhead. Diagnostics records the individual
+file sizes.
 
 ## Stream retirement wakeups
 

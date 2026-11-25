@@ -109,10 +109,15 @@ QString Store::openDatabase(const QByteArray &dataKey) {
 		if (!header) return u"key_unavailable"_q;
 		auto init = Schema();
 		init.statements.insert(init.statements.end() - 1,
-			{ u"INSERT INTO meta VALUES(2,?,?,0)"_q, { _pointer.id, *header }, kOne });
+			{ u"INSERT INTO meta VALUES(2,?,?,0,0,0)"_q, { _pointer.id, *header }, kOne });
 		if (!_db.Execute(init, [this] { return _options.lease->live.load(); }).committed) return u"store_unreadable"_q;
 	}
-	if (!captureSerial()) return u"schema_unknown"_q;
+	if (!captureSerial() || !totals()) return u"schema_unknown"_q;
+	auto sweep = Program();
+	sweep.statements.push_back({ u"DELETE FROM blobs WHERE sealed_manifest IS NULL"_q, {}, ArchiveSqlExpectation::AnyChanges });
+	sweep.statements.push_back({ u"COMMIT"_q });
+	if (!_db.Execute(sweep, [this] { return _options.lease->live.load(); }).ok) return u"store_unreadable"_q;
+	_vacuumPending = pragma(u"PRAGMA freelist_count"_q).value_or(0) > 0;
 	if (!_pointer.initialized) {
 		auto next = _pointer;
 		next.initialized = true;
@@ -175,16 +180,56 @@ std::optional<Store::Row> Store::readHead(const QByteArray &key, const QByteArra
 }
 
 StoreEffect Store::write(ArchiveSqlProgram program) {
+	if (_batch) {
+		for (auto i = size_t(1); i < program.statements.size(); ++i) {
+			if (!(*_batch)(program.statements[i])) return { u"text_write_failed"_q };
+		}
+		return { {}, true };
+	}
 	program.statements.push_back({ u"COMMIT"_q });
-	const auto result = _db.Execute(program, [this] {
-		return current() && step(Phase::BeforeSqlCommit) && current();
-	});
+	const auto result = _db.Execute(program, [this] { return current(); });
 	if (!result.committed) return SqlFailure(result, current() ? u"text_write_failed"_q : u"scope_retired"_q);
-	static_cast<void>(step(Phase::AfterSqlCommit));
 	return { {}, true };
 }
 
 StoreEffect Store::capture(const CapturedEvent &event) {
+	return captureBatch(std::span(&event, 1)).front();
+}
+
+std::vector<StoreEffect> Store::captureBatch(std::span<const CapturedEvent> events) {
+	auto effects = std::vector<StoreEffect>(events.size());
+	if (events.empty()) return effects;
+	auto bytes = int64(0);
+	for (const auto &event : events) {
+		bytes += event.body.size() + event.preimage.size() + 4096;
+		for (const auto &entry : event.attachments) bytes += entry.description.size() + 512;
+	}
+	auto failure = current() ? physicalLimit(bytes) : u"scope_retired"_q;
+	while (failure == u"quota_unreclaimable"_q && maintenancePending() && bytes < kWalHeadroom / 2) {
+		const auto maintained = maintain();
+		failure = maintained ? physicalLimit(bytes) : maintained.reason;
+	}
+	if (!failure.isEmpty()) return std::vector<StoreEffect>(events.size(), StoreEffect{ failure });
+	const auto result = _db.ExecuteV2([&](const DesktopArchiveSqlite::Write &put) {
+		_batch = &put;
+		const auto clear = gsl::finally([&] { _batch = nullptr; });
+		for (auto i = size_t(0); i != events.size(); ++i) effects[i] = captureOne(events[i]);
+		return true;
+	}, [this] { return current() && step(Phase::BeforeSqlCommit) && current(); });
+	if (!result.committed) {
+		for (auto &effect : effects) {
+			if (effect.committed || effect.reason == u"text_write_failed"_q) {
+				effect = SqlFailure(result, current() ? u"text_write_failed"_q : u"scope_retired"_q);
+			}
+		}
+	} else {
+		_trimPending = true;
+		static_cast<void>(step(Phase::AfterSqlCommit));
+	}
+	return effects;
+}
+
+StoreEffect Store::captureOne(const CapturedEvent &event) {
 	if (!current() || event.storeId != id()) return { u"scope_retired"_q };
 	const auto identity = encodeIdentity(event.identity);
 	const auto chat = PeerTokenText(event.identity.peer);
@@ -200,9 +245,6 @@ StoreEffect Store::capture(const CapturedEvent &event) {
 	if (!old || !exists.ok) return { u"store_unreadable"_q };
 	const auto action = Reduce(old->head, event.event, bodyTag, !exists.rows.empty(), event.fillsMissing, !event.preimage.isEmpty());
 	if (action == Mutation::Ignore) return {};
-	auto weight = int64(event.body.size() + event.preimage.size() + 512);
-	for (const auto &attachment : event.attachments) weight += attachment.description.size() + 192;
-	if (const auto failure = reserve(weight, weight, false, key); !failure.isEmpty()) return { failure };
 	auto program = Program();
 	auto &sql = program.statements;
 	const auto previous = captureSerial();
@@ -383,7 +425,7 @@ bool Store::readSaved(const QByteArray &expected, const MessageIdentity &identit
 	return current() && !remaining && hash.result() == saved->digest;
 }
 
-StoreEffect Store::writeBlob(const BlobInput &input) {
+StoreEffect Store::writeBlob(const BlobInput &input, const std::function<void()> &betweenParts) {
 	if (!current() || input.storeId != id() || input.revision != _options.lease->mediaRevision.load()) {
 		return { u"scope_retired"_q };
 	}
@@ -429,8 +471,7 @@ StoreEffect Store::writeBlob(const BlobInput &input) {
 	if (saved && *saved != blob) return { u"scope_retired"_q };
 	const auto parts = (input.size - 1) / kPartSize + 1;
 	const auto manifest = Number(input.size) + Number(parts) + input.digest;
-	const auto previous = _db.Read({ u"SELECT size,sealed_manifest,(SELECT max(timed) FROM media WHERE blob_key=b.blob_key) "
-		"FROM blobs b WHERE blob_key=?"_q, { blob }, kRows });
+	const auto previous = _db.Read({ u"SELECT size,sealed_manifest,timed FROM blobs WHERE blob_key=?"_q, { blob }, kRows });
 	if (!previous.ok) return { u"store_unreadable"_q };
 	auto charge = input.size;
 	if (!previous.rows.empty()) {
@@ -445,34 +486,66 @@ StoreEffect Store::writeBlob(const BlobInput &input) {
 		charge = *timed && !*previousTimed ? input.size : 0;
 	}
 	if (saved) return previous.rows.empty() ? StoreEffect{ u"store_unreadable"_q } : StoreEffect{};
-	const auto disk = previous.rows.empty() ? input.size + (parts * 64) : 0;
-	if (const auto failure = reserve(charge, disk, *timed, key, blob); !failure.isEmpty()) return describe(failure);
+	const auto fresh = previous.rows.empty();
+	if (const auto failure = reserve(charge, *timed, key, blob, betweenParts); !failure.isEmpty()) return describe(failure);
 	const auto sealedReference = seal(u"body", reference, blob);
-	if (!sealedReference) return { u"key_unavailable"_q };
-	const auto result = _db.ExecuteV2([&](const DesktopArchiveSqlite::Write &put) {
-		if (previous.rows.empty()) {
-			const auto meta = seal(u"body", associated("blob", blob), manifest);
-			if (!meta || !put({ u"INSERT INTO blobs VALUES(?,?,?)"_q, { blob, input.size, *meta }, kOne })) return false;
-			auto hash = QCryptographicHash(QCryptographicHash::Sha256);
-			auto remaining = input.size;
-			for (auto part = int64(0); part != parts; ++part) {
-				if (!current() || !step(Phase::BlobPart)
-					|| (_options.canWritePart && !_options.canWritePart())) return false;
+	const auto sealedManifest = fresh ? seal(u"body", associated("blob", blob), manifest) : std::nullopt;
+	if (!sealedReference || (fresh && !sealedManifest)) return { u"key_unavailable"_q };
+	const auto live = [&] { return current() && input.revision == _options.lease->mediaRevision.load(); };
+	auto staged = false;
+	const auto release = gsl::finally([&] {
+		_mediaKeep.clear();
+		if (!staged || !current()) return;
+		auto program = Program();
+		program.statements.push_back({ u"DELETE FROM blobs WHERE blob_key=? AND sealed_manifest IS NULL"_q,
+			{ blob }, ArchiveSqlExpectation::AnyChanges });
+		static_cast<void>(write(std::move(program)));
+	});
+	_mediaKeep = key;
+	if (fresh) {
+		auto hash = QCryptographicHash(QCryptographicHash::Sha256);
+		auto remaining = input.size;
+		for (auto part = int64(0); part < parts;) {
+			const auto count = std::min<int64>(4, parts - part);
+			if (const auto failure = physicalLimit(std::min<int64>(remaining, count * kPartSize) + 128 * 1024);
+					!failure.isEmpty()) return describe(failure);
+			auto program = Program();
+			if (!part) program.statements.push_back({ u"INSERT INTO blobs VALUES(?,?,NULL,?)"_q, { blob, input.size, *timed }, kOne });
+			for (auto i = int64(0); i != count; ++i, ++part) {
+				if (!live() || !step(Phase::BlobPart)) return { u"scope_retired"_q };
 				const auto length = std::min<int64>(remaining, kPartSize);
 				auto bytes = input.read(length);
 				const auto clear = gsl::finally([&] { DesktopArchiveCrypto::Clear(bytes); });
-				if (bytes.size() != length) return false;
+				if (bytes.size() != length) return describe(u"copy_incomplete"_q);
 				hash.addData(bytes);
-				const auto sealed = seal(u"body", associated("part", blob + Number(part)), bytes);
-				if (!sealed || !put({ u"INSERT INTO blob_parts VALUES(?,?,?)"_q, { blob, part, *sealed }, kOne })) return false;
+				const auto sealedPart = seal(u"body", associated("part", blob + Number(part)), bytes);
+				if (!sealedPart) return describe(u"copy_incomplete"_q);
+				program.statements.push_back({ u"INSERT INTO blob_parts VALUES(?,?,?)"_q, { blob, part, *sealedPart }, kOne });
 				remaining -= length;
 			}
-			if (!input.read(1).isEmpty() || hash.result() != input.digest) return false;
+			if (!live()) return { u"scope_retired"_q };
+			const auto result = write(std::move(program));
+			if (!result) return describe(result.reason == u"disk_full"_q ? result.reason : u"copy_incomplete"_q);
+			staged = true;
+			if (betweenParts) betweenParts();
 		}
-		return put({ u"UPDATE media SET blob_key=?,sealed_blob_ref=?,state=1,reason=0 WHERE message_key=? AND seq=? AND ordinal=? AND blob_key IS NULL"_q,
-			{ blob, *sealedReference, key, input.sequence, input.ordinal }, kOne });
-	}, [this] { return current() && step(Phase::BeforeSqlCommit) && current(); });
-	if (!result.committed) return describe(SqlFailure(result, current() ? u"copy_incomplete"_q : u"scope_retired"_q).reason);
+		if (!input.read(1).isEmpty() || hash.result() != input.digest) return describe(u"copy_incomplete"_q);
+	}
+	if (!live()) return { u"scope_retired"_q };
+	const auto allowed = int64(*timed ? _options.policy.timedMiB : _options.policy.ordinaryFileMiB) * kMiB;
+	if (input.size > allowed) return describe(*timed ? u"over_allowance"_q : u"over_file_limit"_q);
+	if (const auto failure = physicalLimit(128 * 1024); !failure.isEmpty()) return describe(failure);
+	auto program = Program();
+	if (fresh) program.statements.push_back({ u"UPDATE blobs SET sealed_manifest=? WHERE blob_key=? AND sealed_manifest IS NULL"_q,
+		{ *sealedManifest, blob }, kOne });
+	if (*timed && !fresh) program.statements.push_back({ u"UPDATE blobs SET timed=1 WHERE blob_key=?"_q, { blob }, kOne });
+	program.statements.push_back({ u"UPDATE media SET blob_key=?,sealed_blob_ref=?,state=1,reason=0 WHERE message_key=? AND seq=? "
+		"AND ordinal=? AND media_key=? AND blob_key IS NULL"_q, { blob, *sealedReference, key, input.sequence, input.ordinal, media }, kOne });
+	program.statements.push_back({ u"COMMIT"_q });
+	const auto result = _db.Execute(program, [&] { return live() && step(Phase::BeforeSqlCommit) && live(); });
+	if (!result.committed) return describe(SqlFailure(result, live() ? u"copy_incomplete"_q : u"scope_retired"_q).reason);
+	staged = false;
+	_trimPending = true;
 	static_cast<void>(step(Phase::AfterSqlCommit));
 	return { {}, true };
 }

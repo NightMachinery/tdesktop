@@ -6,6 +6,7 @@
 
 #include <QtCore/QLockFile>
 #include <atomic>
+#include <span>
 
 namespace Purple::ArchiveV2 {
 
@@ -33,7 +34,6 @@ struct StoreOptions {
 	Policy policy;
 	std::function<int64()> now;
 	std::function<int64()> availableBytes;
-	std::function<bool()> canWritePart;
 };
 
 struct StoreEffect {
@@ -158,9 +158,12 @@ struct Usage {
 	int64 support = 0;
 	int64 ordinary = 0;
 	int64 timed = 0;
-	int64 reclaimed = 0;
 	[[nodiscard]] int64 physical() const { return database + wal + sharedMemory + support; }
 };
+
+// A bounded SQLite write plus its checkpoint, and page/index/encryption overhead.
+inline constexpr auto kWalHeadroom = int64(16 * 1024 * 1024);
+inline constexpr auto kMetadataHeadroom = int64(384 * 1024 * 1024);
 
 struct StorageSummary {
 	Usage active;
@@ -168,7 +171,7 @@ struct StorageSummary {
 	int64 ordinaryCap = 0;
 	int64 timedCap = 0;
 	int64 ordinaryFileCap = 0;
-	int64 lastTrimDay = -1;
+	int64 overheadCap = 0;
 	bool overLimit = false;
 };
 
@@ -194,7 +197,9 @@ public:
 
 	[[nodiscard]] StoreEffect open();
 	[[nodiscard]] StoreEffect capture(const CapturedEvent &event);
-	[[nodiscard]] StoreEffect writeBlob(const BlobInput &input);
+	[[nodiscard]] std::vector<StoreEffect> captureBatch(std::span<const CapturedEvent> events);
+	[[nodiscard]] StoreEffect writeBlob(const BlobInput &input, const std::function<void()> &betweenParts = {});
+	[[nodiscard]] bool maintenancePending() const;
 	using ResetCheck = std::variant<ResetReview, QString>;
 	[[nodiscard]] ResetCheck reviewReset(const QByteArray &expectedId) const;
 	[[nodiscard]] StoreEffect reset(const ResetReview &review);
@@ -271,11 +276,13 @@ private:
 	[[nodiscard]] std::optional<int64> captureSerial();
 	[[nodiscard]] QString openDatabase(const QByteArray &dataKey);
 	[[nodiscard]] StoreEffect write(ArchiveSqlProgram program);
-	[[nodiscard]] QString reserve(int64 logical, int64 physical, bool timed, const QByteArray &keep,
-		const QByteArray &keepBlob = {});
+	[[nodiscard]] StoreEffect captureOne(const CapturedEvent &event);
+	[[nodiscard]] std::optional<std::pair<int64, int64>> totals();
+	[[nodiscard]] QString reserve(int64 logical, bool timed, const QByteArray &keep,
+		const QByteArray &keepBlob, const std::function<void()> &betweenParts);
 	[[nodiscard]] QString expire(int64 day, const QByteArray &keep = {});
-	[[nodiscard]] QString trim(int64 bytes, bool timed, const QByteArray &keep, const QByteArray &keepBlob = {}, bool forceOne = false);
-	[[nodiscard]] QString physicalLimit(int64 extra);
+	[[nodiscard]] QString trim(int64 bytes, bool timed, const QByteArray &keep, const QByteArray &keepBlob = {});
+	[[nodiscard]] QString physicalLimit(int64 extra, bool reclaiming = false);
 	[[nodiscard]] std::optional<int64> pragma(const QString &query);
 	[[nodiscard]] int64 availableBytes() const;
 	[[nodiscard]] int64 today() const;
@@ -293,7 +300,11 @@ private:
 	bool _bound = false;
 	QString _bindFailure;
 	int64 _lastTrimDay = -1;
-	int64 _reclaimed = 0;
+	int64 _pageLimit = 0;
+	bool _trimPending = true;
+	bool _vacuumPending = false;
+	QByteArray _mediaKeep;
+	const DesktopArchiveSqlite::Write *_batch = nullptr;
 };
 
 }

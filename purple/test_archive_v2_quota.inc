@@ -114,11 +114,11 @@ void SeparatePressure() {
 		CHECK(store.capture(event).committed);
 		CHECK(store.writeBlob(MediaFile(event, QByteArray(4 * kMiB, char('A' + i)))).committed);
 		CHECK(Count(path, u"SELECT count(*) FROM media WHERE timed=1 AND blob_key IS NOT NULL"_q) == 2);
-		CHECK(store.usage() && store.usage()->physical() <= 18 * kMiB);
+		CHECK(store.usage() && store.usage()->physical() <= 18 * kMiB + kMetadataHeadroom + kWalHeadroom);
 	}
-	CHECK(peak > 0 && peak <= 18 * kMiB);
+	CHECK(peak > 0 && peak <= 18 * kMiB + kMetadataHeadroom + kWalHeadroom);
 	std::printf("V2 quota physical peak at commit: %lld bytes, cap %lld bytes\n",
-		static_cast<long long>(peak), static_cast<long long>(18 * kMiB));
+		static_cast<long long>(peak), static_cast<long long>(18 * kMiB + kMetadataHeadroom + kWalHeadroom));
 	const auto before = store.usage();
 	CHECK(store.maintain());
 	const auto after = store.usage();
@@ -169,12 +169,20 @@ void QuotaDiskAndAge() {
 	CHECK(reader.Read({ u"SELECT count(*) FROM messages"_q, {}, ArchiveSqlExpectation::OneRow }).ok);
 	const auto whileRead = MediaRow(id, 3, false, at);
 	CHECK(store.capture(whileRead).committed);
-	const auto blocked = MediaRow(id, 4, false, at);
-	CHECK(store.capture(blocked).reason == u"store_busy"_q);
+	auto blocked = MediaRow(id, 4, false, at);
+	auto seenBusy = false;
+	for (auto n = 0; n != 32; ++n) {
+		blocked.identity.message += 1;
+		blocked.body = QByteArray(kMiB, 'W');
+		const auto result = store.capture(blocked);
+		if (result.reason == u"store_busy"_q) { seenBusy = true; break; }
+		CHECK(result.committed);
+	}
+	CHECK(seenBusy && !store.body(blocked.identity, 1));
 	CHECK(reader.EndRead() && reader.Close());
 	CHECK(store.capture(blocked).committed);
 
-	const auto low = MediaRow(id, 5, false, at);
+	const auto low = MediaRow(id, 90, false, at);
 	space = 0;
 	CHECK(store.capture(low).reason == u"disk_full"_q);
 	CHECK(!store.body(low.identity, 1));
@@ -183,7 +191,7 @@ void QuotaDiskAndAge() {
 	CHECK(store.capture(low).committed);
 	CHECK(space == 0);
 	CHECK(store.body(low.identity, 1));
-	CHECK(store.capture(MediaRow(id, 6, false, at)).reason == u"disk_full"_q);
+	CHECK(store.capture(MediaRow(id, 91, false, at)).reason == u"disk_full"_q);
 	failAfter = false;
 	space = 64 * kMiB;
 	now -= 10 * 86400;
@@ -197,7 +205,96 @@ void QuotaDiskAndAge() {
 	const auto reusable = Count(path, u"PRAGMA freelist_count"_q);
 	const auto pageSize = Count(path, u"PRAGMA page_size"_q);
 	CHECK(reusable > 64 && pageSize > 0);
-	CHECK(trimmed && trimmed->database == QFileInfo(path).size() && trimmed->database >= reusable * pageSize);
+	CHECK(trimmed && trimmed->database == QFileInfo(path).size()
+		&& trimmed->database + trimmed->wal >= reusable * pageSize);
+}
+
+void BothAllowances(int ordinaryMiB = 16, int timedMiB = 8) {
+	Section = "v2 both independent buckets fit at their limits in either order";
+	for (const auto timedFirst : { false, true }) {
+		const auto temp = QTemporaryDir();
+		auto options = Options(temp.path());
+		options.policy.totalMiB = options.policy.ordinaryFileMiB = ordinaryMiB;
+		options.policy.timedMiB = timedMiB;
+		const auto ordinaryCap = int64(ordinaryMiB) * kMiB;
+		const auto timedCap = int64(timedMiB) * kMiB;
+		auto path = QString();
+		auto peak = int64(0);
+		auto wal = int64(0);
+		options.checkpoint = [&](Phase phase) {
+			if (!path.isEmpty() && (phase == Phase::BlobPart || phase == Phase::AfterSqlCommit)) {
+				const auto bytes = QFileInfo(path + u"-wal"_q).size();
+				wal = std::max(wal, bytes);
+				peak = std::max(peak, QFileInfo(path).size() + bytes + QFileInfo(path + u"-shm"_q).size());
+			}
+			return true;
+		};
+		auto store = V2Store(options);
+		CHECK(store.open());
+		const auto id = store.id();
+		path = ActivePath(options, id) + u"/archive.sqlite"_q;
+		const auto timed = MediaRow(id, 1, true, 1700000000);
+		const auto ordinary = MediaRow(id, 2, false, 1700000000);
+		CHECK(store.capture(timed).committed && store.capture(ordinary).committed);
+		const auto initial = store.usage();
+		if (!initial) continue;
+		const auto save = [&](const CapturedEvent &event, int64 size, char fill) {
+			auto input = MediaFile(event, {});
+			input.size = size;
+			auto hash = QCryptographicHash(QCryptographicHash::Sha256);
+			const auto part = QByteArray(kChunk, fill);
+			for (auto left = size; left > 0; left -= kChunk) hash.addData(QByteArrayView(part).first(std::min<int64>(left, kChunk)));
+			input.digest = hash.result();
+			input.read = [size, fill, sent = int64(0)](qsizetype maximum) mutable {
+				const auto count = std::min<int64>(maximum, size - sent);
+				sent += count;
+				return QByteArray(count, fill);
+			};
+			CHECK(store.writeBlob(input).committed);
+		};
+		if (timedFirst) save(timed, timedCap, 'T');
+		save(ordinary, ordinaryCap - initial->ordinary, 'O');
+		if (!timedFirst) save(timed, timedCap, 'T');
+		const auto final = store.usage();
+		CHECK(final && final->ordinary == ordinaryCap && final->timed == timedCap);
+		CHECK(wal > 0 && wal <= kWalHeadroom);
+		CHECK(peak > ordinaryCap + timedCap && peak <= ordinaryCap + timedCap + kMetadataHeadroom + kWalHeadroom);
+		std::printf("V2 %d + %d MiB (%s first): peak=%lld WAL=%lld bytes\n",
+			ordinaryMiB, timedMiB, timedFirst ? "timed" : "ordinary", static_cast<long long>(peak), static_cast<long long>(wal));
+	}
+}
+
+void LiveTrim() {
+	Section = "v2 capture during a quota reduction and clean idle maintenance";
+	const auto temp = QTemporaryDir();
+	auto options = Options(temp.path());
+	options.policy.totalMiB = 48;
+	options.policy.timedMiB = 0;
+	auto capacityChecks = 0;
+	options.availableBytes = [&] { ++capacityChecks; return 256 * kMiB; };
+	auto store = V2Store(options);
+	CHECK(store.open());
+	const auto id = store.id();
+	for (auto n = 1; n <= 240; ++n) {
+		auto event = MediaRow(id, n, false, 1700000000);
+		event.body = QByteArray(120 * 1024, 'A');
+		CHECK(store.capture(event).committed);
+	}
+	auto smaller = options.policy;
+	smaller.totalMiB = 16;
+	CHECK(store.updatePolicy(smaller));
+	CHECK(store.usage() && store.usage()->ordinary > 16 * kMiB);
+	for (auto n = 241; n <= 244; ++n) {
+		const auto incoming = MediaRow(id, n, false, 1700000000);
+		CHECK(store.capture(incoming).committed);
+		CHECK(store.body(incoming.identity, 1));
+	}
+	for (auto n = 0; n != 512 && store.maintenancePending(); ++n) CHECK(store.maintain());
+	CHECK(store.usage() && store.usage()->ordinary <= 16 * kMiB);
+	CHECK(!store.maintenancePending());
+	const auto checked = capacityChecks;
+	CHECK(store.maintain());
+	CHECK(capacityChecks == checked);
 }
 
 void OverlappingAdmissions() {
@@ -266,6 +363,192 @@ void ReadyMediaPriority() {
 	if (finished.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
 		CHECK((finished.get() == std::vector{ 1, 3, 4, 2, 5 }));
 	}
+}
+
+void IncomingDuringBlob() {
+	Section = "v2 text arriving at every blob part is saved in order and the file survives";
+	const auto temp = std::make_shared<QTemporaryDir>();
+	struct Run {
+		std::promise<QByteArray> opened;
+		std::promise<bool> saved;
+		int reports = 0;
+		int count = 0;
+		bool accepted = true;
+	};
+	const auto state = std::make_shared<Run>();
+	auto ready = state->opened.get_future();
+	auto result = state->saved.get_future();
+	const auto worker = std::make_shared<Writer>(Options(temp->path()), [state, temp, done = false](StoreEffect effect, QByteArray id) mutable {
+		if (++state->reports == 1) state->opened.set_value(id);
+		else if (!done && state->count > 0 && (!effect || state->reports == 43)) {
+			done = true;
+			state->saved.set_value(bool(effect));
+		}
+	});
+	CHECK(ready.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+	if (ready.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+	const auto id = ready.get();
+	const auto target = MediaRow(id, 1, true, 1700000000);
+	CHECK(worker->post(target));
+	auto input = MediaFile(target, QByteArray(40 * kMiB, 'V'));
+	input.read = [state, id, weak = std::weak_ptr(worker), read = std::move(input.read)](qsizetype size) {
+		if (size > 1) {
+			const auto writer = weak.lock();
+			state->accepted &= writer && bool(writer->post(MediaRow(id, ++state->count + 1, true, 1700000000)));
+		}
+		return read(size);
+	};
+	CHECK(worker->postBlob(std::move(input)));
+	CHECK(result.wait_for(std::chrono::seconds(15)) == std::future_status::ready);
+	if (result.wait_for(std::chrono::seconds(0)) == std::future_status::ready) CHECK(result.get());
+	const auto inspected = std::make_shared<std::promise<bool>>();
+	auto finished = inspected->get_future();
+	CHECK(worker->query(id, [=](V2Store &store) {
+		auto good = state->accepted && state->count == 40;
+		const auto files = store.media(target.identity, 1);
+		good = good && files && files->front().savedBytes == 40 * kMiB;
+		for (auto n = 2; n <= 41 && good; ++n) {
+			const auto body = store.body(MediaRow(id, n, true, 0).identity, 1);
+			good = body && body->serial == n;
+		}
+		inspected->set_value(good);
+	}));
+	CHECK(finished.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+	if (finished.wait_for(std::chrono::seconds(0)) == std::future_status::ready) CHECK(finished.get());
+}
+
+void CheckTotals(V2Store &store, const QString &path) {
+	const auto usage = store.usage();
+	const auto ordinary = Count(path, u"SELECT coalesce((SELECT sum(length(sealed_identity)+160) FROM messages),0)+"
+		"coalesce((SELECT sum(length(sealed_body)+144) FROM versions),0)+"
+		"coalesce((SELECT sum(length(sealed_descriptor)+144) FROM media),0)+"
+		"coalesce((SELECT count(*)*128 FROM purged_edits),0)+"
+		"coalesce((SELECT sum(size) FROM blobs b WHERE NOT EXISTS("
+		"SELECT 1 FROM media r WHERE r.blob_key=b.blob_key AND r.timed=1)),0)"_q);
+	const auto timed = Count(path, u"SELECT coalesce(sum(size),0) FROM blobs b "
+		"WHERE EXISTS(SELECT 1 FROM media r WHERE r.blob_key=b.blob_key AND r.timed=1)"_q);
+	CHECK(usage && usage->ordinary == ordinary && usage->timed == timed);
+}
+
+void TotalsMatchAfterMixedWrites() {
+	Section = "v2 committed byte totals equal a full sum after mixed mutations";
+	const auto temp = QTemporaryDir();
+	auto options = Options(temp.path());
+	auto store = V2Store(Options(temp.path()));
+	CHECK(store.open());
+	const auto id = store.id();
+	const auto path = ActivePath(options, id) + u"/archive.sqlite"_q;
+	const auto one = MediaRow(id, 1, true, 1700000000);
+	const auto two = MediaRow(id, 2, false, 1700000000);
+	const auto bytes = QByteArray(kMiB, 'A');
+	CHECK(store.capture(one).committed && store.capture(two).committed);
+	CHECK(store.writeBlob(MediaFile(two, bytes)).committed);
+	CheckTotals(store, path);
+	CHECK(store.writeBlob(MediaFile(one, bytes)).committed);
+	CheckTotals(store, path);
+	auto edit = one;
+	edit.event = Observation::Edit;
+	edit.eventId = "updated";
+	edit.body = "another body";
+	CHECK(store.capture(edit).committed);
+	auto cleaned = store.prepareCleanup(CleanupKind::EditHistory);
+	CHECK(cleaned && store.cleanupPage(*cleaned).effect);
+	CheckTotals(store, path);
+	CHECK(store.usage() && store.usage()->timed == 0 && store.usage()->ordinary > kMiB);
+}
+
+int ReviewBenchmark() {
+	using Clock = std::chrono::steady_clock;
+	const auto temp = std::make_shared<QTemporaryDir>();
+	if (!temp->isValid()) return 2;
+	const auto at = int64(1700000000);
+	auto id = QByteArray();
+	{
+		auto store = V2Store(Options(temp->path()));
+		if (!store.open()) return 2;
+		id = store.id();
+		for (auto offset = 0; offset < 200000; offset += 128) {
+			auto batch = std::vector<CapturedEvent>();
+			for (auto n = offset; n < std::min(200000, offset + 128); ++n) {
+				auto event = MediaRow(id, n / 10 + 1, false, at);
+				event.event = (n % 10) ? Observation::Edit : Observation::Baseline;
+				event.eventId = QByteArray::number(n);
+				event.body = event.eventId + QByteArray(950, 'B');
+				event.attachments.clear();
+				batch.push_back(std::move(event));
+			}
+			for (const auto &effect : store.captureBatch(batch)) if (!effect.committed) return 3;
+		}
+		const auto bytes = store.usage();
+		if (!bytes || !store.maintain()) return 4;
+		std::printf("V2 benchmark seeded: versions=200000 ordinary=%lld DB+WAL+SHM=%lld bytes\n",
+			static_cast<long long>(bytes->ordinary), static_cast<long long>(bytes->physical()));
+	}
+	struct Metrics {
+		std::mutex lock;
+		std::condition_variable changed;
+		int committed = 0;
+		bool open = false;
+		bool failed = false;
+		bool retiring = false;
+		bool retired = false;
+	};
+	const auto metrics = std::make_shared<Metrics>();
+	auto worker = Writer(Options(temp->path()), [metrics, temp](StoreEffect effect, QByteArray) {
+		const auto guard = std::lock_guard(metrics->lock);
+		metrics->open = true;
+		metrics->failed |= !effect;
+		if (metrics->retiring) metrics->retired = effect.committed;
+		else metrics->committed += effect.committed;
+		metrics->changed.notify_one();
+	});
+	const auto wait = [&](const auto &test) {
+		auto lock = std::unique_lock(metrics->lock);
+		return metrics->changed.wait_for(lock, std::chrono::seconds(25), [&] { return metrics->failed || test(); })
+			&& !metrics->failed;
+	};
+	const auto elapsed = [](auto start) { return std::chrono::duration<double, std::milli>(Clock::now() - start).count(); };
+	if (!wait([&] { return metrics->open; })) return 5;
+	auto latencies = std::vector<double>();
+	for (auto n = 0; n < 100; ++n) {
+		const auto start = Clock::now();
+		if (!worker.post(MediaRow(id, 21000 + n, false, at))
+			|| !wait([&] { return metrics->committed >= n + 1; })) return 6;
+		latencies.push_back(elapsed(start));
+	}
+	std::sort(latencies.begin(), latencies.end());
+	std::printf("V2 benchmark capture: p50=%.3f ms p95=%.3f ms p99=%.3f ms\n",
+		latencies[49], latencies[94], latencies[98]);
+	const auto burst = Clock::now();
+	for (auto n = 0; n < 1000; ++n) {
+		if (n && n % 128 == 0 && !wait([&] { return metrics->committed >= 100 + n; })) return 7;
+		if (!worker.post(MediaRow(id, 22000 + n, false, at))) return 7;
+	}
+	if (!wait([&] { return metrics->committed == 1100; })) return 7;
+	std::printf("V2 benchmark 1000-event burst: %.3f ms\n", elapsed(burst));
+	const auto inspected = std::make_shared<std::promise<bool>>();
+	auto done = inspected->get_future();
+	if (!worker.query(id, [=](V2Store &store) {
+		if (!store.maintain() || store.maintenancePending()) { inspected->set_value(false); return; }
+		auto start = Clock::now();
+		for (auto i = 0; i != 10000; ++i) if (!store.maintain()) { inspected->set_value(false); return; }
+		std::printf("V2 benchmark clean idle maintenance: %.6f ms per call\n", elapsed(start) / 10000);
+		start = Clock::now();
+		const auto page = store.timeline(PeerToken{ PeerTokenKind::User, 19 }, false, std::nullopt, 40);
+		std::printf("V2 benchmark 40-row timeline page: %.3f ms\n", elapsed(start));
+		const auto ticket = store.prepareCleanup(CleanupKind::EditHistory);
+		start = Clock::now();
+		const auto cleaned = ticket ? store.cleanupPage(*ticket) : CleanupResult{};
+		std::printf("V2 benchmark cleanup page (%d items): %.3f ms\n", cleaned.removed, elapsed(start));
+		inspected->set_value(page && page->rows.size() == 40 && ticket && cleaned.effect && cleaned.removed > 0);
+	})) return 8;
+	if (done.wait_for(std::chrono::seconds(25)) != std::future_status::ready || !done.get()) return 8;
+	{
+		const auto guard = std::lock_guard(metrics->lock);
+		metrics->retiring = true;
+	}
+	worker.logout(id);
+	return wait([&] { return metrics->retired; }) ? 0 : 9;
 }
 
 void VerifiedCompleteFile() {

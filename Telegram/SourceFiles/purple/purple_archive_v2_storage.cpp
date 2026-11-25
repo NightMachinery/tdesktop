@@ -234,9 +234,10 @@ std::optional<StorageSummary> Store::storageSummary() {
 	if (!active) return std::nullopt;
 	const auto ordinary = int64(_options.policy.totalMiB) * 1024 * 1024;
 	const auto timed = int64(_options.policy.timedMiB) * 1024 * 1024;
+	const auto overhead = kWalHeadroom + kMetadataHeadroom;
 	return StorageSummary{ *active, pendingBytes(), ordinary, timed,
-		int64(_options.policy.ordinaryFileMiB) * 1024 * 1024, _lastTrimDay,
-		active->ordinary > ordinary || active->timed > timed || active->physical() > ordinary + timed };
+		int64(_options.policy.ordinaryFileMiB) * 1024 * 1024, overhead,
+		active->ordinary > ordinary || active->timed > timed || active->physical() > ordinary + timed + overhead };
 }
 
 QString Store::cleanup() {

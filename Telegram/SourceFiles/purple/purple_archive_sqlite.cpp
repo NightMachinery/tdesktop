@@ -270,11 +270,12 @@ DesktopArchiveSqlResult DesktopArchiveSqlite::ConfigureV2() {
 		return Failure(SQLITE_ERROR, u"incremental-vacuum-unavailable"_q);
 	}
 	if (const auto configured = Configure(); !configured.ok) return configured;
-	for (const auto &query : { u"PRAGMA cache_spill=OFF"_q, u"PRAGMA temp_store=MEMORY"_q }) {
-		const auto result = Read({ query });
+	if (const auto result = Read({ u"PRAGMA temp_store=MEMORY"_q }); !result.ok) return result;
+	for (const auto &query : { u"PRAGMA secure_delete=OFF"_q, u"PRAGMA wal_autocheckpoint=0"_q }) {
+		const auto result = Read({ query, {}, ArchiveSqlExpectation::OneRow });
 		if (!result.ok) return result;
 	}
-	return Read({ u"PRAGMA wal_autocheckpoint=0"_q, {}, ArchiveSqlExpectation::OneRow });
+	return { .ok = true };
 }
 
 DesktopArchiveSqlResult DesktopArchiveSqlite::CheckpointV2() {

@@ -2,8 +2,8 @@
 
 #include "purple/purple_archive_v2_media.h"
 
+#include <QtCore/QDateTime>
 #include <algorithm>
-
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -49,12 +49,6 @@ Writer::Writer(StoreOptions options, Report report) : _state(std::make_shared<St
 	if (!options.lease) options.lease = std::make_shared<Lease>();
 	_state->lease = options.lease;
 	_state->report = std::move(report);
-	options.canWritePart = [weak = std::weak_ptr(_state), previous = std::move(options.canWritePart)] {
-		const auto state = weak.lock();
-		if (!state || (previous && !previous())) return false;
-		const auto lock = std::lock_guard(state->mutex);
-		return !state->stopped && state->jobs.empty();
-	};
 	std::thread([state = _state, options = std::move(options)]() mutable {
 		run(std::move(state), std::move(options));
 	}).detach();
@@ -135,58 +129,87 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 	auto opened = store->open();
 	const auto initial = store->id();
 	if (state->lease->live.load()) report(std::move(opened), initial);
+	const auto drain = [&] {
+		auto events = std::vector<CapturedEvent>();
+		auto query = std::optional<State::Query>();
+		{
+			const auto lock = std::lock_guard(state->mutex);
+			if (state->stopped || state->jobs.empty()) return false;
+			if (auto task = std::get_if<State::Query>(&state->jobs.front())) {
+				query = std::move(*task);
+				state->jobs.pop_front();
+			}
+			while (!query && events.size() != 32 && !state->jobs.empty()) {
+				const auto event = std::get_if<CapturedEvent>(&state->jobs.front());
+				if (!event) break;
+				state->bytes -= Weight(*event);
+				events.push_back(std::move(*event));
+				state->jobs.pop_front();
+			}
+		}
+		if (query && query->generation == store->id()) query->operation(*store);
+		for (auto &effect : store->captureBatch(events)) {
+			if (state->lease->live.load()) report(std::move(effect), store->id());
+		}
+		return query.has_value() || !events.empty();
+	};
+	auto retry = std::chrono::steady_clock::time_point();
 	for (;;) {
 		auto lock = std::unique_lock(state->mutex);
-		const auto ready = state->changed.wait_for(lock, std::chrono::minutes(1),
-			[&] { return state->stopped || !state->jobs.empty() || !state->blobs.empty(); });
-		if (!ready) {
-			lock.unlock();
-			const auto result = store->maintain();
-			if (!result && state->lease->live.load()) report(result, store->id());
-			continue;
+		const auto hasWork = [&] { return state->stopped || !state->jobs.empty() || !state->blobs.empty(); };
+		const auto now = std::chrono::steady_clock::now();
+		if (!hasWork() && (!store->maintenancePending() || now < retry)) {
+			const auto midnight = std::chrono::seconds(86400
+				- QDateTime::currentSecsSinceEpoch() % 86400);
+			state->changed.wait_until(lock, now < retry ? retry : now + midnight, hasWork);
 		}
 		if (state->stopped) {
 			const auto logout = std::move(state->logout);
 			lock.unlock();
 			if (logout) {
-				auto result = store->logout(*logout);
+				auto effect = store->logout(*logout);
 				const auto id = store->id();
 				store.reset();
-				report(std::move(result), id);
+				report(std::move(effect), id);
 			}
 			return;
 		}
-		if (state->jobs.empty()) {
+		if (!state->jobs.empty()) {
+			if (const auto expected = std::get_if<ResetReview>(&state->jobs.front())) {
+				const auto review = *expected;
+				state->jobs.pop_front();
+				lock.unlock();
+				auto effect = store->reset(review);
+				const auto id = store->id();
+				if (effect.committed || !state->lease->live.load()) {
+					store.reset();
+					report(std::move(effect), id);
+					return;
+				}
+				report(std::move(effect), id);
+			} else {
+				lock.unlock();
+				drain();
+			}
+		} else if (!state->blobs.empty()) {
 			auto blob = state->writing = std::move(state->blobs.front());
 			state->blobs.pop_front();
 			lock.unlock();
-			auto effect = store->writeBlob(*blob);
+			auto effect = store->writeBlob(*blob, [&] { drain(); });
 			{
 				const auto guard = std::lock_guard(state->mutex);
 				state->writing.reset();
 			}
 			if (state->lease->live.load()) report(std::move(effect), store->id());
-			continue;
-		}
-		auto job = std::move(state->jobs.front());
-		state->jobs.pop_front();
-		const auto event = std::get_if<CapturedEvent>(&job);
-		if (event) state->bytes -= Weight(*event);
-		lock.unlock();
-		if (event) {
-			auto effect = store->capture(*event);
-			if (state->lease->live.load()) report(std::move(effect), store->id());
-		} else if (const auto query = std::get_if<State::Query>(&job)) {
-			if (query->generation == store->id()) query->operation(*store);
 		} else {
-			auto effect = store->reset(std::get<ResetReview>(job));
-			const auto id = store->id();
-			if (effect.committed || !state->lease->live.load()) {
-				store.reset();
-				report(std::move(effect), id);
-				return;
+			lock.unlock();
+		}
+		if (store->maintenancePending() && std::chrono::steady_clock::now() >= retry) {
+			const auto result = store->maintain();
+			if (!result && state->lease->live.load()) {
+				report(result, store->id());
+				retry = std::chrono::steady_clock::now() + std::chrono::minutes(1);
 			}
-			report(std::move(effect), id);
 		}
 	}
 }
