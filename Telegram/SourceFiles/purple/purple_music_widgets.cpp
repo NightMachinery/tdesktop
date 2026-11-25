@@ -149,7 +149,9 @@ void MusicActionButton::paintEvent(QPaintEvent *e) {
 	p.drawText(area.left(), textBaseline(), _label);
 }
 
-double RelativeLuminance(QColor color) {
+} // namespace
+
+double MusicRelativeLuminance(QColor color) {
 	const auto channel = [](double value) {
 		return (value <= 0.04045)
 			? value / 12.92
@@ -159,13 +161,11 @@ double RelativeLuminance(QColor color) {
 		+ 0.0722 * channel(color.blueF());
 }
 
-} // namespace
-
 QColor MusicReadableColor(QColor foreground, QColor background, double minimum) {
-	const auto bg = RelativeLuminance(background);
+	const auto bg = MusicRelativeLuminance(background);
 	const auto target = (bg > 0.18) ? 0. : 1.;
 	for (auto step = 0; step != 9; ++step) {
-		const auto fg = RelativeLuminance(foreground);
+		const auto fg = MusicRelativeLuminance(foreground);
 		if ((std::max(bg, fg) + 0.05) / (std::min(bg, fg) + 0.05) >= minimum) {
 			return foreground;
 		}

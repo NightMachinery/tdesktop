@@ -80,6 +80,7 @@ struct ChatMusicLayoutArgs {
 	rpl::producer<bool> tiles,
 	Fn<void(bool)> select,
 	const MusicKeyHint &keys);
+[[nodiscard]] double MusicRelativeLuminance(QColor color);
 [[nodiscard]] QColor MusicReadableColor(QColor foreground, QColor background, double minimum);
 void PaintMusicText(
 	QPainter &p,

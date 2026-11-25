@@ -25,6 +25,8 @@
 #include <QtGui/QIcon>
 #include <QtWidgets/QStyle>
 
+#include <cmath>
+
 namespace Purple {
 namespace {
 
@@ -209,7 +211,16 @@ void NowPlaying::updateProgressContrast() {
 		tinted = anim::color(surface, ink, _tint.alphaF());
 	}
 	const auto preferred = anim::color(st::windowSubTextFg, st::windowFg, .15);
-	const auto rail = MusicReadableColor(MusicReadableColor(preferred, surface, 3.), tinted, 3.);
+	const auto base = MusicRelativeLuminance(surface);
+	const auto rail = [&] {
+		if (base <= .18) {
+			return MusicReadableColor(MusicReadableColor(preferred, surface, 3.), tinted, 3.);
+		}
+		const auto darkest = std::min(base, MusicRelativeLuminance(tinted));
+		const auto luminance = (darkest + .05) / 3.1 - .05;
+		const auto gray = 1.055 * std::pow(luminance, 1. / 2.4) - .055;
+		return QColor::fromRgbF(gray, gray, gray);
+	}();
 	_progress->setColorOverrides({ .inactiveFg = rail });
 }
 
