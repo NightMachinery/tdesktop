@@ -59,6 +59,7 @@
 #include "settings/settings_builder.h"
 #include "settings/settings_key_navigation.h"
 #include "storage/storage_shared_media.h"
+#include "test/test_purple_notices.h"
 #include "ui/abstract_button.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/layers/layer_widget.h"
@@ -1990,6 +1991,9 @@ void Keys::watchUserKeymap() {
 }
 
 bool Keys::eventFilter(QObject *watched, QEvent *event) {
+	if (Test::TryPurpleNoticeProbe(_window, watched, event)) {
+		return true;
+	}
 	if (watched == _window && event->type() == QEvent::WindowActivate) {
 		schedulePendingNoticeFlush();
 	}

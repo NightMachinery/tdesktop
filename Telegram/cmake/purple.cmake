@@ -635,6 +635,16 @@ target_include_directories(purple_edn PRIVATE
     ${purple_edn_loc}/src)
 set_source_files_properties(${src_loc}/purple/purple_keys.cpp
     PROPERTIES INCLUDE_DIRECTORIES ${purple_edn_loc}/include)
+option(PURPLE_BUILD_NOTICE_TEST_PROBES "Enable the local notice test shortcuts" OFF)
+if (PURPLE_BUILD_NOTICE_TEST_PROBES)
+    target_sources(Telegram PRIVATE
+        "$<$<NOT:$<CONFIG:Release>>:${src_loc}/test/test_purple_notices.cpp>")
+    set_property(SOURCE
+        "${src_loc}/purple/purple_keys.cpp"
+        "${src_loc}/test/test_purple_notices.cpp"
+        APPEND PROPERTY
+        COMPILE_DEFINITIONS "$<$<NOT:$<CONFIG:Release>>:PURPLE_BUILD_NOTICE_TEST_PROBES>")
+endif()
 target_link_libraries(purple_edn PRIVATE Threads::Threads)
 if (UNIX AND NOT APPLE)
     target_link_libraries(purple_edn PRIVATE m)

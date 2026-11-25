@@ -497,6 +497,13 @@ ordered(dispatch, "case Action::EnterInsertMode:", "enterInsert(false)", "FocusM
 ordered(dispatch, "case Action::Search:", "MapKind::Music", "enterInsert(true)",
         "FocusMusicSearch(current, target.focus, true)", "launch(Native::Search)")
 assert "MusicHidesChats(_mainSection.data())" in read("mainwidget.cpp")
+notice_probe = read("test/test_purple_notices.cpp")
+assert re.search(r"option\(PURPLE_BUILD_NOTICE_TEST_PROBES[^)]*OFF\)", purple_cmake)
+assert "$<$<NOT:$<CONFIG:Release>>:PURPLE_BUILD_NOTICE_TEST_PROBES>" in purple_cmake
+ordered(keys, "bool Keys::eventFilter", "Test::TryPurpleNoticeProbe(_window, watched, event)")
+ordered(notice_probe, "PURPLE_TEST_NOTICE_PROBES", "QApplication::activeWindow() != window",
+        "key->isAutoRepeat()", "controller.maybeSession()", "ShowPurpleNotice", "ShowPurpleAck")
+assert all(word not in notice_probe for word in ("writePref", "WriteSettings", "sync(", "api()."))
 assert "Purple::IsChatPaletteController(_controller)" in read("boxes/peer_list_box.cpp")
 
 print("Modal key, status line, which-key, cheatsheet, M-x, localleader, hints and background routes passed")
