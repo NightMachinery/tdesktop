@@ -659,6 +659,16 @@ void InitPurpleNoticeDelivery() {
 	Pending();
 }
 
+QString ExportRecentPurpleNotices(not_null<Window::Controller*> window) {
+	const auto session = window->maybeSession();
+	const auto accountKey = session ? PurpleNoticeAccountKey(session) : QString();
+	if (accountKey.isEmpty() || Core::App().activeWindow() != window.get()
+		|| !CanPresentNotice(window->widget(), accountKey)) {
+		return {};
+	}
+	return Diagnostics::ExportNotices(Store().historyFor(accountKey), Store().historyFor(kAppKey));
+}
+
 QString PurpleNoticeAccountKey(Main::Session *session) {
 	if (!session) {
 		return kAppKey;

@@ -1,8 +1,10 @@
 #include "purple/purple_diagnostics.h"
+#include "purple/purple_notice_state.h"
 
 #include <QtCore/QStringList>
 
 #include <deque>
+#include <algorithm>
 #include <mutex>
 #include <optional>
 
@@ -11,6 +13,7 @@ namespace {
 
 constexpr auto kMaxEntries = 256;
 constexpr auto kNoticeEntries = 18;
+constexpr auto kExportNoticeEntries = 32;
 using enum Subsystem;
 
 struct Entry {
@@ -149,6 +152,44 @@ QString ExportText() {
 	const auto lines = Recent(std::nullopt, kMaxEntries);
 	return lines.isEmpty() ? QStringLiteral("No recent diagnostics in this session.\n")
 		: lines.join(u'\n') + u'\n';
+}
+
+QString ExportNotices(
+		std::span<const ModalNotices::NoticeRecord> account,
+		std::span<const ModalNotices::NoticeRecord> app) {
+	struct Item {
+		const ModalNotices::NoticeRecord *record;
+		bool app;
+	};
+	auto items = std::vector<Item>();
+	items.reserve(account.size() + app.size());
+	for (const auto &record : account) {
+		items.push_back({ &record, false });
+	}
+	for (const auto &record : app) {
+		items.push_back({ &record, true });
+	}
+	std::ranges::sort(items, {}, [](const Item &item) {
+		return std::pair(item.record->timestampMs, item.record->id);
+	});
+	auto result = QStringLiteral("Recent notices (this account and the app)\n");
+	const auto offset = items.size() > kExportNoticeEntries
+		? items.size() - kExportNoticeEntries
+		: 0;
+	for (const auto &item : std::span(items).subspan(offset)) {
+		const auto &record = *item.record;
+		const auto entry = Notice(record.scope, record.coalesceKey,
+			record.severity == ModalNotices::NoticeSeverity::Error);
+		result += QStringLiteral("[%1] %2: %3")
+			.arg(item.app ? QStringLiteral("App") : QStringLiteral("This account"),
+				Name(entry.subsystem),
+				entry.text);
+		if (record.repeatCount > 1) {
+			result += QStringLiteral(" (repeated %1 times)").arg(record.repeatCount);
+		}
+		result += u'\n';
+	}
+	return items.empty() ? result + QStringLiteral("No recent notices.\n") : result;
 }
 
 void Clear() {

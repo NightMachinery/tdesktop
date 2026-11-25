@@ -114,9 +114,10 @@ void ShowExport(not_null<Window::Controller*> window) {
 				ExportFailure(host, u"Choose a file outside the app's settings, data, and log paths."_q);
 				return;
 			}
-			const auto bytes = (u"Purple diagnostics\n%1\nTelegram Desktop %2\nQt %3\n\n%4"_q
+			const auto bytes = (u"Purple diagnostics\n%1\nTelegram Desktop %2\nQt %3\n\nRecent diagnostic events\n%4\n%5"_q
 				.arg(VersionText(), QString::fromLatin1(AppVersionStr),
-					QString::fromLatin1(qVersion()), ExportText())).toUtf8();
+					QString::fromLatin1(qVersion()), ExportText(),
+					ExportRecentPurpleNotices(host))).toUtf8();
 			auto file = QSaveFile(path);
 			if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size()
 				|| !file.commit()) {

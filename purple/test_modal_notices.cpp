@@ -53,6 +53,29 @@ int main() {
 		Diagnostic::Clear();
 		Check(Diagnostic::ExportText().contains(QStringLiteral("No recent diagnostics")),
 			"Clearing removes diagnostic events");
+		auto accountNotices = std::vector<NoticeRecord>(32);
+		auto noticeId = uint64_t(0);
+		for (auto &record : accountNotices) {
+			record.id = ++noticeId;
+			record.scope = QStringLiteral("Local archive");
+			record.summary = secret;
+			record.coalesceKey = QStringLiteral("archive:discard_failed:") + secret;
+			record.timestampMs = 1;
+		}
+		accountNotices.back().repeatCount = 3;
+		const auto appNotices = std::vector<NoticeRecord>{ {
+			.scope = QStringLiteral("Local archive"),
+			.summary = secret,
+			.coalesceKey = QStringLiteral("archive:removal_pending"),
+			.timestampMs = 2,
+		} };
+		const auto notices = Diagnostic::ExportNotices(accountNotices, appNotices);
+		Check(notices.count(u'\n') == 33 && notices.count(QStringLiteral("[This account]")) == 31,
+			"export keeps only the latest 32 notices across account and app history");
+		Check(notices.contains(QStringLiteral("repeated 3 times"))
+			&& notices.endsWith(QStringLiteral("[App] Local archive: Local archive removal is pending.\n"))
+			&& !notices.contains(secret) && !notices.contains(QStringLiteral("222999")),
+			"export orders notice events and redacts private fields while retaining coalescing");
 	}
 	for (const auto modal : { true, false }) {
 		auto store = AccountNoticeStore();

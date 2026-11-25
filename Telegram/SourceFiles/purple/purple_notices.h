@@ -61,6 +61,8 @@ void InitPurpleNoticeDelivery();
 void MaybeFlushPendingNotices(not_null<::MainWindow*> window);
 void OpenPurpleNoticeHistory(not_null<::MainWindow*> window);
 [[nodiscard]] int PendingPurpleNoticeCount(Main::Session *session);
+[[nodiscard]] QString ExportRecentPurpleNotices(
+	not_null<Window::Controller*> window);
 
 [[nodiscard]] QString PurpleNoticeAccountKey(Main::Session *session);
 [[nodiscard]] Window::Controller *PurpleNoticeWindow(
