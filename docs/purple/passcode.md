@@ -37,4 +37,6 @@ or enter your Purple passcode.
 **Use Purple passcode** or Escape dismisses the sheet and returns the keyboard
 to Purple's passcode field. If biometrics and Apple Watch are unavailable,
 system unlock can still use the standard macOS authentication dialog.
+Quit remains available while the embedded sheet is open. Keyboard Quit
+still follows the **Warn before quitting** setting.
 See [upstream hooks](upstream_hooks.md#macos-passcode-unlock).
