@@ -1454,3 +1454,16 @@ Purple has its own section directly under Settings. It uses Telegram's stock
 section navigation and settings controls. Purple rows are indexed under this
 section for search and no longer appear inside Advanced. Their stored settings
 and existing row identifiers are unchanged.
+
+## Diagnostics
+
+Purple settings has **Export logs…** and **Clear logs…**. In M-x, use
+`:log-export` and `:log-clear`.
+
+- Export writes a text file to the location you choose. It includes the Purple,
+  Telegram Desktop, and Qt versions and up to 256 recent Purple diagnostic
+  events from this run. The events use fixed descriptions that omit message
+  content, names, account and chat IDs, phone numbers, tokens, and local paths.
+- Clear asks for confirmation and empties the same in-memory events used by
+  **Copy logs** in notice dialogs. Telegram's ordinary log files and Screen
+  Time history stay on disk.

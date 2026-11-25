@@ -199,6 +199,8 @@ PRIVATE
     purple/purple_notice_state.h
     purple/purple_diagnostics.cpp
     purple/purple_diagnostics.h
+    purple/purple_diagnostics_ui.cpp
+    purple/purple_diagnostics_ui.h
     purple/purple_notices.cpp
     purple/purple_notices.h
     purple/purple_privacy_screen.cpp

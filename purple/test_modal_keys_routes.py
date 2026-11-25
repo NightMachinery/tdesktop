@@ -440,6 +440,16 @@ ordered(notices_cpp, "class PendingNoticeDelivery", "passcodeLockChanges()",
 ordered(notices_cpp, "QWidget *ShowDeferredToast", "ToastCapture", "pending.fallbackToast()",
         "capture.visibleToast()", "CanShowDeferredToast", "Ui::Toast::Show")
 config_cpp = read("purple/purple_config.cpp")
+diagnostics_ui = read("purple/purple_diagnostics_ui.cpp")
+ordered(keys, '"log-export"', '"log-clear"', "case Action::LogExport:",
+        "Diagnostics::CanManage", "Diagnostics::ShowExport", "Diagnostics::ShowClear")
+ordered(diagnostics_ui, "void ShowExport", "CanManage(window)", "FileDialog::GetWritePath",
+        "CurrentWindow(window)", "IsAppDataPath(path)", "QSaveFile(path)", "file.commit()")
+ordered(diagnostics_ui, "void ShowClear", "CanManage(window)", "Ui::MakeConfirmBox",
+        "CurrentWindow(window)", "close()", "current()", "Clear()")
+ordered(read("purple/purple_settings_section.cpp"), "diagnosticsWindow = base::make_weak(controller)",
+        "advanced/purple_log_export", "Diagnostics::ShowExport",
+        "advanced/purple_log_clear", "Diagnostics::ShowClear")
 ordered(config_cpp, "void Config::reloadFromDisk", "takeEditorGlobalReload", "edited && !editorEcho")
 ordered(config_cpp, "SettingsEditorOpening CaptureWindowSettingsEditor", "activeWindow() == host",
         "host->maybeSession() == live", "!host->locked()", "!PrivacyScreenActiveAny()", "!live->account().loggingOut()")

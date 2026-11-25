@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_birthday_reminders.h"
 #include "purple/purple_account_appwide_removal.h"
 #include "purple/purple_device.h"
+#include "purple/purple_diagnostics_ui.h"
 #include "purple/purple_emoji_export.h"
 #include "purple/purple_control.h"
 #include "purple/purple_last_seen.h"
@@ -747,6 +748,29 @@ void BuildPurpleSection(SectionBuilder &builder) {
 			if (const auto live = weak.get()) ShowCustomizeSettings(&live->window());
 		},
 		.keywords = { u"purple"_q, u"settings"_q, u"customize"_q, u"file"_q },
+	});
+	const auto diagnosticsWindow = base::make_weak(controller);
+	builder.addButton({
+		.id = u"advanced/purple_log_export"_q,
+		.title = rpl::single(u"Export logs…"_q),
+		.st = &st::settingsButtonNoIcon,
+		.onClick = [=] {
+			if (const auto live = diagnosticsWindow.get()) {
+				Diagnostics::ShowExport(&live->window());
+			}
+		},
+		.keywords = { u"purple"_q, u"log"_q, u"diagnostics"_q, u"export"_q },
+	});
+	builder.addButton({
+		.id = u"advanced/purple_log_clear"_q,
+		.title = rpl::single(u"Clear logs…"_q),
+		.st = &st::settingsButtonNoIcon,
+		.onClick = [=] {
+			if (const auto live = diagnosticsWindow.get()) {
+				Diagnostics::ShowClear(&live->window());
+			}
+		},
+		.keywords = { u"purple"_q, u"log"_q, u"diagnostics"_q, u"clear"_q },
 	});
 	BuildPrivacyScreenSetting(builder);
 	BuildEmojiExportSetting(builder);

@@ -44,6 +44,7 @@
 #include "purple/purple_chat_background.h"
 #include "purple/purple_chat_palette.h"
 #include "purple/purple_config.h"
+#include "purple/purple_diagnostics_ui.h"
 #include "purple/purple_exact_search.h"
 #include "purple/purple_keys_mx.h"
 #include "purple/purple_keys_ui.h"
@@ -292,6 +293,8 @@ enum class Action {
 	OpenMainMenu,
 	OpenSettings,
 	CustomizeSettings,
+	LogExport,
+	LogClear,
 	OpenSavedMessages,
 	OpenArchive,
 	OpenContacts,
@@ -418,6 +421,10 @@ const Command kCommands[] = {
 		[] { return tr::lng_menu_settings(tr::now); } },
 	{ Action::CustomizeSettings, "customize-settings", "files", "Needs an unlocked account window",
 		[] { return u"Customize Purple settings"_q; } },
+	{ Action::LogExport, "log-export", "files", "Needs an unlocked account window",
+		[] { return u"Export Purple diagnostics"_q; } },
+	{ Action::LogClear, "log-clear", "files", "Needs an unlocked account window",
+		[] { return u"Clear Purple diagnostics"_q; } },
 	{ Action::OpenSavedMessages, "open-saved-messages", "open", "",
 		[] { return tr::lng_saved_messages(tr::now); } },
 	{ Action::OpenArchive, "open-archived-chats", "open", "",
@@ -1515,6 +1522,9 @@ bool Available(Action action, const Target &target) {
 		return target.controller && !target.controller->session().supportMode();
 	case Action::CustomizeSettings:
 		return target.controller && CanCustomizeSettings(&target.controller->window());
+	case Action::LogExport:
+	case Action::LogClear:
+		return target.controller && Diagnostics::CanManage(&target.controller->window());
 	case Action::OpenScheduled: return target.chatActions;
 	case Action::OpenChatMenu: return target.list || target.chatActions;
 	case Action::TogglePlayback:
@@ -3482,6 +3492,14 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 	case Action::CustomizeSettings:
 		clearPrefix();
 		ShowCustomizeSettings(&_window->controller());
+		break;
+	case Action::LogExport:
+		clearPrefix();
+		Diagnostics::ShowExport(&_window->controller());
+		break;
+	case Action::LogClear:
+		clearPrefix();
+		Diagnostics::ShowClear(&_window->controller());
 		break;
 	case Action::OpenDownloads:
 		clearPrefix();

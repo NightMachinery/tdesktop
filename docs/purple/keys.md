@@ -274,6 +274,10 @@ on the modal status line and cheatsheet footer.
   clears its pending notices. Passcode lock, screen lock, and the privacy
   cover defer notices and acknowledgements.
 
+- **Diagnostics in M-x.** Run `:log-export` to save a redacted bundle or
+  `:log-clear` to clear recent Purple diagnostic events after confirmation.
+  Both actions are also available under Purple settings.
+
 ## Known limits
 
 - Desktop language packs can translate labels while the app layout stays
