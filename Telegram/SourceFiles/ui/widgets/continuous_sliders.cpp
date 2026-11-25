@@ -82,12 +82,21 @@ void ContinuousSlider::mouseMoveEvent(QMouseEvent *e) {
 }
 
 float64 ContinuousSlider::computeValue(const QPoint &pos) const {
-	const auto seekRect = myrtlrect(getSeekRect());
+	const auto reversed = getDirection() == Direction::HorizontalReversed;
+	const auto seekRect = reversed ? getSeekRect() : myrtlrect(getSeekRect());
+	const auto x = reversed ? (width() - pos.x()) : pos.x();
 	const auto result = isHorizontal() ?
-		(pos.x() - seekRect.x()) / float64(seekRect.width()) :
+		(x - seekRect.x()) / float64(seekRect.width()) :
 		(1. - (pos.y() - seekRect.y()) / float64(seekRect.height()));
 	const auto snapped = std::clamp(result, 0., 1.);
 	return _adjustCallback ? _adjustCallback(snapped) : snapped;
+}
+
+void ContinuousSlider::applyDirection(QPainter &p) const {
+	if (getDirection() == Direction::HorizontalReversed) {
+		p.translate(width(), 0);
+		p.scale(-1., 1.);
+	}
 }
 
 void ContinuousSlider::mousePressEvent(QMouseEvent *e) {
@@ -162,10 +171,13 @@ void ContinuousSlider::keyPressEvent(QKeyEvent *e) {
 	const auto newValue = [&] {
 		constexpr auto kSmallStep = 0.01;
 		constexpr auto kLargeStep = 0.10;
+		const auto horizontalStep = (getDirection() == Direction::HorizontalReversed)
+			? -kSmallStep
+			: kSmallStep;
 		switch (e->key()) {
-		case Qt::Key_Right:
+		case Qt::Key_Right: return changeBy(horizontalStep);
 		case Qt::Key_Up: return changeBy(kSmallStep);
-		case Qt::Key_Left:
+		case Qt::Key_Left: return changeBy(-horizontalStep);
 		case Qt::Key_Down: return changeBy(-kSmallStep);
 		case Qt::Key_PageUp: return changeBy(kLargeStep);
 		case Qt::Key_PageDown: return changeBy(-kLargeStep);
@@ -231,6 +243,7 @@ float64 FilledSlider::getOverDuration() const {
 
 void FilledSlider::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
+	applyDirection(p);
 	PainterHighQualityEnabler hq(p);
 
 	p.setPen(Qt::NoPen);
@@ -341,6 +354,7 @@ void MediaSlider::paintEvent(QPaintEvent *e) {
 		return;
 	}
 	auto p = QPainter(this);
+	applyDirection(p);
 	PainterHighQualityEnabler hq(p);
 
 	p.setPen(Qt::NoPen);

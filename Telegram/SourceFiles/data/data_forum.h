@@ -53,6 +53,9 @@ public:
 	void preloadTopics();
 	void reloadTopics();
 	void requestTopics();
+	[[nodiscard]] bool topicsLoadFailed() const {
+		return _topicsLoadFailed;
+	}
 	[[nodiscard]] rpl::producer<> chatsListChanges() const;
 	[[nodiscard]] rpl::producer<> chatsListLoadedEvents() const;
 
@@ -134,6 +137,7 @@ private:
 	mtpRequestId _staleRequestId = 0;
 
 	mtpRequestId _requestId = 0;
+	bool _topicsLoadFailed = false;
 	ForumOffsets _offset;
 
 	base::flat_set<MsgId> _creatingRootIds;

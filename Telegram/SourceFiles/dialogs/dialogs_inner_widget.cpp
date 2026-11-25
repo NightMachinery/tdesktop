@@ -5845,6 +5845,12 @@ ChosenRow InnerWidget::computeChosenRow() const {
 	return ChosenRow();
 }
 
+Key InnerWidget::purpleKeyboardSelection() const {
+	return (!_mouseSelection && _state == WidgetState::Default)
+		? computeChosenRow().key
+		: Key();
+}
+
 bool InnerWidget::isUserpicPress() const {
 	return (_lastRowLocalMouseX >= 0)
 		&& (_lastRowLocalMouseX < _st->nameLeft)
@@ -6897,6 +6903,10 @@ int InnerWidget::defaultChildIndexOfSelected() const {
 		return -1;
 	}
 	return collapsed + (shownIndex - skip);
+}
+
+Key InnerWidget::purpleHintCollapsedRow(int row) const {
+	return _collapsedRows[row]->folder;
 }
 
 int InnerWidget::accessibilityChildCount() const {

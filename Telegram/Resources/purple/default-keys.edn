@@ -48,7 +48,7 @@
   "SPC RET" :chat-palette
   "SPC u"   :unread-chats-buffer
   "SPC z"   :toggle-privacy-screen
-  "SPC b b" :chat-palette
+  "SPC b b" :recent-chat-palette
   "SPC b I" :unread-chats-buffer
 
   ; Navigation and scrolling.
@@ -82,9 +82,10 @@
   "] T"     :topic-next
   "] U"     :topic-next-unread
 
-  ; Search and quick URL hint.
+  ; Search and window-wide hints.
   "/"       :search-messages
-  "f"       :message-hint-open-url
+  "f"       :window-hint
+  "F"       :window-hint-menu
   "SPC s s" :search-messages
   "SPC s c" :chat-palette
 
@@ -159,6 +160,7 @@
   "SPC w l" :focus-conversation
   "SPC w w" :focus-other-pane
   "SPC w m" :toggle-chat-zen-mode
+  "SPC w z" :toggle-zen-chat-list
   "C-w h"   :focus-chat-list
   "C-w l"   :focus-conversation
   "C-w w"   :focus-other-pane
@@ -197,7 +199,9 @@
   "h" :topic-parent}
 
  :chats
- {"p" :preview-chat
+ {"J" :folder-next
+  "K" :folder-previous
+  "p" :preview-chat
   "m" :open-chat-menu
   "a" :open-archived-chats
   "f" :folder-next
@@ -210,6 +214,13 @@
   "N" :playback-previous-track
   "f" :playback-seek-forward
   "b" :playback-seek-backward
+  "t" :music-toggle-view
+  "F" :music-forward-tracks
+  "g" :music-go-to-message
+  "a" :music-add-to-playlist
+  "q" :music-queue-tracks
+  "y" :music-copy-message-link
+  "." :music-track-menu
   "l" :open-playlists}
 
  :insert

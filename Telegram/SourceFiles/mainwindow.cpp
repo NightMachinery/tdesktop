@@ -696,6 +696,7 @@ bool MainWindow::eventFilter(QObject *object, QEvent *e) {
 			auto state = (windowState() & Qt::WindowMinimized) ? Qt::WindowMinimized :
 				((windowState() & Qt::WindowMaximized) ? Qt::WindowMaximized :
 				((windowState() & Qt::WindowFullScreen) ? Qt::WindowFullScreen : Qt::WindowNoState));
+			Purple::ModalFullscreenChanged(this, isFullScreen());
 			handleStateChanged(state);
 		}
 	} break;

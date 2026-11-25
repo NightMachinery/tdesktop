@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <variant>
 #include <vector>
 
 namespace Purple::ModalUnread {
@@ -169,18 +170,20 @@ enum class MarkOp {
 	MarkBucketCH,
 };
 
+[[nodiscard]] inline uint64_t SelectedPeer(
+		const std::vector<BufferItem> &items,
+		const std::vector<int> &visible,
+		int row) {
+	return (row >= 0 && row < int(visible.size())) ? items[visible[row]].peerId : 0;
+}
+
 inline void ApplyMarkOp(
 		QSet<uint64_t> &markedPeerIds,
 		const std::vector<BufferItem> &items,
 		const std::vector<int> &visibleIndices,
 		int currentRow,
 		MarkOp op) {
-	const auto currentPeerId = [&]() -> uint64_t {
-		if (currentRow < 0 || currentRow >= int(visibleIndices.size())) {
-			return 0;
-		}
-		return items[visibleIndices[currentRow]].peerId;
-	};
+	const auto currentPeerId = [&] { return SelectedPeer(items, visibleIndices, currentRow); };
 	switch (op) {
 	case MarkOp::MarkOne:
 		if (const auto id = currentPeerId()) {
@@ -233,6 +236,28 @@ inline void ApplyMarkOp(
 
 [[nodiscard]] inline bool NeedsMarkReadConfirmation(int targetCount) {
 	return targetCount > 1;
+}
+
+enum class TopicPages {
+	Partial,
+	Complete,
+	Failed,
+};
+
+using TopicSearch = std::variant<int, TopicPages>;
+
+[[nodiscard]] inline TopicSearch FindNextUnreadTopic(
+		int count,
+		int current,
+		TopicPages pages,
+		const auto &isUnread) {
+	for (auto step = 1; step <= count; ++step) {
+		const auto index = (current + step) % count;
+		if (isUnread(index)) {
+			return index;
+		}
+	}
+	return pages;
 }
 
 } // namespace Purple::ModalUnread

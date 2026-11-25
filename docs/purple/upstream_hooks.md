@@ -30,16 +30,25 @@ the numbers.
   panels.
 - `mainwindow.cpp` and `window/main_window.cpp`: attaches Purple's modal status
   line and docked which-key drawer in `finishFirstShow()`, reserves the
-  status-bar height beneath `_main` in `updateControlsGeometry()`, and gives
-  full-height layers precedence over the modal chrome. It raises the
+  status-bar height beneath `_main` in `updateControlsGeometry()`, forwards OS
+  fullscreen changes, and gives full-height layers precedence over the modal chrome. It raises the
   privacy overlay last when active and unlocked (covering layers and media
   preview while keeping passcode/setup-email locks and their boxes on top),
   blocks `handleStartFiles()` while active, and replaces the window title with
   `Clock`.
+- `platform/mac/main_window_mac.mm`: consumes already claimed single-shot
+  repeats before Cocoa can reinterpret them as text after a focus or mode change.
 - `mainwidget.h`, `mainwidget.cpp`, `window/window_filters_menu.h`, and
-  `window/window_session_controller.*`: hides the folder strip, dialogs column,
-  side shadows, and third column while Zen fullscreen chat mode is active,
-  restoring only widgets Zen itself hid.
+  `window/window_session_controller.*`: keeps the chat list and folder strip
+  available in Zen fullscreen and hides the third column. The Zen chat-list
+  toggle also hides the folder strip and its side shadow. Its resized width
+  is temporary. Each layout pass refreshes the modal status segments from
+  the live widget bounds and divider positions.
+- `history/view/history_view_top_bar_widget.cpp`: adds the Zen chat list action
+  to the chat header menu.
+- `window/window_adaptive.*`: uses normal bubble and date alignment in
+  fullscreen. The measured layout still controls the availability of the
+  saved adaptive setting.
 - `window/notifications_manager.cpp`, `media/view/media_view_overlay_widget.cpp`,
   `media/system_media_controls_manager.cpp`, `tray.cpp`,
   `tray_accounts_menu.cpp`, and `platform/mac/global_menu_mac.mm`: suppresses
@@ -47,10 +56,22 @@ the numbers.
   clears OS Now Playing metadata without stopping playback, hides tray account
   actions, and disables macOS global menu actions while Purple's privacy screen
   is active.
+- `platform/platform_current_geo_location.h`,
+  `platform/mac/current_geo_location_mac.mm`, and `Telegram.plist`: expose
+  a current-location lookup that cannot prompt, a separate explicit address
+  lookup, and the macOS location-use explanation.
+- `window/window_session_controller.cpp`: records chat visits for the local
+  recency palette. `boxes/peer_list_box.*` allows the palette to sort search
+  results while preserving the selected row.
 - `core/shortcuts.h`: declares the existing pause-aware dispatch overload so
   modal commands can use Telegram's contextual shortcut handlers.
 - `dialogs/dialogs_widget.*` and `history/history_widget.*`: focus eligibility
   adapters expose the existing dialogs cursor and eligible history controls.
+- `dialogs/dialogs_widget.*` and `dialogs/dialogs_inner_widget.*`: expose the
+  visible dialogs list and its keyboard-selected entry to open or preview
+  the same row from another pane.
+- `dialogs/dialogs_inner_widget.h` and `info/media/info_media_list_widget.h`:
+  admit the hint adapters to the stock row geometry and identity checks.
 - `platform/mac/main_window_mac.mm`: keeps the preliminary typing notification
   from moving focus to search while Normal mode owns the chat list.
 - `history/history_inner_widget.*`: visible message enumeration and geometry
@@ -63,13 +84,20 @@ the numbers.
 - `history/history_widget.h`, `history/view/history_view_chat_section.h`,
   `history/view/history_view_scheduled_section.h`, and
   `history/view/controls/history_view_compose_controls.h` grant the attachment
-  shortcut access to the native pickers and their attachment controls.
+  shortcut access to the native pickers and their attachment controls. That
+  access also locates the composer anchors for the status text.
 - `history/view/history_view_list_widget.*`: visible enumeration, layout
   cancellation and focus preservation for hint selection.
-- `history/view/history_view_message.*`: exposes rendered body text and its
-  bounds so Purple can place a hint on each visible link.
+- `history/view/history_view_message.*` and `iv/markdown/iv_markdown_article*`:
+  expose the rendered text geometry for plain and rich message link hints,
+  including clipping by collapsed details and scrollable article blocks.
 - `history/history_inner_widget.cpp` and `history/view/history_view_list_widget.cpp`:
   accept an explicit hinted item in the native keyboard context menu path.
+- `history/history_inner_widget.cpp` and `history/view/history_view_context_menu.*`:
+  give the hint actions access to the native message menu before popup and
+  defer read receipt and reaction metadata lookups to the full native menu.
+- `dialogs/dialogs_inner_widget.*` and `window/window_filters_menu.*`: give the
+  hint actions access to the native chat, Archive, and folder menu builders.
 - `window/section_widget.cpp`: repaint subscription and an early solid-color
   paint for live history when wallpaper artwork is hidden.
 - `window/window_session_controller.cpp`: applies the live chat style through
@@ -159,6 +187,10 @@ the numbers.
   for the birthday-triggered gift button in both composers.
 
 ## Recipient picker visibility
+
+- `boxes/peer_list_box.cpp` shares the modal filter entry and exit keys with
+  the chat palette and searchable peer pickers. The handler receives the
+  chat-palette classification so pressing Escape closes it directly.
 
 - `boxes/share_box.cpp`: candidate guards for default, folder-filtered and server
   search sources, plus two calls and a friend declaration for the owned share
@@ -1700,7 +1732,8 @@ Purple edit in this file.
 
 **`Telegram/SourceFiles/media/system_media_controls_manager.cpp`**: +4 -0.
 First Purple edit in this file.
-- The facade include, after the file's own header.
+- The recording facade include follows the file's own header, then the
+  privacy screen include.
 - The `commandRequests` handler in the constructor: one early return through
   `Purple::HandleSystemMediaCommand`, only when no video delegate is set. It
   takes skip backward and forward for the active audio track and returns
@@ -2007,7 +2040,14 @@ worker's pending database transactions. The existing playlist menu hook in
 ### Music layout and chat palette
 
 - `mainwidget.cpp` uses Purple's Music-only sidebar preference when placing the
-  chat area. The dialog width preference still belongs to the regular chat layout.
+  chat area. It also suspends the third-column widget, shadow, and resize area
+  while Music is open, and skips automatic third-column changes until Music
+  closes. The regular layout keeps its saved sidebar preferences.
+- `mainwidget.cpp` and `mainwidget.h` let Purple's Music section take over the
+  song toolbar and its layout space when its own transport is active.
+- `ui/widgets/continuous_sliders.cpp` and `.h` expose an opt-in reversed
+  horizontal direction for painting and seeking. The Music progress slider
+  selects it when the interface is right to left.
 - `boxes/peer_list_box.cpp` compares raw queries for Purple's chat palette so
   punctuation, handles and international phone numbers reach its exact matcher.
   The palette opens at the compact picker height.
@@ -2048,6 +2088,12 @@ worker's pending database transactions. The existing playlist menu hook in
 - `boxes/peers/edit_forum_topic_box.cpp`: refreshes the edited bot thread by
   ID after a successful or already-applied edit. The normal topic update
   notifies the stock header and Purple topic picker.
+
+### Forum topic paging
+
+- `data/data_forum.{h,cpp}` exposes whether the last page request failed.
+  The next-unread command uses it because the stock list is marked loaded
+  on both completion and failure. Reload clears the failure flag.
 
 ### Per-chat translation exclusion
 

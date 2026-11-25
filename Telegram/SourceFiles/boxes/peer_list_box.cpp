@@ -121,6 +121,8 @@ void PeerListBox::createMultiSelect() {
 			: st::defaultMultiSelect),
 		placeholder ? std::move(placeholder) : tr::lng_participant_filter());
 	_select.create(this, std::move(entity));
+	Purple::InstallPickerFilter(this, _select->entity(), content(),
+		Purple::IsChatPaletteController(_controller.get()));
 	_select->heightValue(
 	) | rpl::on_next(
 		[this] { updateScrollSkips(); },
@@ -233,7 +235,10 @@ void PeerListBox::prepare() {
 }
 
 void PeerListBox::keyPressEvent(QKeyEvent *e) {
-	if (e->key() == Qt::Key_Down) {
+	if (Purple::HandlePickerFilter(this, _select ? _select->entity() : nullptr, content(), e,
+		Purple::IsChatPaletteController(_controller.get()))) {
+		return;
+	} else if (e->key() == Qt::Key_Down) {
 		content()->selectSkip(1);
 	} else if (e->key() == Qt::Key_Up) {
 		content()->selectSkip(-1);
@@ -1684,6 +1689,19 @@ void PeerListContent::setSearchMode(PeerListSearchMode mode) {
 			clearSearchRows();
 		}
 	}
+}
+
+void PeerListContent::sortSearchRows(
+		Fn<bool(const PeerListRow&, const PeerListRow&)> compare) {
+	const auto selected = saveSelectedData(_selected);
+	const auto pressed = saveSelectedData(_pressed);
+	setSelected(Selected());
+	setPressed(Selected());
+	std::stable_sort(begin(_filterResults), end(_filterResults), [&](auto a, auto b) {
+		return compare(*a, *b);
+	});
+	setSelected(restoreSelectedData(selected));
+	setPressed(restoreSelectedData(pressed));
 }
 
 void PeerListContent::clearSearchRows() {

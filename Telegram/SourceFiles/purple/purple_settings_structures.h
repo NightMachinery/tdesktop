@@ -27,7 +27,7 @@ struct Item {
 [[nodiscard]] QByteArray RecordTemplate(SettingId id);
 [[nodiscard]] QString RecordEffect(const QByteArray &source, const SettingAddress &address);
 
-enum class FieldKind { String, Choice, Boolean, Time, Duration, Integer, Weekdays, FirstList, FirstFolder };
+enum class FieldKind { String, Choice, Boolean, Time, TimeZone, Duration, Integer, Weekdays, FirstList, FirstFolder };
 struct RecordField {
 	QString key;
 	QString label;

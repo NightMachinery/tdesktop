@@ -67,6 +67,7 @@ private:
 		bool toBeginning = false);
 	void setupMainMenuIcon();
 	void showMenu(QPoint position, FilterId id);
+	void fillMenu(not_null<Ui::PopupMenu*> menu, FilterId id);
 	void scrollToButton(not_null<Ui::RpWidget*> widget);
 	void applyFilterAt(int start, int delta);
 	void moveToFilter(int delta);

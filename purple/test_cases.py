@@ -20,6 +20,18 @@ from voice_queue_fixture import voice_queue_include
 
 CORE = 'purple_core'
 CASES = {
+    'chat-palette': {
+        'program': 'chat_palette_cases.cpp',
+        'units': [],
+        'frameworks': ['QtCore'],
+    },
+    'sync-merge': {
+        'program': 'sync_merge_cases.cpp',
+        'generated': ['sync-settings-link.inc'],
+        'units': ['purple/purple_sync_merge.cpp'],
+        'frameworks': ['QtCore'],
+        'toml': True,
+    },
     'playlist-managed-cache': {
         'program': 'playlist_managed_cache_cases.cpp',
         'units': [
@@ -360,6 +372,15 @@ CASES = {
         'libraries': ['Telegram/lib_base/liblib_base.a'],
         'frameworks': ['QtCore', 'Foundation'],
     },
+    'music-progress': {
+        'program': 'music_progress_cases.cpp',
+        'units': ['ui/widgets/continuous_sliders.cpp'],
+        'objects': ['Telegram/lib_crl/CMakeFiles/lib_crl.dir/crl/dispatch/crl_dispatch_async.cpp.o'],
+        'build_libraries': ['libcrypto.a', 'libxxhash.dylib'],
+        'libraries': ['Telegram/lib_ui/liblib_ui.a', 'Telegram/lib_base/liblib_base.a'],
+        'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'QtSvg', 'QtTest', 'Foundation', 'AppKit', 'Metal'],
+        'link': ['-lobjc'],
+    },
     'recording-round': {
         # F10's round copy, remux, repair rebuild and AAC measure over the
         # build's own FFmpeg, on a round encoded at test time.
@@ -442,6 +463,11 @@ def slices(sources):
     }
 
 
+
+
+def sync_settings_link_include(sources):
+    text = (sources / 'purple/purple_sync_magic_service.cpp').read_text()
+    return function(text, 'bool SyncMagicSettingsUnlinked(') + '\n'
 
 
 def sync_setup_status_include(sources):
@@ -673,7 +699,9 @@ def customize_keymap_include(sources):
     catalog = 'struct Command { Action action; const char *id; };\nconst Command kCommands[] = {\n'
     catalog += ''.join(f'\t{{ Action::{action}, "{name}" }},\n' for action, name in commands)
     catalog += '};\n'
-    parser = keys[catalog_end:keys.index('constexpr auto kStarterKeysTemplate')]
+    parser = keys[catalog_end:keys.index('int KeyStroke(', catalog_end)]
+    parser += keys[keys.index('const Command &FindCommand(', catalog_end):
+        keys.index('constexpr auto kStarterKeysTemplate')]
     fixture = (sources.parent / 'Resources/purple/default-keys.edn').read_text()
     return modifiers + actions + catalog + parser + 'constexpr auto Bundled = R"EDN(' + fixture + ')EDN";\n'
 
@@ -748,6 +776,7 @@ for name in case.get('generated', []):
         'sync-pickup.inc': sync_pickup_include,
         'sync-first-use-boundary.inc': sync_first_use_boundary_include,
         'sync-setup-status.inc': sync_setup_status_include,
+        'sync-settings-link.inc': sync_settings_link_include,
         'recording-store-startup.inc': recording_startup_include,
         'recording-round-encoder.inc': recording_encoder_include,
     }.get(name, flow_include)
@@ -772,7 +801,7 @@ with (work / 'build.log').open('w') as log:
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
     for source in units:
         objects.append(work / (source.stem + '.o'))
-        toml = ['-I' + str(repo / 'Telegram/ThirdParty/purple_core/tomlplusplus')] if 'purple_core' in source.parts else []
+        toml = ['-I' + str(repo / 'Telegram/ThirdParty/purple_core/tomlplusplus')] if 'purple_core' in source.parts or case.get('toml') else []
         command = [recipe[0], *include, *toml, *flags.get(source.suffix, flags['.cpp']), '-g0',
             '-c', str(source), '-o', str(objects[-1]), '-MD', '-MF', str(objects[-1].with_suffix('.d'))]
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)

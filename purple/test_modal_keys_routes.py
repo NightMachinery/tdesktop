@@ -31,6 +31,8 @@ mac_native = between(read("platform/mac/main_window_mac.mm"),
                      "bool MainWindow::nativeEvent", "void MainWindow::hideAndDeactivate")
 ordered(mac_native, "PossiblyTextTypingEvent(event)",
         "!Purple::ModalKeysOwnChatListFocus(this)", "imeCompositionStartReceived()")
+ordered(mac_native, "[event isARepeat]", "Purple::SwallowModalNativeRepeat", "return true;",
+        "PossiblyTextTypingEvent(event)")
 win_native = read("platform/win/main_window_win.cpp")
 assert "ModalKeysOwnChatListFocus" not in win_native
 assert press.count("Purple::HandleModalKeys") == 1
@@ -44,9 +46,20 @@ ordered(mainwindow, "void MainWindow::updateControlsGeometry()",
         "Purple::ModalKeysStatusHeight(this)",
         "body.height() - modalStatusH",
         "Purple::UpdateModalKeysLayout(this, body);")
+mainwidget = read("mainwidget.cpp")
+ordered(mainwidget, "void MainWidget::updateControlsGeometry()", "_a_dialogsWidth.value",
+        "floatPlayerUpdatePositions()", "Purple::RefreshModalKeysColumns(_controller->widget())")
 
 keys = read("purple/purple_keys.cpp")
 keys_ui = read("purple/purple_keys_ui.cpp")
+ordered(keys, "class ModalStatusLayout", "widget->mapTo(body", "main->_dialogs.get()",
+        "main->_thirdSection.data()", "KeyboardAttachment::Geometry(section)",
+        "fullTextMargins().left()", "composer.placeholderInset", "composer.iconWidth",
+        "st::forumTopicRow : st::defaultDialogRow", "main->_sideShadow.get()", "main->_thirdShadow.data()")
+ordered(keys, "bool Keys::eventFilter", "type == QEvent::Move", "_statusLayout.tracks", "refreshColumns()")
+ordered(keys_ui, "void ModalStatusBar::paintEvent", "PaintModalStatusBar(",
+        "st::sideBarBg", "st::dialogsBg", "st::historyComposeAreaBg", "st::shadowFg",
+        "st::windowFiltersButton.style.font->f")
 chrome = between(keys, "void Keys::raiseChrome", "Target Keys::currentTarget")
 ordered(chrome, "topShownLayer()", "geometry().bottom()", "_statusBar->stackUnder(stack)",
         "_whichKey->stackUnder(stack)", "_statusBar->raise()")
@@ -125,11 +138,15 @@ ordered(collection_edit, "FindSettingDescriptor(item.address)", "if (_config.nam
 assert not re.search(r"FindSettingDescriptor\([^\n]+\)->", collections)
 ordered(collections, "void showOtherReferences", "_config.otherReferences(object)", "Other accounts’ files are not checked")
 ordered(collection_edit, "showOtherReferences(item.address)", "_accept = button")
-ordered(collections, 'u"Add"_q, [this] { add()', 'u"Enter ID"_q, [this] { edit(Op::Insert)',
-        'u"Duplicate"_q, [this] { edit(Op::Duplicate)',
-        'u"Delete"_q, [this] { edit(Op::Erase)', 'u"Move up"_q, [this] { move(-1)',
+ordered(collections, 'u"Add"_q, ModalKeysEnabled() ? u"a"_q', 'u"Enter ID"_q',
+        'u"Duplicate"_q', 'u"Delete"_q', 'u"Move up"_q',
         "&QAbstractItemModel::rowsMoved", "moveTo(from, to)",
         "code == Qt::Key_D", "edit(Op::Duplicate)", "code == Qt::Key_A", "add()", "edit(Op::Erase)")
+look = read("purple/purple_settings_customize_look.h")
+ordered(collections, "ConfigureCollectionList(list)", "void resizeEvent", "CollectionListDirection(width(), fontMetrics())")
+ordered(look, "void ConfigureCollectionList", "setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff)", "Qt::ElideRight")
+ordered(look, "CollectionListDirection(", "QBoxLayout::TopToBottom", "QBoxLayout::LeftToRight")
+ordered(customize, "void activateRow()", "if (row->listCaseFix)", "stage(std::move(fixed), SettingScalar(*row->listCaseFix))", "showForm")
 ordered(collections, "void add()", "_config.peerField", "addPeer()", "edit(Op::Insert)")
 # Verify new native UI surfaces reuse stock Ui::KeysLegend & Ui::LayerWidget, not Toasts/ASCII TextBox.
 assert "Ui::Toast::Show" not in keys, "Modal UI must not fall back to plain Toast popups"
@@ -148,8 +165,61 @@ for required_ui in (
     assert required_ui in (keys_ui + read("purple/purple_keys_ui.h")), required_ui
 
 # Verify IME safety in palette filter input.
-ordered(keys_ui, "preeditAreaText().isEmpty()", "Qt::Key_Escape", "Qt::Key_Down", "Qt::Key_Up",
+palette_ui = between(keys_ui, "class CommandPaletteLayer", "class UnreadBufferRowsWidget")
+ordered(keys_ui, "void InstallListFilter", "ListFilter::Mark(edit)", "preeditAreaText().isEmpty()",
+        "ListFilter::ProtectPreedit", "FilterResult::Cancel", "FilterResult::Continue", "handler(key)")
+ordered(palette_ui, "InstallListFilter(this, _input", "ListFilter::Submit(key)", "AllowModalLayerKey",
+        "ListFilter::Exit", "cancel()", "Qt::Key_F6", "setFocus()",
+        "ListStep(key, mods, false)",
         "Qt::AltModifier", "stepHistory(")
+ordered(palette_ui, "void keyPressEvent", "ListStep(key, mods, ModalKeysEnabled())",
+        "AllowModalLayerKey(*event, this, true)", "moveSelection(step)",
+        "ListFilter::Submit(key)", "activateRow(_selected)", "ListFilter::Exit", "cancel()")
+ordered(palette_ui, "void doSetInnerFocus()", "_input->setFocusFast()")
+assert "_input->setText(QString())" not in palette_ui
+for layer, last in (("UnreadBufferLayer", "TopicRowsWidget"), ("TopicPickerLayer", "NoticeBodyWidget")):
+    body = between(keys_ui, f"class {layer}", f"class {last}")
+    input_keys = between(body, "InstallListFilter(this, _filter", "\n\t\t});")
+    ordered(input_keys, "ListFilter::Exit", "AllowModalLayerKey", "setFocus()")
+    assert "setText(" not in input_keys
+    ordered(body, "void keyPressEvent", "ClearListFilterOrClose(this, _filter)", "ListFilter::Enter(*e, key)")
+help_layer = between(keys_ui, "class ModalHelpLayer", "class DescribeLayer")
+ordered(help_layer, "InstallListFilter(this, _filter", "ListFilter::Exit", "AllowModalLayerKey",
+        "setFocus()", "FilterResult::Cancel")
+assert "setText(" not in between(help_layer, "InstallListFilter(this, _filter", "\n\t\t});")
+ordered(help_layer, "void keyPressEvent", "ClearListFilterOrClose(this, _filter)", "ListFilter::Enter(*e, key)")
+ordered(keys, "void Keys::showPalette", "EffectiveBindings(true, target.contextMap)",
+        "ChordsForAction(cmd.action, effective)", "fromInsert", "origin->setFocus",
+        ".describeMode = describe", ".onCancel", "restoreOrigin()")
+unread = between(keys_ui, "class UnreadBufferLayer", "class TopicRowsWidget")
+ordered(unread, 'u"i or / to filter"_q', "_filter->submits()", "openRow(_selected)", "InstallListFilter")
+ordered(unread, "void keyPressEvent", "key == Qt::Key_Q", "closeLayer()", "_pendingConfirmTargets.empty()")
+ordered(unread, "_filter->hasFocus()", 'u"RET open · C-n/C-p move · Esc list"_q',
+        "ModalUnread::SelectedPeer", "_selection.refilter")
+notice_history = keys_ui[keys_ui.index("class NoticeHistoryLayer final"):]
+ordered(notice_history, "InstallListFilter(this, _filter", "ListFilter::Exit", "setFocus()",
+        "void keyPressEvent", "ClearListFilterOrClose(this, _filter)", "ListFilter::Enter(*e, key)")
+for layer, end in (("UnreadBufferLayer", "TopicRowsWidget"),
+                   ("TopicPickerLayer", "NoticeBodyWidget"),
+                   ("NoticeHistoryLayer", "CreateNoticeHistoryLayer")):
+    body = between(keys_ui, f"class {layer}", end)
+    ordered(body, "_selection.keepCurrentOnClear()", "ClearListFilterOrClose(this, _filter)",
+            "_selection.refilter(")
+ordered(keys, "void Keys::showNoticeLayer", "if (isHistory)", "rememberFilterFocus(raw)")
+ordered(customize, "if (object == _filter)", "ListFilter::Exit", "_tree->setFocus()", "ListFilter::Enter(*event, key)")
+assert "_filterBeforeEdit" not in customize
+ordered(collections, "object == _search && ListFilter::Exit", "_peerList->setFocus()", "ListFilter::Enter(*key, code, false)")
+ordered(read("boxes/peer_list_box.cpp"), "Purple::InstallPickerFilter", "Purple::IsChatPaletteController",
+        "void PeerListBox::keyPressEvent", "Purple::HandlePickerFilter", "Purple::IsChatPaletteController")
+ordered(read("purple/purple_picker.cpp"), "void InstallPickerFilter", "preeditAreaText().isEmpty()",
+        "ListFilter::ProtectPreedit", "ListFilter::Exit", "if (closeOnEscape)", "box->closeBox()",
+        "list->setFocus()", "bool HandlePickerFilter", "if (closeOnEscape", "box->closeBox()",
+        "ListFilter::Enter", "filter->clearQuery()")
+ordered(keys_ui, "void ClearListFilterOrClose", "getLastText().isEmpty()", "CloseModalFilterLayer(layer)", "setText(QString())")
+ordered(keys, "void Keys::rememberFilterFocus", "windowFocusWidget()", "revision == guard->_revision",
+        "origin->setFocus", "void Keys::closeFilterLayer", "&QObject::destroyed", "QTimer::singleShot", "layer->closeLayer()")
+ordered(keys, "void Keys::refreshStatusBar", "ListFilter::IsMarked(focus)", "case ActiveLayer::UnreadBuffer",
+        "if (filterFocused)", "ModalUi::BadgeKind::Insert", 'u"INSERT"_q')
 
 # Verify amx + orderless helpers exist in purple_keys_mx.h (including title-first tiering and subtitle highlights).
 for sym in ("kRecentLimit = 7", "WordInitials", "ParseTokens", "MatchToken",
@@ -160,7 +230,8 @@ assert "SubtitleMatchSpans" in keys_ui
 
 # Verify Normal-mode non-leakage guard: printable, Option/Alt text, Return/Enter, Backspace/Delete return Capture or Ignore, never Pass.
 classify = between(keys, "KeyUse Keys::classify", "bool Keys::handle")
-ordered(classify, "if (!_normal)", "return KeyUse::Pass;",
+ordered(classify, "const auto normal = _normal || target.musicDialog",
+        "if (!normal)", "return KeyUse::Pass;",
         "Qt::AltModifier", "!event.text().isEmpty()",
         "Qt::Key_Return", "Qt::Key_Enter", "KeyUse::Ignore", "KeyUse::Pass")
 
@@ -177,8 +248,8 @@ assert "_colCapWidths" not in keys_ui
 status_fn = between(keys, "void Keys::refreshStatusBar", "KeyUse Keys::classify")
 for layer_case in ("ActiveLayer::Cheatsheet", "ActiveLayer::AllBindings",
                    "ActiveLayer::Palette", "ActiveLayer::DescribeKey",
-                   "ActiveLayer::StockShortcuts", "state.rightCue",
-                   'u"DEL back  ·  ESC cancel"_q'):
+                   "ActiveLayer::StockShortcuts", "state.hints",
+                   '{ u"DEL"_q, u"back"_q }', '{ u"ESC"_q, u"cancel"_q }'):
     assert layer_case in status_fn, layer_case
 
 # Verify cheatsheet preserves key casing, derives live-available SPC prefixes, and tags localleader rows.
@@ -189,7 +260,7 @@ assert "return style::RightToLeft();" in keys_ui
 assert "MeasureTextWidth(" in keys_ui
 assert "ElideText(" in keys_ui
 help_fn = between(keys, "void Keys::showHelpLayer", "void Keys::showDescribeKeyResult")
-ordered(help_fn, "b.viaLocalleader ? mapContextTag(b.sourceMap)",
+ordered(help_fn, ".contextTag = mapContextTag(b.sourceMap)",
         "Qt::Key_S, Qt::Key_T", "Available(b.action, target)",
         ".contextTag = ctx", "requireAvailable && !Available(b.action, target)", "onTabChanged")
 
@@ -212,23 +283,60 @@ for protected in ("isSearching()", "isRecording()", "_purpleScreenTimeCover->vis
 # Key routing, physical keys (non-ASCII + macOS Option M-), counts, DEL step-back, localleader.
 assert "modifiers.testFlag(Qt::AltModifier)" in between(keys, "int ModalKey(", "enum class Action")
 routing = between(keys, "bool Keys::handle", "void Keys::showWhichKey")
-ordered(routing, "ModalKey(*keyEvent)", "QEvent::KeyRelease",
-        "isAutoRepeat() && _held.contains(key)", "if (!Enabled())",
+ordered(routing, "ModalKey(*keyEvent)", "PhysicalIdentity(*keyEvent)", "QEvent::KeyRelease",
+        "_motion.release(physical)", "ClaimedKeys.erase(physical)",
+        "if (keyEvent->isAutoRepeat())", "ClaimedKeys.find(physical)",
+        "_held.contains(physical)", "repeat(*keyEvent, receiver)", "if (!Enabled())",
         "StockModeShortcut", "MxShortcutInStockMode()", "receiver == _preeditInput",
         "currentTarget(receiver, true)", "event->accept()", "QEvent::KeyPress",
         "!keyEvent->isAutoRepeat()", "showPalette(false, target, false)",
         "const auto target = currentTarget(receiver)", "if (!target.focus)",
         "QEvent::ShortcutOverride", "event->accept()", "return true;",
-        "_held.insert(key)", "keyEvent->isAutoRepeat()",
+        "keyEvent->isAutoRepeat()", "_held.insert(physical)",
         "case KeyUse::CountDigit:", "case KeyUse::PrefixBackspace:",
-        "stroke(KeyStroke(*keyEvent, key), target)")
+        "stroke(HoldStroke(*keyEvent), target)")
 ordered(routing, "const auto result = _hints.type", "if (!guard)",
         "result == MessageHints::Input::LeaveNormal", "enterInsert(true)")
 
 stroke = between(keys, "void Keys::stroke", "void Keys::dispatch")
 ordered(stroke, "_frozenEffective = EffectiveBindings", "IsExactLocalleader(_prefix)",
-        "_swallowNext = true", "const auto inspect = _inspect", "clearPrefix()",
-        "if (inspect)", "showDescribeKeyResult", "else if (Available", "dispatch(")
+        "_swallowNext = true", "const auto action = b.action", "const auto inspect = _inspect",
+        "KeyRepeat::CanArm", "clearPrefix(RepeatPolicy::Never, opensCursor)", "if (inspect)", "showDescribeKeyResult",
+        "CommandAvailable(action, target)", "_motion.start", "dispatch(action, target, count,")
+repeat_path = between(keys, "void Keys::repeat", "bool Keys::layerKey")
+ordered(repeat_path, "Enabled()", "_preeditInput", "_prefix.empty()", "_count",
+        "currentTarget(receiver)", "_normal || target.musicDialog",
+        "Available(*action, target)", "_motion.next", "dispatch(*action, target, 1, { PhysicalIdentity(event), true })")
+scroll_key = between(keys, "void Keys::scrollKey", "bool Keys::advanceScroll")
+ordered(scroll_key, "readScroll(view, layer)", "anim::Disabled()", "ScrollTo(view, current->top + delta)",
+        "_pixel.expectedTop", "press.repeat && style == ScrollStyle::Continuous",
+        "_pixel.motion.startHold", "_pixel.motion.step", "_scrollFrame.start()")
+ordered(keys, "Keys::readScroll", "owner()", "HistoryScroll(target)",
+        "scroll->movement()", "KeyboardAttachment::ScrollAnimating", "animatedScrolling()")
+ordered(keys, "void ScrollTo(", "elastic->scrollToY", "scroll->scrollToY",
+        "QAbstractScrollArea*>(view)->verticalScrollBar()->setValue(top)")
+ordered(keys, "bool Keys::advanceScroll", "current->top != _pixel.expectedTop",
+        "_pixel.motion.advance", "_pixel.expectedTop = next", "ScrollTo(_pixel.view, next)")
+ordered(routing, "_motion.release(physical)", "_pixel.motion.release", "_pixel.physical = 0")
+ordered(keys, "type == QEvent::Wheel", "cancelScroll()")
+for surface in ("ModalHelpLayer", "NoticeLayer"):
+    assert "ScrollModalLayer" in keys_ui.split(f"class {surface} final", 1)[1].split("\nclass ", 1)[0]
+ordered(customize, "if (_reviewBody && object == _reviewBody", "ScrollModalLayer", "singleStep()")
+ordered(keys, "QEvent::InputMethodQuery", "watched == _normalComposer",
+        "Enabled() && _normal && owner()", "setValue(Qt::ImEnabled, false)")
+ordered(keys, "void Keys::clearPrefix", "_motion.cancel(keepMotion)", "_layerMotion.cancel()")
+ordered(keys, "owner->activeChatEntryChanges()", "RepeatPolicy::ChatNavigation",
+        "owner->activeChatsFilter()", "contextChanged(folderMotion())", "contextChanged(RepeatPolicy::Never)")
+actions = between(keys, "const Command kCommands[]", "using Chord")
+armed = re.findall(r"\{ Action::(\w+),[^\n]*\n[^\n]*\n[^\n]*RepeatPolicy::(SameTarget|ChatNavigation|FolderNavigation)", actions)
+assert set(armed) == {
+    ("MoveUp", "SameTarget"), ("MoveDown", "SameTarget"),
+    ("PreviousChat", "ChatNavigation"), ("NextChat", "ChatNavigation"),
+    ("HistoryHalfUp", "SameTarget"), ("HistoryHalfDown", "SameTarget"),
+    ("OlderMessagesPage", "SameTarget"), ("NewerMessagesPage", "SameTarget"),
+    ("SeekBackward", "SameTarget"), ("SeekForward", "SameTarget"),
+    ("PreviousFolder", "FolderNavigation"), ("NextFolder", "FolderNavigation"),
+}
 
 palette = between(keys, "void Keys::showPalette", "} // namespace")
 ordered(palette, "revision = _revision", "base::make_weak(current)",
@@ -297,6 +405,94 @@ ordered(dispatch, "case Action::ToggleNightMode:", "editingTheme()",
         "ToggleNightModeWithConfirmation", "Window::Theme::ToggleNightMode();",
         "Window::Theme::KeepApplied();")
 ordered(dispatch, "case Action::OpenChat:", "chooseRow()")
+cursor = between(keys, "Dialogs::InnerWidget *Keys::liveChatCursor", "QWidget *Keys::windowFocusWidget")
+ordered(cursor, "controller != owner()", "isLayerShown()", "ChatsInnerList(controller)",
+        "list != _chatCursor.list", "purpleKeyboardSelection()", "key != _chatCursor.row",
+        "key.owningHistory()", "purpleHiddenFromView()")
+ordered(between(keys, "bool Available(", "bool RequiresModalInput"),
+        "case Action::PreviewChat:", "case Action::OpenChat:", "target.chatCursorAvailable")
+ordered(keys, "const auto stepChatList", "ChatsInnerList(current)", "processKeyDispatch",
+        "purpleKeyboardSelection()", "_chatCursor = row")
+ordered(dispatch, "case Action::OpenChat:", "liveChatCursor(current)", "_chatCursor = {};",
+        "list->showChatPreview()", "list->chooseRow()", "activeChatCurrent() == picked", "activate()")
+ordered(stroke, "const auto opensCursor", "target.chatCursorAvailable",
+        "Action::OpenChat || action == Action::PreviewChat", "clearPrefix(RepeatPolicy::Never, opensCursor)")
+ordered(keys, "void Keys::clearPrefix", "if (!keepChatCursor)", "_chatCursor = {};")
+ordered(keys, "bool Keys::eventFilter", "type == QEvent::MouseMove", "globalPosition().toPoint()",
+        "type == QEvent::MouseButtonPress", "type == QEvent::Hide", "_chatCursor = {};")
+ordered(status_fn, "target.focus && liveChatCursor(target.controller)", '{ u"RET"_q, u"open"_q }')
+ordered(read("dialogs/dialogs_widget.cpp"), "InnerWidget *Widget::purpleVisibleKeysList",
+        "_childList->purpleVisibleKeysList()", "purpleKeysList(this)")
+ordered(read("dialogs/dialogs_inner_widget.cpp"), "InnerWidget::computeChosenRow",
+        ".key = row->folder", ".key = _selected->key()", "Key InnerWidget::purpleKeyboardSelection",
+        "!_mouseSelection", "computeChosenRow().key")
+assert '"J/K to pick a chat first"' in keys
+
+# Universal hints use the active layer, reuse the message engine, and validate again after capture.
+universal = read("purple/purple_message_hints.cpp")
+hint_targets = read("purple/purple_hint_targets.cpp")
+ordered(keys, "Ui::RpWidget *Keys::hintRoot()", "if (!owner())", "stack->topShownLayer()")
+ordered(keys, "bool Keys::handleWindowHints", "receiver == _preeditInput", "_hints.windowActive()",
+        "event->isAutoRepeat()", "_hints.typeWindow(key, hintRoot(), &current->session(),")
+ordered(universal, "bool MessageHints::startWindow", "CollectWindowHintTargets(root)",
+        "appendWindowMessages", "HintLabels(targets.size())", "WindowHintExposed", "PlaceHintBadge")
+ordered(universal, "MessageHints::Input MessageHints::typeWindow", "session != _session.get()",
+        "Qt::Key_Backspace", "_prefix.chop(1)", "auto entry = std::move", "clear()",
+        "entry.current()", "WindowHintExposed", "entry.activate()")
+ordered(universal, "void MessageHints::appendWindowMessages", "purpleHiddenFromView()", "fullId()",
+        "alive->data().message(id)", "CanSendReply(item)", "VisibleBodyLinks", "purpleEnumerateVisible")
+ordered(hint_targets, "class HintDialogRows", "At(list, index)", "At(guard, index) == identity")
+ordered(hint_targets, "class HintMediaRows", "item->fullId()", "live.layout->getItem()->fullId() == id")
+ordered(hint_targets, "void AddItemView", "QPersistentModelIndex(view->indexAt", "index.isValid()",
+        "identity.current()", "ClickWindowHint(viewport, local)")
+ordered(read("purple/purple_hint_item_identity.h"), "bool current() const", "index.isValid()",
+        "view->viewport() == viewport", "view->indexAt(point) == index")
+ordered(customize, "FilterCustomizeSettingsInput", "owns(target)", "HandleModalWindowHints(target, event)")
+ordered(hint_targets, "void AddButton", "SendButton::Type::Record", "SendButton::Type::Round",
+        "send->state() == *sendState", "clicked(Qt::NoModifier, Qt::LeftButton)")
+hydra = read("purple/purple_hint_hydra.cpp")
+ordered(hydra, "void keyPressEvent", "AllowModalLayerKey(*e, this)", "live()", "Qt::Key_Backspace", "Qt::Key_Return")
+ordered(hydra, "void load(", "menu->actions()", "action->isEnabled()", "menu->ensureSubmenu", "HintMnemonics")
+ordered(hydra, "void choose(", "action.child", "action.native->trigger()", "const auto menu = std::move(_menu)",
+        "closeLayer();", "if (allowed() && current())", "trigger()")
+ordered(keys, "void Keys::showHintHydra", "guard->owner() == original.get()", "target.nativeMenu()", "target.current()",
+        "CreateHintHydra", "data.itemRemoved()", "data.itemDataChanges()", "ranges::contains(watched, id)")
+ordered(universal, "WindowHintTarget::Menu MessageHints::buildMenu", "view.session().frozen()",
+        "MessageHintMenuEvent", "main->showContextMenu(&event)", "request.passive = true", "FillContextMenu")
+ordered(read("history/history_inner_widget.cpp"), "Purple::AddSelfDestructSaveAction(_menu.get(), leaderOrSelf)",
+        "Purple::CaptureHintMenu(e, _menu)", "AttachSelectorToMenu", "_menu->popupPrepared()")
+assert "->popup(" not in hydra
+
+# Bare J/K select folders only in the list. The other chat-cursor chords
+# remain in Normal, and explicit overlays take precedence over the defaults.
+chat_map = between(defaults, "\n :chats", "\n :music")
+normal_map = between(defaults, "\n :normal", "\n :chat")
+for action, chord in (("NextFolder", "J"), ("PreviousFolder", "K"),
+                      ("NextFolder", "f"), ("PreviousFolder", "F")):
+    bound(action, chord, chat_map)
+    assert len(re.findall(rf'"{chord}"\s+:', chat_map)) == 1
+for action, chord in (("NextChat", "J"), ("PreviousChat", "K"),
+                      ("NextChat", "C-j"), ("PreviousChat", "C-k"),
+                      ("NextChat", "] c"), ("PreviousChat", "[ c"),
+                      ("NextFolder", "] f"), ("PreviousFolder", "[ f")):
+    bound(action, chord, normal_map)
+ordered(keys, "bool IsActiveDirectChatListBinding", "IsDirectChatListChord",
+        "binding.user", "normalChatListOverrides")
+ordered(keys, "std::vector<EffectiveBinding> EffectiveBindings", "contextMap == MapKind::Chats",
+        "IsActiveDirectChatListBinding", "directKeys.insert",
+        "b.map == MapKind::Normal && !directKeys.contains")
+ordered(keys, "void Keys::showWhichKey()", "EffectiveBindings(_normal || target.musicDialog, target.contextMap)",
+        "other.sourceMap == MapKind::Chats", "!other.viaLocalleader", 'u" (%1 from list)"')
+ordered(status_fn, "_normal && target.folders", "StepModalChatsFilter(target.controller, 1, false)",
+        "HasFolderKeys()", '{ u"J/K"_q, u"folders"_q }')
+ordered(keys, "Target FindTarget", ".folders = owner->isPrimary()",
+        "!owner->openedFolder().current()", "!owner->shownForum().current()")
+ordered(dispatch, "case Action::PreviousFolder:", "StepModalChatsFilter(current, delta, true)",
+        'u"No other folders"', "setInnerFocus(true)", "purpleKeyboardSelection()", "selectSkip(1)")
+ordered(read("purple/purple_folder_strip.cpp"), "bool StepModalChatsFilter", "ShownList(session)",
+        "dialogFiltersCurrent()", "count < 2", "(start + delta % count + count) % count",
+        "setActiveChatsFilter(list[changed].id())")
+ordered(read("window/window_filters_menu.cpp"), "_session->activeChatsFilter(", "scrollToButton(j->second)")
 
 # Verify Doom-aligned SPC leader + localleader (, / SPC m) bindings and zero 4-stroke chords.
 assert ':localleader ["," "SPC m"]' in defaults
@@ -313,7 +509,7 @@ for action, chord in (
     ("Run", "SPC SPC"),
     ("ChatPalette", "SPC ,"),
     ("ChatPalette", "SPC RET"),
-    ("ChatPalette", "SPC b b"),
+    ("RecentChatPalette", "SPC b b"),
     ("Backgrounds", "SPC t b"),
     ("ToggleNightMode", "SPC t n"),
     ("OpenChatInfo", "SPC b i"),
@@ -347,7 +543,9 @@ for action, chord in (
     ("MessageMenu", "g m"),
     ("ReplyToMessage", "g r"),
     ("EditMessage", "g e"),
-    ("OpenMessageUrl", "f"),
+    ("WindowHint", "f"),
+    ("WindowHintMenu", "F"),
+    ("OpenMessageUrl", "g o"),
     ("CopyMessage", "y y"),
     ("CopyMessageLink", "y l"),
     ("CopyMessageUrl", "y u"),
@@ -355,6 +553,7 @@ for action, chord in (
     ("UnreadBuffer", "SPC b I"),
     ("ToggleZenMode", "SPC t z"),
     ("ToggleZenMode", "SPC w m"),
+    ("ToggleZenChats", "SPC w z"),
     ("TogglePrivacyScreen", "SPC t p"),
     ("TogglePrivacyScreen", "SPC z"),
     ("TopicPalette", "SPC b t"),
@@ -403,16 +602,48 @@ for action, key in (
 ):
     bound(action, key, chat_body)
 
+music_target = between(keys, "Target Keys::currentTarget", "QWidget *Keys::windowFocusWidget")
+ordered(music_target, "isLayerShown()", "FindChatMusicKeyTarget(current, focus)", "MapKind::Music")
+music_dispatch = between(keys, "void Keys::dispatch", "using Native =")
+ordered(music_dispatch, "MusicAction(action)", "dialog->act(*trackAction)",
+        "MusicNavigation(action)", "dialog->navigate(*navigation, repeat)", "dialog->focusFilter()")
+music_defaults = between(keys, "std::vector<EffectiveBinding> EffectiveBindings",
+                         "bool IsLocalleaderPrefix")
+ordered(music_defaults, "km.localleaders", "b.map == MapKind::Normal",
+        "km.unboundNormal.contains(keys)", "StartsWith(binding.keys, keys)")
+music_caps = between(keys, "MusicShortcutHints MusicEffectiveShortcuts()", "bool ModalKeysInNormal")
+ordered(music_caps, "KeymapChanges.events()", "EnabledChanges.events()",
+        "ChordsForAction(*action, EffectiveBindings(true, MapKind::Music))")
+chat_music = read("purple/purple_chat_music.cpp")
+assert "_pendingG" not in chat_music and "_pendingLocal" not in chat_music
+ordered(chat_music, "MusicEffectiveShortcuts()", "AddChatMusicLayout", "MakeMusicNowPlaying")
+
 # Phase 2 routes: unread status counts, avatars, iBuffer read-receipt confirm,
-# real fullscreen Zen mode with transient status bar, app-wide privacy screen, and topics.
+# fullscreen with a persistent status bar, app-wide privacy screen, and topics.
 ordered(keys, "ComputeUnreadSummary", "HasUnmutedUnreadNotification", "BucketForPeer")
 ordered(keys, "void Keys::setZenMode", "setPurpleZenHidden(true)", "showFullScreen()",
         "setPurpleZenHidden(false)", "PlanWindowRestore", "showNormal()")
-ordered(keys, "bool Keys::zenNeedsTransientBar", "int Keys::statusBarHeight", "!_zenMode")
+ordered(keys, "int Keys::statusBarHeight", "chromeVisible() ?", "ModalStatusBar::PreferredHeight()")
+ordered(classify, "KeyUse::Cancel", "KeyUse::ExitInsertOrBackOut",
+        "_window->isFullScreen()", "KeyUse::FullscreenBack")
+ordered(keys, "case KeyUse::FullscreenBack:", "target.history->escape()",
+        "target.messages.section->delegate()->listCancelRequest()")
+ordered(read("window/window_adaptive.cpp"), "void Adaptive::setPurpleFullscreen",
+        "fullscreen ? ChatLayout::Normal : _measuredChatLayout.current()")
+ordered(keys, "case Action::ToggleZenChats:", "ToggleZenChatList(current)")
+ordered(keys, "void ToggleZenChatList(", "clearSectionStack()", "setPurpleZenHidden(true, hide)")
 ordered(keys, "void Keys::showUnreadBuffer", "CreateUnreadBufferLayer", "MarkAsReadMenu::MarkAsReadThread")
 ordered(keys, "void Keys::showTopicPicker", "CreateTopicPickerLayer", "onRefresh",
         "onLoadMore", "requestTopics()", "onReload", "reloadTopics()", "pageUpdates",
         "onCreateTopic", "guard->owner() != ctrl", "CreateTopic(ctrl, liveForum)")
+step_topic = between(keys, "void Keys::stepTopic", "void Keys::enterNormal")
+ordered(step_topic, "preloadTopics()", "if (unreadOnly)", "topicsLoadFailed()", "topicsList()->loaded()",
+        "FindNextUnreadTopic", "showThread(topics[*index])", "remaining == Pages::Complete",
+        "No unread topics", "ChordsForAction(", "Action::TopicUnreadPalette", "EffectiveBindings",
+        "M-x topic-unread-palette", "Could not load more topics", "No unread topic among loaded topics")
+forum = read("data/data_forum.cpp")
+ordered(forum, "void Forum::reloadTopics", "_topicsLoadFailed = false", "_topicsList.setLoaded(false)")
+ordered(forum, "void Forum::requestTopics", ".fail", "_topicsLoadFailed = true", "_topicsList.setLoaded()")
 ordered(keys, "case Action::TopicCreate:", "CreateTopic(current, forum)")
 create_topic = between(keys, "void CreateTopic(", "ModalUnread::ChatBucket BucketForPeer")
 ordered(create_topic, "Data::IsBotUserCreatesTopics", "showPeerHistory", "return;",
@@ -438,12 +669,26 @@ keys_ui = read("purple/purple_keys_ui.cpp")
 ordered(keys_ui, "class TopicPickerLayer final", "_config.actionLabel",
         "_topicAction->setClickedCallback", "Qt::Key_C && !mods && _topicAction", "openTopicAction()")
 ordered(keys_ui, "sends read receipts", "ModalUnread::NeedsMarkReadConfirmation", "executeMarkRead")
+unread_layer = between(keys_ui, "class UnreadBufferLayer final", "class TopicRowsWidget final")
+ordered(unread_layer, "void refilter(uint64_t selectedPeer)", "_selection.refilter(",
+        "_rows->setData", "syncSelection()", "void syncSelection()", "scrollToY(rowTop,")
+ordered(unread_layer, "void openRow(int row)",
+        "_config.items[_visible[row]].peerId", "cb(peerId)")
+notice_history = between(keys_ui, "class NoticeHistoryLayer final",
+                         "std::unique_ptr<Ui::LayerWidget> CreateNoticeHistoryLayer")
+ordered(notice_history, "void refilter()", "Identity(item.accountKey, item.id)", "_selection.refilter(",
+        "_rows->setData", "ensureSelectionVisible()", "void ensureSelectionVisible()", "scrollToY(rowTop,",
+        "void inspectRow(int row)", "_config.items[_visible[row]]", "cb(std::move(rec))")
 ordered(keys_ui, "paintUserpic")
 ordered(keys_ui, "class TopicPickerLayer final", "QTimer::timeout", "_config.pageUpdates",
         "_rootsBeforeLoad.contains", "QTimer::singleShot(0, this, [=] { maybeRequestMore(); })",
         "Qt::Key_R && !mods", "finishLoading()", "_config.onReload()")
 ordered(keys_ui, "class NoticeLayer final", "class NoticeHistoryLayer final",
         "CreateNoticeLayer", "CreateNoticeHistoryLayer")
+notice = between(keys_ui, "class NoticeLayer final", "class NoticeHistoryRowsWidget final")
+ordered(notice, "AllowModalLayerKey(*e, this", "_keys.escape()", "NoticeEscape::CancelPrefix",
+        "NoticeEscape::HideHelp", "NoticeEscape::Close", "e->isAutoRepeat() || elapsed < 180",
+        "if (_keys.pendingG)", "_scroll->scrollToY(0)", "return;", "activateButton(_focusedButton)")
 ordered(keys, "void Keys::schedulePendingNoticeFlush", "_noticeLayers.empty()",
         "&QObject::destroyed", "_noticePresentation == presentation", "MaybeFlushPendingNotices")
 ordered(keys, "PeekCountdownChanges()", "schedulePendingNoticeFlush()", "PeekCountdownPending()")
@@ -514,7 +759,9 @@ last_seen_cpp = read("purple/purple_last_seen.cpp")
 ordered(last_seen_cpp, "ShowPurpleNotice", "lastseen:empty:", ".background = true")
 
 privacy = read("purple/purple_privacy_screen.cpp")
-ordered(privacy, "ShouldFetchWeather", "Accept-Language")
+ordered(privacy, "void ensureFresh()", "PrivacyScreenActiveAny()", "WeatherPermitted()",
+        'source != "off"', "resolveLocation(false)", "Accept-Language")
+ordered(privacy, 'u"Use approximate location"_q', 'ChangeWeatherSource("current")', "resolveLocation(true)")
 ordered(privacy, "Lock with passcode", "hasLocalPasscode()", "lockByPasscode()", "DismissPrivacyScreen()")
 ordered(privacy, "QEvent::WindowActivate", "QEvent::FocusIn", "QEvent::InputMethod", "QEvent::Drop")
 ordered(privacy, "class PrivacyAppFilter final", "passcodeLockValue()", "QEvent::Show",
@@ -547,6 +794,16 @@ main_w = read("mainwidget.cpp")
 ordered(main_w, "syncZenHide", "_zenThirdSectionHide", "_zenThirdShadowHide")
 ordered(main_w, "void MainWidget::destroyThirdSection()", "_zenThirdSectionHide.onWidgetDestroyed()")
 
+hints = read("purple/purple_message_hints.cpp")
+ordered(hints, "VisibleBodyLinks(", "purpleRichLinkLayout()", "forEachVisibleLinkText(",
+        "CollectVisibleBodyLinks", "else if (text")
+ordered(hints, "MessageHints::Input MessageHints::applyBodyLink",
+        "canUseBodyLink", "BodyLinkState", "MatchesUrl(state.link, link.url)",
+        "copyToClipboardText()", "ActivateClickHandler")
+article = read("iv/markdown/iv_markdown_article.cpp")
+ordered(article, "void MarkdownArticle::Impl::forEachVisibleLinkText",
+        "VisibleTextSegmentRect", "visit(*segment.leaf")
+
 # Existing attachment, playback, account, calendar, background, hints, menu, and music checks.
 attachment = between(keys, "class KeyboardAttachment final", "constexpr auto kEnabledPref")
 ordered(attachment, "if (!CanAttach(widget)) return {};", "QPointer(widget)",
@@ -576,7 +833,7 @@ ordered(background, "readPref<bool>(kVisiblePref, true)", "VisibilityChanges.fir
 
 hints = read("purple/purple_message_hints.cpp")
 ordered(hints, "setFocusPolicy(Qt::NoFocus)", "Qt::WA_TransparentForMouseEvents")
-ordered(hints, "0xff, 0xd8, 0x4a", "0xb9, 0x1c, 0x1c")
+ordered(read("purple/purple_hint_paint.h"), "0xff, 0xd8, 0x4a", "0xb9, 0x1c, 0x1c")
 ordered(hints, "bool MessageHints::eligible", "hasCopyRestriction", "goodForSelection")
 
 menu = read("window/window_main_menu.cpp")
@@ -599,7 +856,18 @@ dispatch = between(keys, "void Keys::dispatch", "void Keys::showHelpLayer")
 ordered(dispatch, "case Action::EnterInsertMode:", "enterInsert(false)", "FocusMusicSearch(current, target.focus, true)")
 ordered(dispatch, "case Action::Search:", "MapKind::Music", "enterInsert(true)",
         "FocusMusicSearch(current, target.focus, true)", "launch(Native::Search)")
-assert "MusicHidesChats(_mainSection.data())" in read("mainwidget.cpp")
+geometry = between(read("mainwidget.cpp"), "void MainWidget::updateControlsGeometry", "void MainWidget::destroyThirdSection")
+ordered(geometry, "MusicHidesInfo(_mainSection.data())", "MusicHidesChats(_mainSection.data())",
+        "hideThird = zenWide || musicHidesInfo", "hideChats = musicWide || (zenWide && _controller->purpleZenChatsHidden())",
+        "UpdateMusicSidebar(_dialogs.get(), hideChats", "_thirdSection.data(), hideThird")
+ordered(keys, "std::vector<EffectiveBinding> EffectiveBindings", "MapKind::Chats",
+        "!directKeys.contains(b.keys.front())", "contextMap == MapKind::Music",
+        "firstTrack ? Action::MusicFirstTrack : b.action")
+ordered(dispatch, "MapKind::Music", "MusicAction(action)", "ActOnMusic",
+        "MusicNavigation(action)", "NavigateMusic", "case Action::OpenChat:")
+ordered(read("purple/purple_playlist_song_list.cpp"), "void PlaylistSongList::Rows::keyPressEvent",
+        "Qt::Key_Return || key == Qt::Key_Enter", "e->isAutoRepeat()", "Mode::Playlist && *action == TrackListAction::Play",
+        "return;", "navigate(*action, 1)")
 notice_probe = read("test/test_purple_notices.cpp")
 assert re.search(r"option\(PURPLE_BUILD_NOTICE_TEST_PROBES[^)]*OFF\)", purple_cmake)
 assert "$<$<NOT:$<CONFIG:Release>>:PURPLE_BUILD_NOTICE_TEST_PROBES>" in purple_cmake

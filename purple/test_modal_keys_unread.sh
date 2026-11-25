@@ -13,6 +13,7 @@ if [[ ! -d "${QtInclude}/QtCore" && -d "${QtLib}/QtCore.framework/Headers" ]]; t
     -framework QtCore
     -Wl,-rpath,"${QtLib}"
   )
+  KeyQtFlags=(-framework QtGui -framework QtWidgets)
 else
   QtFlags=(
     -I "${QtInclude}"
@@ -21,6 +22,7 @@ else
     -lQt6Core
     -Wl,-rpath,"${QtLib}"
   )
+  KeyQtFlags=(-I "${QtInclude}/QtGui" -I "${QtInclude}/QtWidgets" -lQt6Gui -lQt6Widgets)
 fi
 
 Bin="$(mktemp "${TMPDIR:-/tmp}/test_modal_keys_unread.XXXXXX")"
@@ -30,6 +32,14 @@ clang++ -std=c++20 -Wall -Wextra -Werror \
   -I "${Root}/Telegram/SourceFiles" \
   "${Root}/purple/test_modal_keys_unread.cpp" \
   "${QtFlags[@]}" \
+  -o "${Bin}"
+
+"${Bin}"
+
+clang++ -std=c++20 -Wall -Wextra -Werror \
+  -I "${Root}/Telegram/SourceFiles" \
+  "${Root}/purple/test_list_filter_keys.cpp" \
+  "${QtFlags[@]}" "${KeyQtFlags[@]}" \
   -o "${Bin}"
 
 "${Bin}"

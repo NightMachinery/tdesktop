@@ -139,6 +139,30 @@ int main() {
 	});
 	Check(badDays != badRows.end() && badDays->invalid && badDays->effective.toInt() == 90,
 		"invalid raw value stays visible alongside the reader fallback");
+	const auto mismatch = QByteArray("[lists.Friends]\nmembers = [42]\n[presets.work]\n"
+		"list_order = [{ list = 'friends', notify_p = false }] # keep\n");
+	const auto mismatchLayers = LayerSettings(QString::fromUtf8(mismatch), QStringLiteral("work.toml"),
+		{}, {}, { .accountPresent = false, .traceReads = true });
+	const auto mismatchRows = Build(mismatchLayers, {
+		{ QStringLiteral("Fixture"), QStringLiteral("work.toml"), mismatch, true },
+	});
+	const auto fix = std::find_if(mismatchRows.begin(), mismatchRows.end(), [](const Row &row) {
+		return row.listCaseFix.has_value();
+	});
+	Check(fix != mismatchRows.end() && fix->editable && fix->help.contains(QStringLiteral("'Friends'")),
+		"case warning offers a correction with the existing list's spelling");
+	if (fix != mismatchRows.end()) {
+		const auto candidate = EditSettingScalar(mismatch, MapSettingsSource(mismatch).revision,
+			fix->address, SettingScalar(*fix->listCaseFix));
+		Check(candidate.ok() && candidate.bytes.contains("list = 'Friends', notify_p = false }] # keep"),
+			"correction changes only the reference token");
+	}
+	const auto readOnlyRows = Build(mismatchLayers, {
+		{ QStringLiteral("Fixture"), QStringLiteral("work.toml"), mismatch, false },
+	});
+	Check(std::none_of(readOnlyRows.begin(), readOnlyRows.end(), [](const Row &row) {
+		return row.listCaseFix.has_value();
+	}), "a read-only source still warns but cannot stage a correction");
 	Check(ShouldHandleEditorKey(false, true, true, false) == EditorKey::Stage, "plain Return stages single line");
 	const auto composition = QInputMethodEvent(QStringLiteral("仮"), {});
 	const auto preedit = !composition.preeditString().isEmpty();

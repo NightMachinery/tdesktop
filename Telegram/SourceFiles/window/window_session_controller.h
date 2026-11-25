@@ -652,9 +652,14 @@ public:
 	}
 
 	[[nodiscard]] int filtersWidth() const;
-	void setPurpleZenHidden(bool hidden);
+	[[nodiscard]] std::optional<float64> purpleZenDialogsRatio() const;
+	void setPurpleZenDialogsRatio(float64 ratio);
+	void setPurpleZenHidden(bool hidden, bool hideChats = false);
 	[[nodiscard]] bool purpleZenHidden() const {
 		return _purpleZenHidden;
+	}
+	[[nodiscard]] bool purpleZenChatsHidden() const {
+		return _purpleZenChatsHidden;
 	}
 	[[nodiscard]] bool enoughSpaceForFilters() const;
 	[[nodiscard]] rpl::producer<bool> enoughSpaceForFiltersValue() const;
@@ -846,7 +851,9 @@ private:
 
 	std::unique_ptr<Passport::FormController> _passportForm;
 	std::unique_ptr<FiltersMenu> _filters;
+	std::optional<float64> _purpleZenDialogsRatio;
 	bool _purpleZenHidden = false;
+	bool _purpleZenChatsHidden = false;
 
 	GifPauseReasons _gifPauseReasons = 0;
 	rpl::event_stream<> _gifPauseLevelChanged;

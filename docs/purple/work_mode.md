@@ -1219,7 +1219,10 @@ A `state.toml` written before list snapshots existed restores names only, as
 before. It cannot recover definitions that have already disappeared, and gains
 a snapshot at the next reload that can still see the lists. A valid file that
 keeps the active preset but drops a list it names still resolves from that
-file; the missing list claims nothing and the parser warns about it.
+file; the missing list claims nothing and the parser warns about it. List names
+are case-sensitive. If only the case differs, the warning names the lists that
+match. In Customize, select the warning and press Return to stage the fix when
+there is exactly one match. Review and apply the draft to save it.
 
 The earlier decision to keep `.good` without extending the cache covered a
 missing or broken file, but could not cover a valid file that removed the

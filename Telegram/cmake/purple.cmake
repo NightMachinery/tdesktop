@@ -43,6 +43,7 @@ PRIVATE
     purple/purple_music_bookmark.h
     purple/purple_chat_palette.cpp
     purple/purple_chat_palette.h
+    purple/purple_chat_palette_search.h
     purple/purple_exact_search.h
     purple/purple_control_endpoint.cpp
     purple/purple_control_endpoint.h
@@ -202,11 +203,16 @@ PRIVATE
     purple/purple_chat_background.h
     purple/purple_keys.cpp
     purple/purple_keys.h
+    purple/purple_key_repeat.h
+    purple/purple_key_scroll.h
     purple/purple_keys_colors.h
     purple/purple_keys_mx.h
     purple/purple_keys_ui.cpp
     purple/purple_keys_ui.h
+    purple/purple_status_bar.h
     purple/purple_keys_unread.h
+    purple/purple_list_filter_keys.h
+    purple/purple_list_selection.h
     purple/purple_keys_zen.h
     purple/purple_notice_state.h
     purple/purple_diagnostics.cpp
@@ -217,9 +223,20 @@ PRIVATE
     purple/purple_notices.h
     purple/purple_privacy_screen.cpp
     purple/purple_privacy_screen.h
+    purple/purple_privacy_canvas.cpp
+    purple/purple_privacy_canvas.h
     purple/purple_privacy_state.h
     purple/purple_privacy_weather.h
+    purple/purple_privacy_clocks.h
     purple/purple_message_hint_placement.h
+    purple/purple_hint_labels.h
+    purple/purple_hint_hydra.cpp
+    purple/purple_hint_hydra.h
+    purple/purple_hint_item_identity.h
+    purple/purple_hint_mnemonics.h
+    purple/purple_hint_paint.h
+    purple/purple_hint_targets.cpp
+    purple/purple_hint_targets.h
     purple/purple_message_hints.cpp
     purple/purple_message_hints.h
     purple/purple_instant_replaces.cpp
@@ -276,8 +293,14 @@ PRIVATE
     purple/purple_music_index.h
     purple/purple_music_index_service.cpp
     purple/purple_music_index_service.h
+    purple/purple_music_now_playing.cpp
+    purple/purple_music_now_playing.h
+    purple/purple_music_widgets.cpp
+    purple/purple_music_widgets.h
     purple/purple_music_section.cpp
     purple/purple_music_section.h
+    purple/purple_chat_music.cpp
+    purple/purple_chat_music.h
     purple/purple_music_source_roster.cpp
     purple/purple_music_source_roster.h
     purple/purple_playlists_resolve_queue.cpp
@@ -452,6 +475,8 @@ PRIVATE
     purple/purple_sync_local_store.h
     purple/purple_sync_review_box.cpp
     purple/purple_sync_review_box.h
+    purple/purple_sync_merge.cpp
+    purple/purple_sync_merge.h
     purple/purple_sync_setup_box.cpp
     purple/purple_sync_setup_box.h
     purple/purple_system_unlock.h
@@ -475,6 +500,7 @@ nice_target_sources(Telegram ${res_loc} PRIVATE purple/keymaps.qrc)
 nice_target_sources(lib_ffmpeg ${src_loc} PRIVATE purple/purple_build_checks.cpp)
 
 if (APPLE)
+    nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_privacy_accessibility_mac.mm)
     nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_system_unlock_mac.mm)
     target_link_frameworks(Telegram PRIVATE LocalAuthenticationEmbeddedUI)
     nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_webp_paste_mac.mm)
@@ -615,6 +641,7 @@ set_source_files_properties(
     ${purple_core_loc}/purple/purple_settings_edit.cpp
     ${purple_core_loc}/purple/purple_splice.cpp
     ${purple_core_loc}/purple/purple_state.cpp
+    ${src_loc}/purple/purple_sync_merge.cpp
     PROPERTIES INCLUDE_DIRECTORIES ${purple_core_loc}/tomlplusplus)
 
 include(${CMAKE_CURRENT_LIST_DIR}/purple_version.cmake)

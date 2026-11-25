@@ -1,17 +1,65 @@
 using "ui/basic.style";
 using "ui/widgets/widgets.style";
 using "ui/layers/layers.style";
+using "media/player/media_player.style";
 
-purpleMusicMaxWidth: 840px;
+purpleMusicMaxWidth: 1240px;
+purpleChatMusicWidth: 760px;
+purpleChatMusicMargin: 16px;
 purpleMusicHeaderHeight: 64px;
-purpleMusicMargin: 24px;
-purpleMusicToolbarGap: 6px;
 purpleMusicSearchIconWidth: 42px;
 purpleMusicSearchIcon: icon {{ "box_search", windowSubTextFg }};
 purpleMusicSearchMargin: margins(24px, 4px, 24px, 16px);
 purpleMusicStatusMargin: margins(24px, 0px, 24px, 12px);
-purpleMusicListMargin: margins(12px, 0px, 12px, 0px);
+purpleMusicListMargin: margins(24px, 0px, 24px, 0px);
 purpleMusicActionMargin: margins(24px, 0px, 24px, 10px);
+purpleMusicActionGap: 12px;
+purpleMusicShortcutGap: 6px;
+purpleMusicBarPadding: 8px;
+purpleMusicTrackHeight: 66px;
+purpleMusicCoverSize: 48px;
+purpleMusicCoverRadius: 6px;
+purpleMusicTrackInset: 8px;
+purpleMusicTrackGap: 16px;
+purpleMusicBadgeSize: 18px;
+purpleMusicTileCursor: 2px;
+purpleMusicButtonInset: 10px;
+purpleMusicSkipGlyphSize: 18px;
+purpleMusicTileMin: 150px;
+purpleMusicTileMax: 180px;
+purpleMusicTileNarrowMax: 224px;
+purpleMusicTileNarrowWidth: 500px;
+purpleMusicTileGap: 18px;
+purpleMusicNowCover: 120px;
+purpleMusicNowCoverCompact: 72px;
+purpleMusicNowCompactWidth: 530px;
+purpleMusicNowPadding: 16px;
+purpleMusicNowTransportGap: 8px;
+purpleMusicNowMargin: margins(24px, 0px, 24px, 12px);
+purpleMusicNowTitle: font(27px semibold);
+purpleMusicNowEyebrow: font(12px semibold);
+
+purpleMusicPlayButton: MediaPlayerPlayButton(mediaPlayerPlayButton) {
+	size: size(36px, 36px);
+	iconPosition: point(6px, 6px);
+	color: activeButtonFg;
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: 36px;
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: activeButtonBgOver;
+	}
+}
+
+purpleMusicSkipButton: IconButton(mediaPlayerNextButton) {
+	icon: icon {};
+	iconOver: icon {};
+}
+
+purpleMusicProgress: MediaSlider(mediaPlayerPanelPlayback) {
+	activeFg: windowActiveTextFg;
+	activeFgOver: windowActiveTextFg;
+	inactiveFgDisabled: windowFg;
+}
 
 purpleMusicTitle: FlatLabel(boxTitle) {
 	style: TextStyle(semiboldTextStyle) {
@@ -19,10 +67,20 @@ purpleMusicTitle: FlatLabel(boxTitle) {
 	}
 }
 
+purpleMusicViewOption: RoundButton(defaultLightButton) {
+	width: -20px;
+	textBg: windowBgOver;
+	textBgOver: windowBgOver;
+	radius: purpleMusicCoverRadius;
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: windowBgRipple;
+	}
+}
+
 purpleMusicSearch: InputField(defaultInputField) {
 	textBg: windowBgOver;
 	textBgActive: windowBgOver;
-	textMargins: margins(42px, 14px, 14px, 8px);
+	textMargins: margins(42px, 14px, 54px, 8px);
 	placeholderMargins: margins(0px, 0px, 0px, 0px);
 	placeholderFgActive: windowSubTextFg;
 	placeholderShift: 0px;
@@ -48,4 +106,9 @@ purpleMusicBack: IconButton(defaultIconButton) {
 	height: 36px;
 	rippleAreaSize: 32px;
 	rippleAreaPosition: point(2px, 2px);
+}
+
+purpleMusicBackRtl: IconButton(purpleMusicBack) {
+	icon: icon {{ "box_button_back-flip_horizontal", boxTitleCloseFg }};
+	iconOver: icon {{ "box_button_back-flip_horizontal", boxTitleCloseFgOver }};
 }

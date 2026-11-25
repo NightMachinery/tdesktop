@@ -3795,6 +3795,10 @@ public:
 	void setSearchMatches(
 		std::vector<MarkdownArticleSearchMatch> matches,
 		int current);
+	void forEachVisibleLinkText(
+		QRect clip,
+		Fn<void(const Ui::Text::String &,
+			const Ui::Text::HighlightRectsRequest &)> visit) const;
 	[[nodiscard]] auto searchSources() const
 	-> std::vector<MarkdownArticleSearchSource>;
 	void updatePreparedLeaf(
@@ -4338,6 +4342,32 @@ void MarkdownArticle::Impl::setSearchMatches(
 		&& current < int(_searchMatches.size()))
 		? current
 		: -1;
+}
+
+void MarkdownArticle::Impl::forEachVisibleLinkText(
+		QRect clip,
+		Fn<void(const Ui::Text::String &,
+			const Ui::Text::HighlightRectsRequest &)> visit) const {
+	for (const auto &segment : _segments) {
+		if (!segment.isTextLeaf() || !segment.leaf->hasLinks()) {
+			continue;
+		}
+		const auto logical = logicalSegmentRect(segment.index);
+		const auto owner = findHorizontalScrollOwner(segment.index);
+		const auto visible = clip.intersected(VisibleTextSegmentRect(
+			segment,
+			{ logical, owner ? owner->block : nullptr },
+			layoutStyle()));
+		if (!visible.isEmpty() && !logical.isEmpty()) {
+			visit(*segment.leaf, {
+				.position = logical.topLeft(),
+				.geometry = TextGeometry(segment.textWidth),
+				.align = segment.align,
+				.clip = visible,
+				.ratio = float64(currentDevicePixelRatio()),
+			});
+		}
+	}
 }
 
 auto MarkdownArticle::Impl::searchSources() const
@@ -7014,6 +7044,13 @@ void MarkdownArticle::setSearchMatches(
 		std::vector<MarkdownArticleSearchMatch> matches,
 		int current) {
 	_impl->setSearchMatches(std::move(matches), current);
+}
+
+void MarkdownArticle::forEachVisibleLinkText(
+		QRect clip,
+		Fn<void(const Ui::Text::String &,
+			const Ui::Text::HighlightRectsRequest &)> visit) const {
+	_impl->forEachVisibleLinkText(clip, std::move(visit));
 }
 
 auto MarkdownArticle::searchSources() const

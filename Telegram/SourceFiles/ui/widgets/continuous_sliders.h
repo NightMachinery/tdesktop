@@ -28,6 +28,7 @@ public:
 	enum class Direction {
 		Horizontal,
 		Vertical,
+		HorizontalReversed,
 	};
 	void setDirection(Direction direction) {
 		_direction = direction;
@@ -93,8 +94,9 @@ protected:
 		return _direction;
 	}
 	bool isHorizontal() const {
-		return (_direction == Direction::Horizontal);
+		return (_direction != Direction::Vertical);
 	}
+	void applyDirection(QPainter &p) const;
 	QRect getSeekRect() const;
 	virtual QSize getSeekDecreaseSize() const = 0;
 

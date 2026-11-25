@@ -56,6 +56,34 @@ int main() {
 		{ 9, Q("preview-chat"), Q("Show chat preview"), Q("chats"), Q(", p"), false },
 	};
 
+	{
+		auto commands = std::vector<Candidate>{
+			{ 0, Q("playback-toggle"), Q("Play / Pause"), Q("playback"),
+				Q("SPC p p"), true, Q("music audio resume") },
+			{ 1, Q("test-play"), Q("Play music"), Q("test"), {}, true },
+		};
+		History history;
+		history.record(Q("playback-toggle"), Q("music play"));
+		const auto result = RankAndFilter(commands, history, Q("music play"));
+		Expect(result == std::vector<int>({ 1, 0 }),
+			"names rank before alias-only tokens even for recent commands");
+		Expect(RankAndFilter(commands, history, Q("resume music")) == std::vector<int>({ 0 }),
+			"aliases combine orderlessly");
+	}
+
+	{
+		const auto actions = std::vector<Candidate>{
+			{ 0, Q("describe-command"), Q("Describe command"), Q("help"), Q("SPC h v"), true },
+			{ 1, Q("cafe"), Q("Café"), Q("fixture"), Q("SPC z"), true },
+		};
+		const auto remapped = RankAndFilter(actions, {}, Q("h v"));
+		Expect(remapped.size() == 1 && actions[remapped.front()].id == Q("describe-command"),
+			"the effective remapped chord finds Describe Command");
+		const auto composed = RankAndFilter(actions, {}, Q("Café"));
+		Expect(composed.size() == 1 && actions[composed.front()].id == Q("cafe"),
+			"a committed composed character is searchable");
+	}
+
 	// 1. Title match beats shorter group/id-only matches ("Open chat" beats "GIFs" for "chat").
 	{
 		History h;

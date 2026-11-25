@@ -30,7 +30,7 @@ size_t Section(const SettingAddress &address, bool known) {
 	if (root == u"schedule"_q || root == u"focus_sync"_q || root == u"devices"_q) return 2;
 	if (root == u"peek"_q) return 3;
 	if (root == u"recent"_q || root == u"suggestions"_q || root == u"overrides"_q) return 4;
-	if (root == u"notifications"_q || root == u"last_seen"_q) return 5;
+	if (root == u"notifications"_q || root == u"last_seen"_q || root == u"privacy_screen"_q) return 5;
 	if (root == u"playback"_q || root == u"playlists"_q) return 6;
 	if (root == u"recording"_q || root == u"media_reply"_q) return 7;
 	if (root == u"screen_time"_q) return 8;
@@ -362,12 +362,31 @@ std::vector<Row> Build(const LayerSettingsResult &layers, const std::vector<Sour
 		const auto &parse = report->current;
 		if (parse.path.isEmpty()) continue;
 		auto messages = parse.parsed.warnings;
-		if (!parse.parsed.error.isEmpty() && parse.present) messages.insert(messages.begin(), parse.parsed.error);
+		const auto hasError = !parse.parsed.error.isEmpty() && parse.present;
+		if (hasError) messages.insert(messages.begin(), parse.parsed.error);
 		if (parse.parsed.traceIncomplete) messages.push_back(u"Some settings reads could not be traced."_q);
+		const auto &fixes = parse.parsed.listReferenceCaseFixes;
+		auto fix = fixes.begin();
 		for (auto i = size_t(0); i != messages.size(); ++i) {
 			const auto key = u":diagnostic:"_q + parse.path + u':' + QString::number(i);
-			rows[key] = { .key = key, .parent = SectionKey(9), .label = u"Source warning"_q,
+			auto &row = rows[key];
+			row = { .key = key, .parent = SectionKey(9), .label = u"Source warning"_q,
 				.source = parse.path, .help = messages[i], .invalid = true };
+			if (fix != fixes.end() && fix->warning + size_t(hasError) == i) {
+				row.label = u"List name case · Use ‘%1’"_q.arg(fix->replacement);
+				row.address = fix->address;
+				row.scope = SettingsScope(fix->address);
+				const auto &file = row.scope == SettingScope::AppWide ? global : own;
+				if (row.scope != SettingScope::Unknown && file.writable && !file.recovery && file.path == parse.path) {
+					row.descriptor = FindSettingDescriptor(fix->address);
+					row.editable = row.descriptor != nullptr;
+					if (row.editable) {
+						row.listCaseFix = fix->replacement;
+						row.help += u" Press Return to stage the correction."_q;
+					}
+				}
+				++fix;
+			}
 		}
 	}
 	auto result = std::vector<Row>();

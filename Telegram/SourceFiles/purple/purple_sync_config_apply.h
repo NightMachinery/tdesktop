@@ -38,6 +38,8 @@ struct SyncConfigApplyResult {
 	bool publishNeeded = false;
 };
 
+enum class SyncConfigChoiceMode { Version, Merge };
+
 [[nodiscard]] SyncConfigApplyResult ApplySyncConfigChoice(
 	Main::Account &account,
 	Main::Session &session,
@@ -45,7 +47,8 @@ struct SyncConfigApplyResult {
 	const SyncConfigReview &review,
 	const std::optional<QString> &chosenRemoteKey,
 	const AccountTransferReview *replacement = nullptr,
-	SyncLocalStore *lockedStore = nullptr);
+	SyncLocalStore *lockedStore = nullptr,
+	SyncConfigChoiceMode mode = SyncConfigChoiceMode::Version);
 
 [[nodiscard]] SyncConfigApplyResult ApplySyncFirstUseJoin(
 	Main::Account &account,

@@ -419,6 +419,30 @@ bool SyncMagicPaused(not_null<Main::Session*> session) {
 	return chat && chat->last().kind == SyncMagicResult::Kind::Problem;
 }
 
+bool SyncMagicSettingsUnlinked(not_null<Main::Session*> session) {
+	const auto chat = SyncMagicChatOf(session);
+	if (!chat) {
+		return false;
+	}
+	const auto bound = SyncMagicBound(session);
+	const auto &binding = chat->binding();
+	if (!binding || binding->mode != SyncChatBindingMode::Magic || !binding->chat
+		|| binding->problem != SyncChatProblem::None
+		|| (bound ? binding->chat != bound : binding->verifiedAt <= 0)) {
+		return false;
+	}
+	const auto target = AccountSyncInspectionTarget(session);
+	if (!target || !AccountSyncBindingToken(session->account()).isEmpty()) {
+		return false;
+	}
+	const auto snapshot = ReadSyncRecoveryStore(
+		target->files,
+		SessionAccountKey(session));
+	return snapshot.status == SyncStoreStatus::Ready
+		&& !snapshot.store.statePresent
+		&& !snapshot.store.pendingPresent;
+}
+
 void SyncMagicJoin(not_null<Main::Session*> session, Fn<void(bool)> done) {
 	auto &holder = For(session);
 	const auto chat = holder.current() ? holder.chat() : nullptr;

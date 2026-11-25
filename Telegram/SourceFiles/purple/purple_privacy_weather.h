@@ -1,15 +1,19 @@
 #pragma once
 
 #include <QtCore/QByteArray>
+#include <QtCore/QDateTime>
+#include <QtCore/QTimeZone>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QString>
+#include <QtCore/QStringList>
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
 
 #include <cmath>
 #include <optional>
+#include <vector>
 
 namespace Purple::PrivacyWeather {
 
@@ -25,11 +29,32 @@ struct GeoPoint {
 	QString displayName;
 };
 
+struct HourlyWeather {
+	QDateTime time;
+	std::optional<int> temperatureC;
+	std::optional<int> precipitation;
+	QString condition;
+	int code = -1;
+};
+
+struct DailyWeather {
+	QDate date;
+	std::optional<int> lowC;
+	std::optional<int> highC;
+	QString condition;
+	int code = -1;
+};
+
 struct WeatherSnapshot {
 	QString location;
 	int temperatureC = 0;
 	QString condition;
 	bool valid = false;
+	std::optional<bool> isDay;
+	QTimeZone zone;
+	std::vector<HourlyWeather> hours;
+	std::vector<DailyWeather> days;
+	int code = -1;
 };
 
 [[nodiscard]] inline QString SanitizeLocation(const QString &raw) {
@@ -40,7 +65,7 @@ struct WeatherSnapshot {
 	return out;
 }
 
-[[nodiscard]] inline std::optional<QUrl> BuildGeocodeUrl(const QString &rawLocation) {
+[[nodiscard]] inline std::optional<QUrl> BuildGeocodeUrl(const QString &rawLocation, int count = 1) {
 	const auto location = SanitizeLocation(rawLocation);
 	if (location.isEmpty()) {
 		return std::nullopt;
@@ -48,7 +73,7 @@ struct WeatherSnapshot {
 	auto url = QUrl(QStringLiteral("https://geocoding-api.open-meteo.com/v1/search"));
 	auto query = QUrlQuery();
 	query.addQueryItem(QStringLiteral("name"), location);
-	query.addQueryItem(QStringLiteral("count"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("count"), QString::number(count));
 	query.addQueryItem(QStringLiteral("language"), QStringLiteral("en"));
 	query.addQueryItem(QStringLiteral("format"), QStringLiteral("json"));
 	url.setQuery(query);
@@ -58,9 +83,15 @@ struct WeatherSnapshot {
 [[nodiscard]] inline QUrl BuildForecastUrl(double latitude, double longitude) {
 	auto url = QUrl(QStringLiteral("https://api.open-meteo.com/v1/forecast"));
 	auto query = QUrlQuery();
-	query.addQueryItem(QStringLiteral("latitude"), QString::number(latitude, 'f', 4));
-	query.addQueryItem(QStringLiteral("longitude"), QString::number(longitude, 'f', 4));
-	query.addQueryItem(QStringLiteral("current"), QStringLiteral("temperature_2m,weather_code"));
+	query.addQueryItem(QStringLiteral("latitude"), QString::number(latitude, 'f', 1));
+	query.addQueryItem(QStringLiteral("longitude"), QString::number(longitude, 'f', 1));
+	query.addQueryItem(QStringLiteral("current"), QStringLiteral("temperature_2m,weather_code,is_day"));
+	query.addQueryItem(QStringLiteral("hourly"),
+		QStringLiteral("temperature_2m,weather_code,precipitation_probability"));
+	query.addQueryItem(QStringLiteral("daily"),
+		QStringLiteral("weather_code,temperature_2m_min,temperature_2m_max"));
+	query.addQueryItem(QStringLiteral("forecast_days"), QStringLiteral("4"));
+	query.addQueryItem(QStringLiteral("timeformat"), QStringLiteral("unixtime"));
 	query.addQueryItem(QStringLiteral("timezone"), QStringLiteral("auto"));
 	url.setQuery(query);
 	return url;
@@ -100,34 +131,65 @@ struct WeatherSnapshot {
 	}
 }
 
+[[nodiscard]] inline std::optional<GeoPoint> RoundedCell(
+		double latitude,
+		double longitude) {
+	if (!std::isfinite(latitude) || !std::isfinite(longitude)
+		|| std::abs(latitude) > 90. || std::abs(longitude) > 180.) {
+		return std::nullopt;
+	}
+	return GeoPoint{
+		.latitude = std::round(latitude * 10.) / 10.,
+		.longitude = std::round(longitude * 10.) / 10.,
+		.displayName = {},
+	};
+}
+
+[[nodiscard]] inline std::vector<GeoPoint> ParsePlaces(const QByteArray &jsonBytes) {
+	const auto items = QJsonDocument::fromJson(jsonBytes).object(
+	).value(QStringLiteral("results")).toArray();
+	auto result = std::vector<GeoPoint>();
+	for (const auto &item : items) {
+		const auto fields = item.toObject();
+		auto point = RoundedCell(
+			fields.value(QStringLiteral("latitude")).toDouble(999.),
+			fields.value(QStringLiteral("longitude")).toDouble(999.));
+		if (!point) {
+			continue;
+		}
+		auto parts = QStringList();
+		for (const auto key : { "name", "admin1", "country" }) {
+			const auto value = fields.value(QString::fromLatin1(key)).toString().simplified();
+			if (!value.isEmpty() && !parts.contains(value)) {
+				parts.push_back(value);
+			}
+		}
+		point->displayName = parts.join(QStringLiteral(", "));
+		result.push_back(std::move(*point));
+	}
+	return result;
+}
+
 [[nodiscard]] inline std::optional<GeoPoint> ParseGeocodeResponse(
 		const QByteArray &jsonBytes,
 		const QString &fallbackName) {
-	auto err = QJsonParseError();
-	const auto doc = QJsonDocument::fromJson(jsonBytes, &err);
-	if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+	auto places = ParsePlaces(jsonBytes);
+	if (places.empty()) {
 		return std::nullopt;
 	}
-	const auto results = doc.object().value(QStringLiteral("results")).toArray();
-	if (results.isEmpty() || !results.first().isObject()) {
-		return std::nullopt;
-	}
-	const auto first = results.first().toObject();
-	if (!first.contains(QStringLiteral("latitude"))
-		|| !first.contains(QStringLiteral("longitude"))) {
-		return std::nullopt;
-	}
-	const auto lat = first.value(QStringLiteral("latitude")).toDouble(999.0);
-	const auto lon = first.value(QStringLiteral("longitude")).toDouble(999.0);
-	if (lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0) {
-		return std::nullopt;
-	}
-	const auto name = first.value(QStringLiteral("name")).toString().trimmed();
-	return GeoPoint{
-		.latitude = lat,
-		.longitude = lon,
-		.displayName = name.isEmpty() ? SanitizeLocation(fallbackName) : name,
-	};
+	auto &point = places.front();
+	const auto name = QJsonDocument::fromJson(jsonBytes).object()
+		.value(QStringLiteral("results")).toArray().first().toObject()
+		.value(QStringLiteral("name")).toString().trimmed();
+	point.displayName = name.isEmpty() ? SanitizeLocation(fallbackName) : name;
+	return std::move(point);
+}
+
+[[nodiscard]] inline std::optional<int> Temperature(const QJsonValue &value) {
+	const auto temp = value.toDouble(999.);
+	return (std::isfinite(temp) && std::abs(temp) <= 100.)
+		? std::optional<int>(int(std::lround(temp)))
+		: std::nullopt;
 }
 
 [[nodiscard]] inline std::optional<WeatherSnapshot> ParseForecastResponse(
@@ -138,73 +200,92 @@ struct WeatherSnapshot {
 	if (err.error != QJsonParseError::NoError || !doc.isObject()) {
 		return std::nullopt;
 	}
-	const auto current = doc.object().value(QStringLiteral("current")).toObject();
-	if (!current.contains(QStringLiteral("temperature_2m"))) {
+	const auto root = doc.object();
+	const auto current = root.value(QStringLiteral("current")).toObject();
+	const auto temp = Temperature(current.value(QStringLiteral("temperature_2m")));
+	if (!temp) {
 		return std::nullopt;
 	}
-	const auto temp = current.value(QStringLiteral("temperature_2m")).toDouble(9999.0);
-	if (temp < -100.0 || temp > 100.0) {
-		return std::nullopt;
-	}
+	const auto day = current.value(QStringLiteral("is_day")).toInt(-1);
 	const auto code = current.value(QStringLiteral("weather_code")).toInt(-1);
-	return WeatherSnapshot{
+	auto result = WeatherSnapshot{
 		.location = SanitizeLocation(locationName),
-		.temperatureC = int(std::lround(temp)),
+		.temperatureC = *temp,
 		.condition = DescribeWmoCode(code),
 		.valid = true,
+		.isDay = (day >= 0) ? std::optional<bool>(day != 0) : std::nullopt,
+		.zone = QTimeZone(root.value(QStringLiteral("timezone")).toString().toUtf8()),
+		.hours = {},
+		.days = {},
+		.code = code,
 	};
-}
+	if (!result.zone.isValid()) {
+		return result;
+	}
 
-[[nodiscard]] inline bool ShouldFetchWeather(
-		const QString &configuredLocation,
-		const QString &fetchedLocation,
-		bool hasSnapshot,
-		bool lastFailed,
-		bool inFlight,
-		const QString &inFlightLocation,
-		qint64 lastAttemptMs,
-		qint64 nowMs,
-		bool appProxyEnabled) {
-	if (appProxyEnabled) {
-		return false;
-	}
-	const auto loc = SanitizeLocation(configuredLocation);
-	if (loc.isEmpty()) {
-		return false;
-	}
-	if (inFlight && inFlightLocation == loc) {
-		return false;
-	}
-	if (loc == fetchedLocation) {
-		const auto elapsed = (nowMs >= lastAttemptMs) ? (nowMs - lastAttemptMs) : qint64(0);
-		if (hasSnapshot && elapsed < kRefreshIntervalMs) {
-			return false;
-		}
-		if (lastFailed && elapsed < kFailureBackoffMs) {
-			return false;
+	const auto hours = root.value(QStringLiteral("hourly")).toObject();
+	const auto hourTimes = hours.value(QStringLiteral("time")).toArray();
+	const auto hourTemps = hours.value(QStringLiteral("temperature_2m")).toArray();
+	const auto hourCodes = hours.value(QStringLiteral("weather_code")).toArray();
+	const auto hourRain = hours.value(QStringLiteral("precipitation_probability")).toArray();
+	if (hourTimes.size() == hourTemps.size() && hourTimes.size() == hourCodes.size()
+		&& hourTimes.size() == hourRain.size()) {
+		for (auto i = qsizetype(0); i < hourTimes.size(); ++i) {
+			const auto seconds = hourTimes[i].toInteger();
+			const auto temperature = Temperature(hourTemps[i]);
+			const auto rain = hourRain[i].toInt(-1);
+			const auto code = hourCodes[i].toInt(-1);
+			if (seconds > 0) {
+				result.hours.push_back({
+					QDateTime::fromSecsSinceEpoch(seconds, result.zone),
+					temperature,
+					(rain >= 0 && rain <= 100) ? std::make_optional(rain) : std::nullopt,
+					DescribeWmoCode(code),
+					code,
+				});
+			}
 		}
 	}
-	return true;
+
+	const auto apiOffset = root.value(QStringLiteral("utc_offset_seconds")).toInt(25 * 3600);
+	const auto dailyZone = std::abs(apiOffset) <= 24 * 3600
+		? QTimeZone::fromSecondsAheadOfUtc(apiOffset)
+		: result.zone;
+	const auto days = root.value(QStringLiteral("daily")).toObject();
+	const auto dayTimes = days.value(QStringLiteral("time")).toArray();
+	const auto lows = days.value(QStringLiteral("temperature_2m_min")).toArray();
+	const auto highs = days.value(QStringLiteral("temperature_2m_max")).toArray();
+	const auto dayCodes = days.value(QStringLiteral("weather_code")).toArray();
+	if (dayTimes.size() == lows.size() && dayTimes.size() == highs.size()
+		&& dayTimes.size() == dayCodes.size()) {
+		for (auto i = qsizetype(0); i < dayTimes.size(); ++i) {
+			const auto seconds = dayTimes[i].toInteger();
+			const auto low = Temperature(lows[i]);
+			const auto high = Temperature(highs[i]);
+			const auto code = dayCodes[i].toInt(-1);
+			if (seconds > 0 && (!low || !high || *low <= *high)) {
+				result.days.push_back({
+					QDateTime::fromSecsSinceEpoch(seconds, dailyZone).date(),
+					low,
+					high,
+					DescribeWmoCode(code),
+					code,
+				});
+			}
+		}
+	}
+	return result;
 }
 
-[[nodiscard]] inline QString FormatWeatherLine(
-		const QString &configuredLocation,
-		const std::optional<WeatherSnapshot> &snapshot,
-		bool failed) {
-	if (SanitizeLocation(configuredLocation).isEmpty()) {
-		return QString();
-	}
-	if (snapshot && snapshot->valid) {
-		return snapshot->location
-			+ QStringLiteral("  ·  ")
-			+ QString::number(snapshot->temperatureC)
-			+ QStringLiteral("°C  ·  ")
-			+ snapshot->condition;
-	}
-	if (failed) {
-		return QStringLiteral("Weather unavailable");
-	}
-	return QString();
+[[nodiscard]] inline bool CanFetchForecast(
+		bool coverVisible,
+		bool allowed,
+		bool enabled,
+		bool requestActive,
+		qint64 nextAttempt,
+		qint64 now) {
+	return coverVisible && allowed && enabled && !requestActive
+		&& now >= nextAttempt;
 }
 
 } // namespace Purple::PrivacyWeather

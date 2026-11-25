@@ -5,10 +5,13 @@
 #include "purple/purple_settings_review_display.h"
 
 #include <QtCore/QDir>
+#include <QtCore/QSet>
+#include <QtGui/QKeyEvent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QListWidget>
 #include <QtWidgets/QScrollArea>
+#include <QtWidgets/QScrollBar>
 #include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QTextEdit>
 #include <QtWidgets/QVBoxLayout>
@@ -446,8 +449,13 @@ void ReviewRender(const QDir &output, bool conflict, bool dark, int width) {
 }
 
 void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
-		const QString &heading, std::initializer_list<const char*> actions) {
+		const QString &heading, std::initializer_list<const char*> actions, bool large = false) {
 	auto host = QWidget();
+	if (large) {
+		auto font = host.font();
+		font.setPointSize(19);
+		host.setFont(font);
+	}
 	host.setAutoFillBackground(true);
 	auto palette = host.palette();
 	palette.setColor(QPalette::Window, QColor(0xeaeaea));
@@ -457,6 +465,7 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 	auto stack = new QStackedWidget(&host);
 	auto scroll = new QScrollArea(stack);
 	scroll->setFrameShape(QFrame::NoFrame);
+	scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	scroll->setWidgetResizable(true);
 	scroll->setViewport(new Canvas(scroll));
 	auto page = new Canvas(scroll);
@@ -465,15 +474,26 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 	outer->addWidget(stack);
 	auto layout = new QVBoxLayout(page);
 	Frame(page, layout, heading);
+	auto memberLists = std::vector<QListWidget*>();
 	if (kind == QStringLiteral("collection")) {
 		auto search = new QLineEdit(page);
 		search->setPlaceholderText(QStringLiteral("Filter available chats"));
 		layout->addWidget(search);
-		auto lists = new QHBoxLayout();
-		for (const auto name : { "Selected chat", "Available chat" }) {
+		auto lists = new QBoxLayout(CollectionListDirection(
+			width - 2 * layout->contentsMargins().left(), page->fontMetrics()));
+		for (const auto name : { "Members", "Available chats" }) {
+			auto column = new QVBoxLayout();
+			column->addWidget(new QLabel(QString::fromLatin1(name), page));
 			auto list = new QListWidget(page);
-			list->addItem(QString::fromLatin1(name));
-			lists->addWidget(list);
+			ConfigureCollectionList(list);
+			list->setLayoutDirection(Qt::RightToLeft);
+			list->addItem(QStringLiteral("نام طولانی برای بررسی نمایش کامل این گفتگو در پنجرهٔ باریک"));
+			for (auto i = 1; i != 12; ++i) {
+				list->addItem(QStringLiteral("گفتگوی نمونه %1").arg(i));
+			}
+			column->addWidget(list);
+			lists->addLayout(column);
+			memberLists.push_back(list);
 		}
 		layout->addLayout(lists, 1);
 	} else if (kind == QStringLiteral("budget")) {
@@ -505,10 +525,28 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 		layout->addStretch();
 	}
 	auto firstAction = static_cast<QPushButton*>(nullptr);
-	for (const auto action : actions) {
-		const auto button = new Action(QString::fromLatin1(action), page);
-		AppendAction(layout, button);
-		if (!firstAction) firstAction = button;
+	auto memberActions = std::vector<QPushButton*>();
+	if (kind == QStringLiteral("collection")) {
+		const auto addGroup = [&](std::initializer_list<std::pair<const char*, const char*>> entries) {
+			const auto group = new Actions(page);
+			layout->addWidget(group);
+			for (const auto &[label, key] : entries) {
+				const auto button = new Action(QString::fromLatin1(label), group, QString::fromLatin1(key));
+				group->append(button);
+				memberActions.push_back(button);
+			}
+		};
+		addGroup({ { "Add", "a" }, { "Enter ID", "i" }, { "Edit", "Enter" }, { "Delete", "x" } });
+		addGroup({ { "Move up", "Shift+K" }, { "Move down", "Shift+J" },
+			{ "Undo", "u" }, { "Reset members", "r" } });
+		addGroup({ { "Stage collection", "C-Enter" }, { "Back", "Esc" } });
+		firstAction = memberActions.front();
+	} else {
+		for (const auto action : actions) {
+			const auto button = new Action(QString::fromLatin1(action), page);
+			AppendAction(layout, button);
+			if (!firstAction) firstAction = button;
+		}
 	}
 	if (kind == QStringLiteral("rename")) layout->addStretch();
 	Theme(&host, !dark);
@@ -517,9 +555,49 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 	host.show();
 	QApplication::processEvents();
 	Theme(stack, dark);
-	if (firstAction) firstAction->setFocus();
+	if (firstAction && !large) firstAction->setFocus();
 	Render(host, output, QStringLiteral("%1-%2-%3.png").arg(kind,
 		dark ? QStringLiteral("dark") : QStringLiteral("light")).arg(width), QSize(width, 460));
+	if (!memberActions.empty()) {
+		Check(scroll->horizontalScrollBar()->maximum() == 0, "Members fits the viewport width");
+		for (const auto list : memberLists) {
+			Check(list->horizontalScrollBar()->maximum() == 0, "long RTL list fits without horizontal scrolling");
+			Check(list->item(0)->text().endsWith(QStringLiteral("باریک")), "full RTL name remains in the item model");
+		}
+		for (const auto button : memberActions) {
+			Check(button->width() >= button->sizeHint().width(), "Members fits each label and keycap");
+		}
+		if (large || width == 900) {
+			const auto first = memberLists.front()->mapTo(page, QPoint());
+			const auto second = memberLists.back()->mapTo(page, QPoint());
+			Check(large ? (first.x() == second.x() && first.y() < second.y())
+				: (first.x() < second.x() && first.y() == second.y()), "Members stacks only at the narrow width");
+		}
+		if (large) {
+			host.show();
+			memberLists.front()->setFocus();
+			QApplication::processEvents();
+			Check(host.focusWidget() == memberLists.front(), "Members list starts focused");
+			auto reached = QSet<QWidget*>();
+			for (auto i = 0; i != 32; ++i) {
+				const auto focus = host.focusWidget();
+				if (!focus) break;
+				if (std::find(memberActions.begin(), memberActions.end(), focus) != memberActions.end()) {
+					const auto visible = QRect(focus->mapTo(scroll->viewport(), QPoint()), focus->size());
+					Check(scroll->viewport()->rect().contains(visible), "Tab reveals each focused action");
+					reached.insert(focus);
+				}
+				auto tab = QKeyEvent(QEvent::KeyPress, Qt::Key_Tab, Qt::NoModifier);
+				QApplication::sendEvent(focus, &tab);
+				QApplication::processEvents();
+			}
+			if (reached.size() != qsizetype(memberActions.size())) {
+				std::cerr << "Reached " << reached.size() << " Members actions\n";
+			}
+			Check(reached.size() == qsizetype(memberActions.size()), "Tab reaches every Members action");
+			host.hide();
+		}
+	}
 }
 
 } // namespace
@@ -542,8 +620,7 @@ int main(int argc, char **argv) {
 			ReviewRender(output, false, dark, width);
 			ReviewRender(output, true, dark, width);
 			SheetRender(output, dark, width, QStringLiteral("collection"), QStringLiteral("Members"),
-				{ "Add", "Enter ID", "Edit", "Delete", "Move up", "Move down", "Undo",
-					"Reset members", "Stage collection", "Back" });
+				{});
 			SheetRender(output, dark, width, QStringLiteral("rename"), QStringLiteral("Rename collection"),
 				{ "Cancel", "Keep change" });
 			SheetRender(output, dark, width, QStringLiteral("confirm"), QStringLiteral("Confirm settings change"),
@@ -563,5 +640,9 @@ int main(int argc, char **argv) {
 		}
 	}
 	TreeRender(output, true, 640, true);
+	for (const auto dark : { false, true }) {
+		SheetRender(output, dark, 400, QStringLiteral("collection"), QStringLiteral("Members"), {}, true);
+		SheetRender(output, dark, 900, QStringLiteral("collection"), QStringLiteral("Members"), {});
+	}
 	std::cout << Checks << " checks, 0 failures\n";
 }

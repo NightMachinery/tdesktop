@@ -42,7 +42,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_schedule_box.h"
 #include "purple/purple_screentime_box.h"
 #include "purple/purple_sync.h"
+#include "purple/purple_sync_account_binding.h"
 #include "purple/purple_sync_auto_service.h"
+#include "purple/purple_sync_magic_service.h"
 #include "purple/purple_sync_setup_box.h"
 #include "purple/purple_version.h"
 #include "settings/settings_builder.h"
@@ -779,6 +781,25 @@ void BuildPurpleAccountsSettings(SectionBuilder &builder) {
 			if (const auto own = current()) { own->show(Box(Purple::SyncSetupBox)); }
 		},
 		.keywords = { u"purple"_q, u"sync"_q, u"saved"_q, u"devices"_q },
+	});
+	builder.addButton({
+		.id = u"advanced/purple_sync_join"_q,
+		.title = rpl::single(u"Not linked to sync"_q),
+		.label = rpl::single(u"Join"_q),
+		.onClick = [=] {
+			if (const auto own = current(); own && SyncMagicSettingsUnlinked(&own->session())) {
+				own->show(Box(SyncSetupBoxForAccount, &own->session()));
+			}
+		},
+		.keywords = { u"sync"_q, u"join"_q, u"link"_q },
+		.shown = rpl::merge(
+			AccountRowChanges(),
+			AutomaticSettingsSyncChanges(),
+			AccountSyncBindingChanges()
+		) | rpl::map([=] {
+			const auto session = live.get();
+			return session && SyncMagicSettingsUnlinked(session);
+		}) | rpl::distinct_until_changed(),
 	});
 	BuildAccountSettingsRow(builder, u"advanced/purple_send_after_save"_q,
 		tr::lng_purple_settings_send_after_save(), AccountSettingsRow::SendAfterSave);

@@ -5,6 +5,16 @@ namespace Window { class SectionWidget; class SessionController; }
 
 namespace Purple {
 
+enum class TrackListAction;
+enum class MusicTrackAction {
+	Forward,
+	GoTo,
+	AddToPlaylist,
+	Queue,
+	CopyMessageLink,
+	Menu,
+};
+
 void AddMusicMenuRow(
 	not_null<Ui::VerticalLayout*> menu,
 	not_null<Window::SessionController*> controller);
@@ -21,7 +31,18 @@ void FocusMusicSearch(
 	not_null<Window::SessionController*> controller,
 	QWidget *focus,
 	bool search);
+void NavigateMusic(
+	not_null<Window::SessionController*> controller,
+	QWidget *focus,
+	TrackListAction action,
+	int repeat);
+void ActOnMusic(
+	not_null<Window::SessionController*> controller,
+	QWidget *focus,
+	MusicTrackAction action);
 [[nodiscard]] bool MusicHidesChats(const Window::SectionWidget *section);
+[[nodiscard]] bool MusicHidesInfo(const Window::SectionWidget *section);
+[[nodiscard]] bool MusicOwnsSongTransport(const Window::SectionWidget *section);
 void UpdateMusicSidebar(QWidget *widget, bool suppress, bool restore);
 [[nodiscard]] bool MusicHideChatsCurrent();
 [[nodiscard]] rpl::producer<bool> MusicHideChatsValue();

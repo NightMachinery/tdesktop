@@ -6,9 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/system_media_controls_manager.h"
-
-#include "purple/purple_privacy_screen.h"
 #include "purple/hooks/media_recording.h"
+#include "purple/purple_privacy_screen.h"
 
 #include "base/platform/base_platform_system_media_controls.h"
 #include "core/application.h"

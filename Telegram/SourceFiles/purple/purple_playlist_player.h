@@ -7,10 +7,13 @@
 
 #include <cstddef>
 #include <optional>
+#include <vector>
 
 namespace Main { class Session; }
 
 namespace Purple {
+
+struct PlaylistMessage;
 
 enum class PlaylistPlaybackPhase {
 	Inactive,
@@ -65,6 +68,9 @@ void CancelPlaylistStartsForSleepTimer();
 	bool restart);
 void InvalidatePlaylistPlayback();
 void FinishPlaylistPlayback();
+[[nodiscard]] bool AppendAccountMusicQueue(
+	not_null<Main::Session*> session,
+	const std::vector<PlaylistMessage> &messages);
 
 [[nodiscard]] rpl::producer<PlaylistPlaybackStatus> AccountPlaylistPlaybackValue(
 	not_null<Main::Session*> session);

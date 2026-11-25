@@ -565,6 +565,7 @@ void SearchController::requestMore(
 				parsed.fullCount);
 			finish();
 		}).fail([=] {
+			listData->requests.remove(key);
 			finish();
 		}).send();
 	});
@@ -599,6 +600,7 @@ void DelayedSearchController::setQuery(
 }
 
 void DelayedSearchController::setQueryFast(const Query &query) {
+	_timer.cancel();
 	_controller.setQuery(query);
 	_currentQueryChanges.fire_copy(query.query);
 }

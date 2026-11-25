@@ -1,7 +1,14 @@
 {
-  "about": "Canonical Purple Desktop host gates, run by purple/run_host_gates.py. A patch that adds, renames or removes a gate, a variant, a compiled purple/test_*.cpp fixture or a program under Telegram/SourceFiles/purple/tests updates this list in the same commit. K3 removes dormant search/mark/setup/carry suites and retains active typed record, ordinary upload, account-fence and Magic first-use coverage. Placeholders: {build} is --build-dir, {out} is this configuration's output directory, {out:NAME} is the output directory of configuration NAME, which then runs first. \"variants\" maps the flags of a driver with several configurations to the fixture each selects; \"\" is its default. Media integration retains the K3 roster and adds every active media and recording configuration from the frozen reviewed feature tip.",
+  "about": "Canonical Purple Desktop host gates, run by purple/run_host_gates.py. A patch that adds, renames or removes a gate, a variant, a compiled purple/test_*.cpp fixture or a program under Telegram/SourceFiles/purple/tests updates this list in the same commit. K3 removes dormant search/mark/setup/carry suites and retains active typed record, ordinary upload, account-fence and Magic first-use coverage. Placeholders: {build} is --build-dir, {qt} is the resolved Qt prefix, {out} is this configuration's output directory, and {out:NAME} is the output directory of configuration NAME, which then runs first. \"variants\" maps the flags of a driver with several configurations to the fixtures each selects; \"\" is its default. Media integration retains the K3 roster and adds every active media and recording configuration from the frozen reviewed feature tip.",
   "undriven": {},
   "variants": {
+    "purple/test_privacy_screen.sh": {
+      "": "purple/test_privacy_screen.cpp",
+      "--render": "purple/test_privacy_canvas.cpp"
+    },
+    "purple/test_settings_navigation.py": {
+      "--build": "purple/test_settings_navigation_render.cpp"
+    },
     "purple/test_archive.py": {
       "": "purple/test_archive.cpp",
       "--lifecycle": "purple/test_archive_lifecycle.cpp",
@@ -15,11 +22,20 @@
       "--music-index": "purple/test_music_index.cpp"
     },
     "purple/test_cases.py": {
+      "chat-palette": "Telegram/SourceFiles/purple/tests/chat_palette_cases.cpp",
+      "sync-merge": "Telegram/SourceFiles/purple/tests/sync_merge_cases.cpp",
       "copy-article": "Telegram/SourceFiles/purple/tests/copy_article_cases.cpp",
       "peek-file": "Telegram/SourceFiles/purple/tests/peek_file_cases.cpp",
       "peek-admission": "Telegram/SourceFiles/purple/tests/peek_admission_cases.cpp",
       "account-routing-file": "Telegram/SourceFiles/purple/tests/account_routing_file_cases.cpp",
       "settings-editor": "Telegram/SourceFiles/purple/tests/settings_editor_cases.cpp",
+      "settings-tree": [
+        "Telegram/SourceFiles/purple/tests/settings_tree_cases.cpp",
+        "Telegram/SourceFiles/purple/tests/settings_color_sheet_fixture.cpp"
+      ],
+      "settings-drafts": "Telegram/SourceFiles/purple/tests/settings_draft_cases.cpp",
+      "settings-structures": "Telegram/SourceFiles/purple/tests/settings_structure_cases.cpp",
+      "customize-keymap": "Telegram/SourceFiles/purple/tests/customize_keymap_cases.cpp",
       "sync-diag": "Telegram/SourceFiles/purple/tests/sync_diag_cases.cpp",
       "sync-magic-chat": "Telegram/SourceFiles/purple/tests/sync_magic_chat_cases.cpp",
       "storage-passcode": "Telegram/SourceFiles/purple/tests/storage_passcode_cases.cpp",
@@ -39,6 +55,7 @@
       "sync-auto-service": "Telegram/SourceFiles/purple/tests/sync_auto_service_cases.cpp",
       "music-listening": "Telegram/SourceFiles/purple/tests/music_listening_cases.cpp",
       "music-diagnostics": "Telegram/SourceFiles/purple/tests/music_diagnostics_cases.cpp",
+      "music-progress": "Telegram/SourceFiles/purple/tests/music_progress_cases.cpp",
       "translation-exclusion": "Telegram/SourceFiles/purple/tests/translation_exclusion_cases.cpp",
       "playlists-store": "Telegram/SourceFiles/purple/tests/playlists_store_cases.cpp",
       "playlists-service": "Telegram/SourceFiles/purple/tests/playlists_service_cases.cpp",
@@ -51,6 +68,27 @@
     }
   },
   "gates": [
+    {
+      "name": "test_privacy_canvas",
+      "driver": "purple/test_privacy_screen.sh",
+      "compiles": true,
+      "args": ["--render", "{out}"],
+      "fixtures": ["purple/test_privacy_canvas.cpp"]
+    },
+    {
+      "name": "test_chat_palette",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": ["--case", "chat-palette", "--build-dir", "{build}", "--output-dir", "{out}"],
+      "fixtures": ["Telegram/SourceFiles/purple/tests/chat_palette_cases.cpp"]
+    },
+    {
+      "name": "test_sync_merge",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": ["--case", "sync-merge", "--build-dir", "{build}", "--output-dir", "{out}"],
+      "fixtures": ["Telegram/SourceFiles/purple/tests/sync_merge_cases.cpp"]
+    },
     {
       "name": "test_modal_keys_routes",
       "driver": "purple/test_modal_keys_routes.py",
@@ -358,7 +396,7 @@
     {
       "name": "music-index",
       "driver": "purple/test_archive.py",
-      "coverage": "Physical SQLite music pagination, alias visibility, durable cursor and scope transitions, revocation rollback",
+      "coverage": "Physical SQLite music pagination, alias visibility, restart of head and history scans, scope transitions and revocation rollback",
       "compiles": true,
       "args": [
         "--build-dir",
@@ -462,6 +500,75 @@
       ],
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/settings_editor_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-settings-tree",
+      "driver": "purple/test_cases.py",
+      "coverage": "Customize tree, scalar editors, and color sheet syntax",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "settings-tree"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/settings_tree_cases.cpp",
+        "Telegram/SourceFiles/purple/tests/settings_color_sheet_fixture.cpp"
+      ]
+    },
+    {
+      "name": "cases-settings-drafts",
+      "driver": "purple/test_cases.py",
+      "coverage": "Customize draft undo, stale source handling, and recovery",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "settings-drafts"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/settings_draft_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-settings-structures",
+      "driver": "purple/test_cases.py",
+      "coverage": "Typed collections, reference impact, and review effects",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "settings-structures"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/settings_structure_cases.cpp"
+      ]
+    },
+    {
+      "name": "cases-customize-keymap",
+      "driver": "purple/test_cases.py",
+      "coverage": "Customize command routing and effective bindings",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "customize-keymap"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/customize_keymap_cases.cpp"
       ]
     },
     {
@@ -606,6 +713,141 @@
       ],
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/webp_paste_flow_cases.cpp"
+      ]
+    },
+    {
+      "name": "test_settings_navigation_routes",
+      "driver": "purple/test_settings_navigation.py",
+      "coverage": "Purple settings navigation, indexed search, and archive cleanup routes"
+    },
+    {
+      "name": "test_settings_navigation_render",
+      "driver": "purple/test_settings_navigation.py",
+      "coverage": "Offscreen native settings navigation at two scales and both layout directions",
+      "compiles": true,
+      "args": [
+        "--build",
+        "{build}",
+        "--qt",
+        "{qt}",
+        "--out",
+        "{out}"
+      ],
+      "fixtures": [
+        "purple/test_settings_navigation_render.cpp"
+      ]
+    },
+    {
+      "name": "test_customize_render",
+      "driver": "purple/test_customize_render.sh",
+      "coverage": "Offscreen Customize sheet layout and theme coverage",
+      "compiles": true,
+      "args": [
+        "{out}"
+      ],
+      "fixtures": [
+        "purple/test_customize_render.cpp"
+      ]
+    },
+    {
+      "name": "test_key_repeat",
+      "driver": "purple/test_key_repeat.sh",
+      "coverage": "Held key classification and repeat state",
+      "compiles": true,
+      "fixtures": [
+        "purple/test_key_repeat.cpp"
+      ]
+    },
+    {
+      "name": "test_key_scroll",
+      "driver": "purple/test_key_scroll.sh",
+      "coverage": "Clock-driven held scrolling, reversal, and settled state",
+      "compiles": true,
+      "fixtures": [
+        "purple/test_key_scroll.cpp"
+      ]
+    },
+    {
+      "name": "test_modal_keys_colors",
+      "driver": "purple/test_modal_keys_colors.sh",
+      "coverage": "Modal surface text contrast against theme colors",
+      "compiles": true,
+      "fixtures": [
+        "purple/test_modal_keys_colors.cpp"
+      ]
+    },
+    {
+      "name": "test_modal_keys_mx",
+      "driver": "purple/test_modal_keys_mx.sh",
+      "coverage": "Command search ranking, history, and modal-off shortcut routing",
+      "compiles": true,
+      "fixtures": [
+        "purple/test_modal_keys_mx.cpp"
+      ]
+    },
+    {
+      "name": "test_modal_keys_unread",
+      "driver": "purple/test_modal_keys_unread.sh",
+      "coverage": "Unread chat selection, forum paging, and reversible list filters",
+      "compiles": true,
+      "fixtures": [
+        "purple/test_modal_keys_unread.cpp",
+        "purple/test_list_filter_keys.cpp"
+      ]
+    },
+    {
+      "name": "test_modal_keys_zen",
+      "driver": "purple/test_modal_keys_zen.sh",
+      "coverage": "Zen window state, layout, and restoration",
+      "compiles": true,
+      "fixtures": [
+        "purple/test_modal_keys_zen.cpp"
+      ]
+    },
+    {
+      "name": "test_modal_notices",
+      "driver": "purple/test_modal_notices.sh",
+      "coverage": "Notice routing, selection, diagnostics, and protection guards",
+      "compiles": true,
+      "fixtures": [
+        "purple/test_modal_notices.cpp"
+      ]
+    },
+    {
+      "name": "test_privacy_screen",
+      "driver": "purple/test_privacy_screen.sh",
+      "coverage": "Privacy cover state and passcode handoff",
+      "compiles": true,
+      "fixtures": [
+        "purple/test_privacy_screen.cpp"
+      ]
+    },
+    {
+      "name": "test_window_hints",
+      "driver": "purple/test_window_hints.sh",
+      "coverage": "Hint labels, mnemonics, target identity, badge placement, and offscreen renders",
+      "compiles": true,
+      "args": [
+        "{out}"
+      ],
+      "fixtures": [
+        "purple/test_hint_labels.cpp",
+        "purple/test_hint_mnemonics.cpp",
+        "purple/test_message_hint_placement.cpp",
+        "purple/test_hint_item_identity.cpp",
+        "purple/test_window_hint_renders.cpp"
+      ]
+    },
+    {
+      "name": "test_status_bar",
+      "driver": "purple/test_status_bar.sh",
+      "compiles": true,
+      "coverage": "Offscreen status bar contrast, column and composer alignment, and mode geometry",
+      "args": [
+        "{out}"
+      ],
+      "fixtures": [
+        "purple/test_status_bar.cpp"
       ]
     },
     {
@@ -900,6 +1142,23 @@
       ]
     },
     {
+      "name": "cases-music-progress",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "music-progress"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/music_progress_cases.cpp"
+      ],
+      "coverage": "Native Music rail paint and click mapping at both ends in LTR and RTL."
+    },
+    {
       "name": "cases-music-diagnostics",
       "driver": "purple/test_cases.py",
       "compiles": true,
@@ -914,7 +1173,7 @@
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/music_diagnostics_cases.cpp"
       ],
-      "coverage": "Desktop Music empty-state diagnostics, roster dialog-list gating, offline, search filter and error reporting"
+      "coverage": "Desktop Music empty-state diagnostics, roster dialog-list gating, fake-clock flood waits, bounded backoff and error reporting"
     },
     {
       "name": "cases-translation-exclusion",

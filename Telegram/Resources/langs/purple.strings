@@ -763,6 +763,13 @@ docs/purple/upstream_hooks.md.
 "lng_purple_music_title" = "Music";
 "lng_purple_music_back" = "Back";
 "lng_purple_music_search" = "Search tracks";
+"lng_purple_music_tracks" = "Tracks";
+"lng_purple_music_list" = "List";
+"lng_purple_music_tiles" = "Tiles";
+"lng_purple_music_now_playing" = "Now playing";
+"lng_purple_music_playback_position" = "Playback position";
+"lng_purple_music_playing" = "Playing";
+"lng_purple_music_paused" = "Paused";
 "lng_purple_music_source" = "Music source folder";
 "lng_purple_music_refresh" = "Refresh music";
 "lng_purple_music_more" = "Load more tracks";

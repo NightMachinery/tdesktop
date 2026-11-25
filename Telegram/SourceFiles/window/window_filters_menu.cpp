@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_filters_menu.h"
 
 #include "purple/purple_folder_strip.h"
+#include "purple/purple_hint_targets.h"
 
 #include "menu/menu_mark_as_read.h"
 #include "mainwindow.h"
@@ -694,6 +695,14 @@ base::unique_qptr<Ui::SideBarButton> FiltersMenu::prepareButton(
 		}
 	});
 	if (id >= 0) {
+		Purple::RegisterFolderHintMenu(raw, [=, guard = QPointer(&_outer)] {
+			if (!guard || !_filters.contains(id)) {
+				return Purple::WindowHintTarget::Menu();
+			}
+			auto menu = base::make_unique_q<Ui::PopupMenu>(raw, st::popupMenuWithIcons);
+			fillMenu(menu.get(), id);
+			return menu;
+		});
 		raw->setAcceptDrops(true);
 		raw->events(
 		) | rpl::filter([=](not_null<QEvent*> e) {
@@ -754,11 +763,19 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 	_popupMenu = base::make_unique_q<Ui::PopupMenu>(
 		i->second.get(),
 		st::popupMenuWithIcons);
-	if (Purple::FillViewMenu(_session, id, _popupMenu.get(), &_outer)) {
-		_popupMenu->popup(position);
+	fillMenu(_popupMenu.get(), id);
+	if (_popupMenu->empty()) {
+		_popupMenu = nullptr;
 		return;
 	}
-	const auto addAction = Ui::Menu::CreateAddActionCallback(_popupMenu);
+	_popupMenu->popup(position);
+}
+
+void FiltersMenu::fillMenu(not_null<Ui::PopupMenu*> menu, FilterId id) {
+	if (Purple::FillViewMenu(_session, id, menu, &_outer)) {
+		return;
+	}
+	const auto addAction = Ui::Menu::CreateAddActionCallback(menu);
 	if (id) {
 		addAction(
 			tr::lng_filters_context_edit(tr::now),
@@ -794,11 +811,6 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 			[=] { return _session->session().data().chatsList(); },
 			addAction);
 	}
-	if (_popupMenu->empty()) {
-		_popupMenu = nullptr;
-		return;
-	}
-	_popupMenu->popup(position);
 }
 
 void FiltersMenu::applyReorder(

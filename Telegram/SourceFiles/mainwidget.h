@@ -99,6 +99,10 @@ namespace Core {
 class Changelogs;
 } // namespace Core
 
+namespace Purple {
+class ModalStatusLayout;
+} // namespace Purple
+
 extern const char kForceComposeSearchOneColumn[];
 extern const char kOptionUseNewChatView[];
 
@@ -231,6 +235,8 @@ public:
 	void toggleFiltersMenu(bool value) const;
 
 private:
+	friend class Purple::ModalStatusLayout;
+
 	void paintEvent(QPaintEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 	bool eventFilter(QObject *o, QEvent *e) override;
@@ -378,6 +384,7 @@ private:
 	std::vector<std::unique_ptr<StackItem>> _stack;
 
 	int _playerHeight = 0;
+	bool _musicHidesSongPlayer = false;
 	int _callTopBarHeight = 0;
 	int _exportTopBarHeight = 0;
 	int _contentScrollAddToY = 0;

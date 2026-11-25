@@ -8,11 +8,19 @@ regular player. **Load more tracks** reads the next catalog page.
 You can also set the source under **Settings → Purple → Music source folder**.
 In modal Normal mode, use `SPC p m` or run `open-music` in the command palette
 to toggle Music. The search field opens unfocused in Normal. Press `/` or
-`i`, or click the field, to enter Insert and search. Press `Ctrl+[` to
-return focus to Music navigation.
+`i`, or click the field, to enter Insert and search. Escape clears the filter
+and returns focus to the track cursor. In Normal, `j` and `k` move by one row,
+`Ctrl+d` and `Ctrl+u` move by half a page, and `gg` and `G` move to the first
+and last matching tracks. Press `m` to mark a track. Use `v` to start or finish
+a range and `V` to mark the visible rows. Return plays the cursor or the marked
+tracks. In the filter, Return accepts the query and focuses the results. Escape
+first cancels a range or clears marks, then returns to the prior view.
 The chat list is hidden in Music by default. **Settings → Purple → Hide chat
-list in Music** restores the split view. The toolbar opens Playlists directly.
-The overflow menu contains the source picker and refresh.
+list in Music** restores the split view. Music temporarily hides the right
+sidebar. When you leave Music, the previous sidebar returns if the window
+still has room for it. The toolbar opens Playlists directly. When space is
+tight, Playlists and its shortcut move to the menu alongside the source picker
+and refresh.
 `tdesktop-cli music` opens the same screen through Local automation.
 Opening Music again keeps your place in the results for the same source.
 
@@ -28,8 +36,11 @@ audio messages, or a search filter that hides indexed tracks. Once you focus,
 scroll, or select in the list, indexing leaves the displayed rows in place.
 Search again or use **Refresh music** to see the latest results. Refresh also
 checks for new tracks and resumes unfinished history. It keeps your picks while
-the source folder and its chats stay the same. A failed chat search leaves its
-previous results intact and reports the error and affected chat count.
+the source folder and its chats stay the same. One paced scan runs per account.
+If Telegram asks it to wait, Music displays the remaining time, then resumes
+the same page. Temporary server errors retry with increasing delays and jitter.
+A chat the server cannot search is skipped and its cached tracks stay available.
+Both the older-history cursor and the newer-track cursor survive a restart.
 
 After the first scan, Purple also indexes eligible new tracks it receives
 from the configured folder while the Music screen is closed. Opening Music
@@ -44,14 +55,37 @@ selected folder, its entries are removed. Music ignores Work Mode hiding, and
 playback rechecks the account, folder membership, and source message before
 opening a track.
 
-Double-click a track to play it. Use Command-click on macOS or Ctrl-click on
-other platforms to select tracks. Press Down from search to focus the current
-result and Escape from the results to return to search. While an input method
-is composing text, Down stays in search. In the list, the arrow keys move the
-cursor and Space toggles selection. Press Enter or use
-the playback button to play the selection. Two or more tracks create a
-playlist in Hyper, in the order you selected them. Repeating the same
-selection reuses the playlist while the saved sources still match.
+Click a track to play it, or click the checkbox to mark it. Command-click on
+macOS and Ctrl-click on other platforms also mark tracks. Playing, paused,
+and loading cues follow the player. The row tint and checkmark show marks,
+and a border shows the keyboard cursor. Hold an arrow to move repeatedly.
+While an input method is composing text, Down stays in search.
+
+Choose **List** or **Tiles**, or press `, t` to switch between them. The
+switch shows its shortcut once, beside both labels. The library and chat
+music dialog share the saved view. An accent fill shows the active view.
+In Tiles, Left and Right
+or `h` and `l` move horizontally. Both views use document thumbnails when
+available and draw a cover from the track and artist names while art loads.
+A track can show the cursor border, mark, and playback badge at the same
+time. In List, marks have a separate column and titles and artists sit
+beside the cover in the interface's direction. The text keeps its own
+reading order. Tiles keep the text direction and inset the title and cover
+inside the focused card. In the chat dialog, the grid leaves room for the
+scrollbar. Moving the cursor into a partially visible tile scrolls its caption
+into view with the cover.
+The now-playing panel shows the current song, with a seek slider and
+previous, play or pause, and next controls. It takes the place of the
+regular song toolbar while the library is open. The library shows the
+effective Normal bindings beside its controls. In a right-to-left interface,
+playback fills the rail from the right and clicking farther left seeks ahead.
+
+Marks reveal a bar with playback, queue, playlist, forwarding, and clear
+actions. Each action shows its key chord inside the button. Narrow windows
+put secondary actions in **More**. The bar counts
+hidden marks so a filtered selection can be reviewed before taking action.
+Playing multiple marks creates or reuses a Hyper playlist in displayed order.
+**Queue** appends the chosen tracks to the playback queue.
 
 Right-click a track and choose **Copy Org link**, or focus the track and
 press the system Copy shortcut. This copies a `purpleaudio:` Org link
@@ -62,5 +96,24 @@ Open **Playlists** from the main menu to create folders or move playlists
 between them. Use Tab and Shift+Tab to focus playlist and folder actions, then
 press Enter or Space to activate the focused action. Removing a folder places
 its playlists back at the top level.
+
+On a playlist track, Enter or Space plays once per press. Arrow navigation and
+Alt+Up or Alt+Down reordering can repeat while held.
+
 Hyper holds automatically created playlists. Folder names and placement are
 saved for each account on this Desktop installation.
+
+Stock shared-media search cancels a delayed query when a cached query takes
+over. Clearing the filter restores the unfiltered list even if a search was
+still queued.
+
+In a chat or topic, `, u` opens **Music shared in this chat**. It uses
+Telegram's shared-media history and also works in chats outside the Music
+source folder. The filter matches title, artist, or filename in the loaded
+tracks. **Load more tracks** expands the history and keeps the filter applied.
+Use the arrows or `j` and `k` to move the cursor, and Alt+Up or Alt+Down to move
+by half a page. Press Escape to close the filter, then Escape to close the
+dialog. The **Actions** button or a right-click offers play, forward, go to
+message, add to playlist, and copy message link. The dialog and library share
+the now-playing card and effective Music keymap. Changes to `keys.edn` update
+the chords and their labels on both surfaces.
