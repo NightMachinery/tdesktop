@@ -47,6 +47,10 @@ void AppendQuoteFormulaHighlight(
 	QRect formula,
 	const MarkdownArticlePaintContext &context,
 	int segmentIndex);
+[[nodiscard]] QRect VisibleTextSegmentRect(
+	const SelectableSegment &segment,
+	QuoteSegmentGeometry geometry,
+	const style::Markdown &st);
 [[nodiscard]] QRect DisplayRangesRect(
 	const std::vector<SelectableSegment> &segments,
 	const std::vector<MarkdownArticleSearchMatch> &ranges,

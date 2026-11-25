@@ -636,6 +636,18 @@ void AppendQuoteFormulaHighlight(
 	}
 }
 
+QRect VisibleTextSegmentRect(
+		const SelectableSegment &segment,
+		QuoteSegmentGeometry geometry,
+		const style::Markdown &st) {
+	return VisibleSegmentRect(
+		segment,
+		segment.textRect,
+		geometry.logical,
+		geometry.scrollOwner,
+		st);
+}
+
 QRect DisplayRangesRect(
 		const std::vector<SelectableSegment> &segments,
 		const std::vector<MarkdownArticleSearchMatch> &ranges,

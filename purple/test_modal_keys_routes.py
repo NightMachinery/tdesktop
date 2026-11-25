@@ -578,6 +578,16 @@ main_w = read("mainwidget.cpp")
 ordered(main_w, "syncZenHide", "_zenThirdSectionHide", "_zenThirdShadowHide")
 ordered(main_w, "void MainWidget::destroyThirdSection()", "_zenThirdSectionHide.onWidgetDestroyed()")
 
+hints = read("purple/purple_message_hints.cpp")
+ordered(hints, "VisibleBodyLinks(", "purpleRichLinkLayout()", "forEachVisibleLinkText(",
+        "CollectVisibleBodyLinks", "else if (text")
+ordered(hints, "MessageHints::Input MessageHints::applyBodyLink",
+        "canUseBodyLink", "BodyLinkState", "state.link->url() != link.url",
+        "copyToClipboardText()", "ActivateClickHandler")
+article = read("iv/markdown/iv_markdown_article.cpp")
+ordered(article, "void MarkdownArticle::Impl::forEachVisibleLinkText",
+        "VisibleTextSegmentRect", "visit(*segment.leaf")
+
 # Existing attachment, playback, account, calendar, background, hints, menu, and music checks.
 attachment = between(keys, "class KeyboardAttachment final", "constexpr auto kEnabledPref")
 ordered(attachment, "if (!CanAttach(widget)) return {};", "QPointer(widget)",

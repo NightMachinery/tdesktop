@@ -203,6 +203,8 @@ public:
 	TextState textState(
 		QPoint point,
 		StateRequest request) const override;
+	[[nodiscard]] auto purpleRichLinkLayout() const
+	-> std::pair<const Iv::Markdown::MarkdownArticle*, QPoint>;
 	[[nodiscard]] auto purpleBodyLinkLayout() const
 	-> std::pair<const Ui::Text::String*, QRect>;
 	void updatePressed(QPoint point) override;

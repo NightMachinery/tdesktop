@@ -11,7 +11,6 @@
 #include <optional>
 
 class QContextMenuEvent;
-class ClickHandler;
 class HistoryInner;
 class HistoryItem;
 
@@ -64,7 +63,7 @@ private:
 		FullMsgId owner;
 		QPoint itemPoint;
 		QPoint listPoint;
-		std::shared_ptr<ClickHandler> handler;
+		QString url;
 
 		friend bool operator==(const BodyLink &, const BodyLink &) = default;
 	};

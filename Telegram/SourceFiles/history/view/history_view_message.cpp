@@ -964,6 +964,17 @@ QPoint Message::prepareRichPageStateRect(QPoint point, QRect &trect) const {
 	return point - trect.topLeft();
 }
 
+auto Message::purpleRichLinkLayout() const
+-> std::pair<const Iv::Markdown::MarkdownArticle*, QPoint> {
+	const auto rich = richpage();
+	auto rect = QRect();
+	if (!rich || !prepareRichPageTextRect(rect)) {
+		return {};
+	}
+	const auto offset = prepareRichPageStateRect(QPoint(), rect);
+	return { &rich->article, -offset };
+}
+
 auto Message::purpleBodyLinkLayout() const
 -> std::pair<const Ui::Text::String*, QRect> {
 	auto rect = QRect();

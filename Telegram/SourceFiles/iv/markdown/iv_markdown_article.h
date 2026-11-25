@@ -438,6 +438,10 @@ public:
 	void setSearchMatches(
 		std::vector<MarkdownArticleSearchMatch> matches,
 		int current);
+	void forEachVisibleLinkText(
+		QRect clip,
+		Fn<void(const Ui::Text::String &,
+			const Ui::Text::HighlightRectsRequest &)> visit) const;
 	[[nodiscard]] auto searchSources() const
 	-> std::vector<MarkdownArticleSearchSource>;
 	void updatePreparedLeaf(

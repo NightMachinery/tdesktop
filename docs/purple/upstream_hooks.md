@@ -74,8 +74,9 @@ the numbers.
   shortcut access to the native pickers and their attachment controls.
 - `history/view/history_view_list_widget.*`: visible enumeration, layout
   cancellation and focus preservation for hint selection.
-- `history/view/history_view_message.*`: exposes rendered body text and its
-  bounds so Purple can place a hint on each visible link.
+- `history/view/history_view_message.*` and `iv/markdown/iv_markdown_article*`:
+  expose the rendered text geometry for plain and rich message link hints,
+  including clipping by collapsed details and scrollable article blocks.
 - `history/history_inner_widget.cpp` and `history/view/history_view_list_widget.cpp`:
   accept an explicit hinted item in the native keyboard context menu path.
 - `window/section_widget.cpp`: repaint subscription and an early solid-color

@@ -110,7 +110,8 @@ with at most four strokes per chord:
 - **Yank (`y`) and message hints (`g`, `f`):**
   - `y y` / `y m` copy visible message text, `y l` copy message link, `y u`
     copy URL in message text.
-  - `f` / `g o` open visible URL in message text.
+  - `f` / `g o` open a visible URL in plain or rich message text. In a rich
+    message, expand a Details block before hinting links inside it.
   - `g s` select message, `g m` open message context menu, `g r` reply to
     message, `g e` edit message, `g u` jump to unread.
   - Hint tags render in high-contrast amber-gold with crimson typed-prefix
