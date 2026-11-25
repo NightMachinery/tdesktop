@@ -47,8 +47,10 @@ selected folder, its entries are removed. Music ignores Work Mode hiding, and
 playback rechecks the account, folder membership, and source message before
 opening a track.
 
-Double-click a track to play it. Use Command-click on macOS or Ctrl-click on
-other platforms to select tracks. Press Down from search to focus the current
+Click a track to play it. Use Command-click on macOS or Ctrl-click on
+other platforms to mark tracks. Playing, paused and loading states follow the
+player. The row tint shows marks, and a border shows the keyboard cursor.
+Press Down from search to focus the current
 result and Escape from the results to return to search. While an input method
 is composing text, Down stays in search. In the list, the arrow keys move the
 cursor and Space toggles selection. Press Enter or use

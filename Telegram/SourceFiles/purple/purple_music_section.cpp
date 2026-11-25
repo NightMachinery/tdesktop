@@ -18,6 +18,7 @@
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
+#include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
 #include "mtproto/facade.h"
 #include "mtproto/mtp_instance.h"
@@ -191,6 +192,7 @@ private:
 	void showMenu(not_null<Ui::IconButton*> button);
 	void toggleTrack(quint64 documentId);
 	void updateSelection();
+	void updatePlayback();
 	bool playSelection();
 	void saveSelection(const std::vector<MusicIndexEntry> &tracks);
 	[[nodiscard]] PlaylistResolveSong resolveSong(const MusicIndexEntry &entry) const;
@@ -228,6 +230,7 @@ private:
 	std::unique_ptr<DesktopPlaylistResolver> _bookmarkResolver;
 	uint64_t _route = 0;
 	uint64_t _query = 0;
+	quint64 _loadingDocument = 0;
 	bool _moreAvailable = false;
 	bool _reading = false;
 	bool _snapshotHeld = false;
@@ -429,6 +432,18 @@ MusicSection::MusicSection(
 			_readTimer.callOnce(kRefreshDelay);
 		}
 	}, lifetime());
+	const auto player = Media::Player::instance();
+	player->trackChanged() | rpl::on_next([=](AudioMsgId::Type type) {
+		if (type != AudioMsgId::Type::Song) return;
+		if (base::take(_loadingDocument)) _resolver.reset();
+		updatePlayback();
+	}, lifetime());
+	player->updatedNotifier() | rpl::on_next([=](const Media::Player::TrackState &state) {
+		if (state.id.type() == AudioMsgId::Type::Song) updatePlayback();
+	}, lifetime());
+	player->stops(AudioMsgId::Type::Song) | rpl::on_next([=] {
+		updatePlayback();
+	}, lifetime());
 	Core::App().passcodeLockChanges() | rpl::on_next([=](bool locked) {
 		if (locked) reset();
 		else refresh(true);
@@ -566,6 +581,8 @@ void MusicSection::reset(bool keepRows) {
 	if (_schedule->owner == this) _schedule->owner.clear();
 	_scope.reset();
 	_resolver.reset();
+	_loadingDocument = 0;
+	updatePlayback();
 	_bookmarkResolver.reset();
 	_pending.clear();
 	_savingSelection = false;
@@ -1001,6 +1018,7 @@ void MusicSection::render() {
 		}, _list->lifetime());
 	}
 	updateSelection();
+	updatePlayback();
 	updateStatus();
 	if (hadFocus && _list) _list->focusSelected();
 }
@@ -1178,6 +1196,24 @@ void MusicSection::updateSelection() {
 	updateListHeight();
 }
 
+void MusicSection::updatePlayback() {
+	if (!_list) return;
+	const auto state = Media::Player::instance()->getState(AudioMsgId::Type::Song);
+	const auto document = state.id.audio();
+	auto id = quint64(0);
+	auto playback = MusicRowPlayback::Idle;
+	if (document && &document->session() == &session()
+		&& !Media::Player::IsStoppedOrStopping(state.state)) {
+		id = document->id;
+		playback = Media::Player::IsPausedOrPausing(state.state)
+			? MusicRowPlayback::Paused
+			: (state.waitingForData || state.state == Media::Player::State::Starting)
+			? MusicRowPlayback::Loading
+			: MusicRowPlayback::Playing;
+	}
+	_list->setMusicPlayback(id, playback, _loadingDocument);
+}
+
 bool MusicSection::playSelection() {
 	if (_selection.empty()) return false;
 	if (_savingSelection) return true;
@@ -1194,6 +1230,8 @@ bool MusicSection::playSelection() {
 	requests.reserve(tracks.size());
 	for (const auto &entry : tracks) requests.push_back(resolveSong(entry));
 	_savingSelection = true;
+	_loadingDocument = 0;
+	updatePlayback();
 	updateSelection();
 	_transientNotice = tr::lng_purple_playlists_resolving(tr::now);
 	updateStatus();
@@ -1281,10 +1319,21 @@ void MusicSection::play(quint64 documentId) {
 	const auto row = std::ranges::find(_rows, documentId, &MusicIndexEntry::document);
 	if (row == _rows.end() || !inRoster(row->peer)) return;
 	const auto entry = *row;
+	if (captureTrack(entry)) {
+		_resolver.reset();
+		_loadingDocument = 0;
+		playResolved(entry);
+		return;
+	}
 	const auto route = _route;
+	_loadingDocument = documentId;
+	updatePlayback();
 	_resolver = std::make_unique<DesktopPlaylistResolver>(
 		&session(), std::vector{ resolveSong(entry) }, crl::guard(this, [=](auto results) {
-			if (_route != route || !rosterCurrent()) return;
+			if (_route != route) return;
+			_loadingDocument = 0;
+			updatePlayback();
+			if (!rosterCurrent()) return;
 			if (results.size() == 1 && results.front().status == PlaylistSongStatus::Ready) {
 				playResolved(entry);
 			} else {
@@ -1383,7 +1432,15 @@ void MusicSection::playResolved(const MusicIndexEntry &entry) {
 	}
 	_transientNotice.clear();
 	updateStatus();
-	Media::Player::instance()->play(AudioMsgId(item->media()->document(), id));
+	const auto player = Media::Player::instance();
+	const auto state = player->getState(AudioMsgId::Type::Song);
+	const auto document = item->media()->document();
+	if (state.id.audio() == document && !Media::Player::IsStoppedOrStopping(state.state)) {
+		if (Media::Player::IsPausedOrPausing(state.state)) player->play(AudioMsgId::Type::Song);
+	} else {
+		player->play(AudioMsgId(document, id));
+	}
+	updatePlayback();
 }
 
 MusicSection *MusicForWidget(

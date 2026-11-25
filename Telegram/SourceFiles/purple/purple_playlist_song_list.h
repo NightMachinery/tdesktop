@@ -10,6 +10,13 @@ namespace Ui { class ScrollArea; }
 
 namespace Purple {
 
+enum class MusicRowPlayback {
+	Idle,
+	Loading,
+	Playing,
+	Paused,
+};
+
 struct PlaylistSongListRow {
 	uint64_t documentId = 0;
 	QString title;
@@ -42,6 +49,7 @@ public:
 	[[nodiscard]] rpl::producer<> navigationEvents() const;
 	void moveSelected(int delta);
 	void setPlayback(uint64_t current, uint64_t checked, QString state, bool unavailable);
+	void setMusicPlayback(uint64_t current, MusicRowPlayback state, uint64_t loading = 0);
 	void setVerifiedDownloads(std::set<uint64_t> documents);
 	void cancelInteraction();
 	void focusSelected();

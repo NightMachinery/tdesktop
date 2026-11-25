@@ -22,6 +22,19 @@
 #include "styles/style_widgets.h"
 
 namespace Purple {
+namespace {
+
+QString PlaybackLabel(MusicRowPlayback state) {
+	switch (state) {
+	case MusicRowPlayback::Loading: return tr::lng_contacts_loading(tr::now);
+	case MusicRowPlayback::Playing: return u"Playing"_q;
+	case MusicRowPlayback::Paused: return u"Paused"_q;
+	case MusicRowPlayback::Idle: return {};
+	}
+	Unexpected("Music row playback state.");
+}
+
+} // namespace
 
 class PlaylistSongList::Rows final : public Ui::RpWidget {
 public:
@@ -37,6 +50,7 @@ public:
 	[[nodiscard]] int reorderDelta(const QKeyEvent &event) const;
 	void moveSelected(int delta);
 	void setPlayback(uint64_t current, uint64_t checked, QString state, bool unavailable);
+	void setMusicPlayback(uint64_t current, MusicRowPlayback state, uint64_t loading);
 	void setVerifiedDownloads(std::set<uint64_t> documents);
 	void cancelInteraction();
 	void focusSelected();
@@ -76,6 +90,7 @@ private:
 	[[nodiscard]] int previewRow(int slot) const;
 	[[nodiscard]] QRect handleRect(int slot) const;
 	[[nodiscard]] QString sourceState(int index) const;
+	[[nodiscard]] MusicRowPlayback musicPlayback(uint64_t id) const;
 	void select(int index, bool scroll = true);
 	void updateDrag();
 	void autoscroll();
@@ -96,7 +111,10 @@ private:
 	std::set<uint64_t> _verifiedDownloads;
 	uint64_t _current = 0;
 	uint64_t _checked = 0;
+	uint64_t _loading = 0;
+	MusicRowPlayback _musicState = MusicRowPlayback::Idle;
 	int _selected = -1;
+	int _hovered = -1;
 	int _pressed = -1;
 	int _target = -1;
 	bool _handlePressed = false;
@@ -201,7 +219,14 @@ void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 		const auto &row = _data[index];
 		const auto top = slot * height;
 		const auto selected = index == _selected;
-		if (selected) p.fillRect(0, top, width(), height, st::windowBgOver);
+		const auto library = _mode == Mode::Library;
+		const auto chosen = library && _chosen.contains(row.documentId);
+		const auto hovered = library && index == _hovered;
+		if (chosen || hovered || (!library && selected)) {
+			p.fillRect(0, top, width(), height,
+				chosen ? st::windowBgRipple : st::windowBgOver);
+		}
+		const auto playback = musicPlayback(row.documentId);
 		const auto thumb = style::rtlrect(
 			layout.songPadding.left(),
 			top + layout.songPadding.top(),
@@ -212,10 +237,13 @@ void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 		p.setBrush(row.documentId == _current || _chosen.contains(row.documentId)
 			? st::mediaPlayerActiveFg : layout.songIconBg);
 		p.drawEllipse(thumb);
-		layout.songPlay.paintInCenter(p, thumb);
+		(playback == MusicRowPlayback::Playing ? layout.songPause : layout.songPlay
+		).paintInCenter(p, thumb);
 		p.setFont(st::semiboldFont);
 		p.setPen(row.documentId == _checked && _unavailable
-			? st::windowSubTextFg : st::windowFg);
+			? st::windowSubTextFg
+			: playback != MusicRowPlayback::Idle ? st::windowActiveTextFg
+			: st::windowFg);
 		p.drawTextLeft(
 			left,
 			top + layout.songNameTop,
@@ -223,8 +251,11 @@ void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 			st::semiboldFont->elided(row.title, available));
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
-		const auto details = row.performer.isEmpty()
+		auto details = row.performer.isEmpty()
 			? row.duration : row.performer + u" · "_q + row.duration;
+		if (const auto label = PlaybackLabel(playback); !label.isEmpty()) {
+			details = label + u" · "_q + details;
+		}
 		p.drawTextLeft(
 			left,
 			top + layout.songStatusTop,
@@ -241,6 +272,12 @@ void PlaylistSongList::Rows::paintEvent(QPaintEvent *e) {
 				st::normalFont->elided(state, available));
 		}
 		if (_reorder) st::menuIconReorder.paintInCenter(p, handleRect(slot));
+		if (library && selected && hasFocus()) {
+			const auto line = st::lineWidth;
+			p.setPen(QPen(st::windowActiveTextFg->c, line));
+			p.setBrush(Qt::NoBrush);
+			p.drawRect(QRect(line, top + line, width() - 2 * line, height - 2 * line));
+		}
 		if (_dragging && slot == _target) {
 			p.fillRect(0, top, width(), st::lineWidth, st::mediaPlayerActiveFg);
 		}
@@ -273,6 +310,13 @@ void PlaylistSongList::Rows::mousePressEvent(QMouseEvent *e) {
 }
 
 void PlaylistSongList::Rows::mouseMoveEvent(QMouseEvent *e) {
+	if (_mode == Mode::Library) {
+		const auto hovered = hit(e->pos());
+		if (_hovered != hovered) {
+			_hovered = hovered;
+			update();
+		}
+	}
 	if (_pressed < 0 || !_handlePressed || !isEnabled()) return;
 	if (!_dragging
 		&& (e->pos() - _pressPosition).manhattanLength() >= QApplication::startDragDistance()) {
@@ -347,11 +391,9 @@ void PlaylistSongList::Rows::mouseReleaseEvent(QMouseEvent *e) {
 		submitMove(from, to);
 	} else if (play) {
 		const auto id = _data[from].documentId;
-		if (_toggle) {
-			if (e->modifiers() & Qt::ControlModifier) {
-				const auto callback = _toggle;
-				callback(id);
-			}
+		if (_toggle && (e->modifiers() & Qt::ControlModifier)) {
+			const auto callback = _toggle;
+			callback(id);
 		} else {
 			const auto callback = _play;
 			callback(id);
@@ -360,16 +402,12 @@ void PlaylistSongList::Rows::mouseReleaseEvent(QMouseEvent *e) {
 }
 
 void PlaylistSongList::Rows::mouseDoubleClickEvent(QMouseEvent *e) {
-	const auto index = hit(e->pos());
-	if (!_toggle || !isEnabled() || e->button() != Qt::LeftButton || index < 0
-		|| (e->modifiers() & Qt::ControlModifier)) {
+	if (_mode != Mode::Library || e->button() != Qt::LeftButton) {
 		RpWidget::mouseDoubleClickEvent(e);
 		return;
 	}
 	e->accept();
 	cancelInteraction();
-	const auto callback = _play;
-	callback(_data[index].documentId);
 }
 
 void PlaylistSongList::Rows::contextMenuEvent(QContextMenuEvent *e) {
@@ -489,6 +527,10 @@ void PlaylistSongList::Rows::focusOutEvent(QFocusEvent *e) {
 }
 
 bool PlaylistSongList::Rows::eventHook(QEvent *e) {
+	if (e->type() == QEvent::Leave && _hovered >= 0) {
+		_hovered = -1;
+		update();
+	}
 	if (e->type() == QEvent::Hide || e->type() == QEvent::WindowDeactivate
 		|| e->type() == QEvent::UngrabMouse
 		|| (e->type() == QEvent::EnabledChange && !isEnabled())) {
@@ -531,6 +573,32 @@ void PlaylistSongList::Rows::setSelectionActions(
 		Fn<bool()> playSelection) {
 	_toggle = std::move(toggle);
 	_playSelection = std::move(playSelection);
+}
+
+MusicRowPlayback PlaylistSongList::Rows::musicPlayback(uint64_t id) const {
+	return _mode != Mode::Library ? MusicRowPlayback::Idle
+		: id == _loading ? MusicRowPlayback::Loading
+		: id == _current ? _musicState
+		: MusicRowPlayback::Idle;
+}
+
+void PlaylistSongList::Rows::setMusicPlayback(
+		uint64_t current,
+		MusicRowPlayback state,
+		uint64_t loading) {
+	if (_current == current && _musicState == state && _loading == loading) {
+		return;
+	}
+	const auto oldCurrent = std::exchange(_current, current);
+	const auto oldLoading = std::exchange(_loading, loading);
+	_musicState = state;
+	for (auto i = 0; i != int(_data.size()); ++i) {
+		const auto id = _data[i].documentId;
+		if (id == current || id == oldCurrent || id == loading || id == oldLoading) {
+			accessibilityChildNameChanged(i);
+			update(accessibilityChildRect(i));
+		}
+	}
 }
 
 void PlaylistSongList::Rows::setCopyOrgLinkAction(Fn<void(uint64_t)> copy) {
@@ -585,7 +653,10 @@ QString PlaylistSongList::Rows::accessibilityChildName(int index) const {
 	if (index < 0 || index >= int(_data.size())) return {};
 	const auto &row = _data[index];
 	auto label = row.title + u", "_q + row.performer + u", "_q + row.duration;
-	if (_mode == Mode::Library) return label;
+	if (_mode == Mode::Library) {
+		const auto playback = PlaybackLabel(musicPlayback(row.documentId));
+		return playback.isEmpty() ? label : label + u", "_q + playback;
+	}
 	return label + u", "_q
 		+ (row.documentId == _current ? tr::lng_purple_playlists_current_row(tr::now, lt_status, sourceState(index)) : sourceState(index));
 }
@@ -713,6 +784,13 @@ void PlaylistSongList::moveSelected(int delta) {
 void PlaylistSongList::setPlayback(
 		uint64_t current, uint64_t checked, QString state, bool unavailable) {
 	_rows->setPlayback(current, checked, std::move(state), unavailable);
+}
+
+void PlaylistSongList::setMusicPlayback(
+		uint64_t current,
+		MusicRowPlayback state,
+		uint64_t loading) {
+	_rows->setMusicPlayback(current, state, loading);
 }
 
 void PlaylistSongList::setVerifiedDownloads(std::set<uint64_t> documents) {
