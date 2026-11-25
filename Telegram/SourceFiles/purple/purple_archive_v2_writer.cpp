@@ -28,6 +28,8 @@ struct Writer::State {
 	std::mutex mutex;
 	std::condition_variable changed;
 	std::deque<Job> jobs;
+	std::optional<BlobInput> blob;
+	bool mediaWriting = false;
 	int64 bytes = 0;
 	bool stopped = false;
 	std::optional<QByteArray> logout;
@@ -39,6 +41,12 @@ Writer::Writer(StoreOptions options, Report report) : _state(std::make_shared<St
 	if (!options.lease) options.lease = std::make_shared<Lease>();
 	_state->lease = options.lease;
 	_state->report = std::move(report);
+	options.canWritePart = [weak = std::weak_ptr(_state), previous = std::move(options.canWritePart)] {
+		const auto state = weak.lock();
+		if (!state || (previous && !previous())) return false;
+		const auto lock = std::lock_guard(state->mutex);
+		return !state->stopped && state->jobs.empty();
+	};
 	std::thread([state = _state, options = std::move(options)]() mutable {
 		run(std::move(state), std::move(options));
 	}).detach();
@@ -62,6 +70,15 @@ StoreEffect Writer::post(CapturedEvent event) {
 	if (_state->jobs.size() >= kEvents || size > kBytes - _state->bytes) return { u"text_queue_full"_q };
 	_state->bytes += size;
 	_state->jobs.emplace_back(std::move(event));
+	_state->changed.notify_one();
+	return {};
+}
+
+StoreEffect Writer::postBlob(BlobInput input) {
+	const auto lock = std::lock_guard(_state->mutex);
+	if (_state->stopped || !_state->lease->live.load()) return { u"scope_retired"_q };
+	if (_state->blob || _state->mediaWriting) return { u"store_busy"_q };
+	_state->blob = std::move(input);
 	_state->changed.notify_one();
 	return {};
 }
@@ -99,10 +116,20 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 		report(std::move(opened), initial);
 		return;
 	}
-	if (state->lease->live.load()) report(std::move(opened), initial);
+	if (state->lease->live.load()) {
+		const auto limit = store->maintain();
+		report(limit ? std::move(opened) : limit, initial);
+	}
 	for (;;) {
 		auto lock = std::unique_lock(state->mutex);
-		state->changed.wait(lock, [&] { return state->stopped || !state->jobs.empty(); });
+		const auto ready = state->changed.wait_for(lock, std::chrono::minutes(1),
+			[&] { return state->stopped || !state->jobs.empty() || state->blob.has_value(); });
+		if (!ready) {
+			lock.unlock();
+			const auto result = store->maintain();
+			if (!result && state->lease->live.load()) report(result, store->id());
+			continue;
+		}
 		if (state->stopped) {
 			const auto logout = std::move(state->logout);
 			lock.unlock();
@@ -113,6 +140,18 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 				report(std::move(result), id);
 			}
 			return;
+		}
+		if (state->jobs.empty()) {
+			auto blob = std::exchange(state->blob, std::nullopt);
+			state->mediaWriting = true;
+			lock.unlock();
+			auto effect = store->writeBlob(*blob);
+			{
+				const auto guard = std::lock_guard(state->mutex);
+				state->mediaWriting = false;
+			}
+			if (state->lease->live.load()) report(std::move(effect), store->id());
+			continue;
 		}
 		auto job = std::move(state->jobs.front());
 		state->jobs.pop_front();

@@ -29,6 +29,10 @@ struct StoreOptions {
 	QByteArray loginSecret;
 	std::shared_ptr<Lease> lease = std::make_shared<Lease>();
 	std::function<bool(Phase)> checkpoint;
+	Policy policy;
+	std::function<int64()> now;
+	std::function<int64()> availableBytes;
+	std::function<bool()> canWritePart;
 };
 
 struct StoreEffect {
@@ -73,6 +77,17 @@ struct BlobInput {
 	std::function<QByteArray(qsizetype)> read;
 };
 
+struct Usage {
+	int64 database = 0;
+	int64 wal = 0;
+	int64 sharedMemory = 0;
+	int64 support = 0;
+	int64 ordinary = 0;
+	int64 timed = 0;
+	int64 reclaimed = 0;
+	[[nodiscard]] int64 physical() const { return database + wal + sharedMemory + support; }
+};
+
 class Store final {
 public:
 	explicit Store(StoreOptions options);
@@ -89,6 +104,9 @@ public:
 	[[nodiscard]] std::optional<StoredBody> body(const MessageIdentity &identity, int64 sequence);
 	[[nodiscard]] QByteArray id() const;
 	[[nodiscard]] bool current() const;
+	[[nodiscard]] std::optional<Usage> usage();
+	[[nodiscard]] StoreEffect maintain();
+	[[nodiscard]] StoreEffect updatePolicy(Policy policy);
 
 private:
 	struct Retired {
@@ -128,6 +146,14 @@ private:
 	[[nodiscard]] std::optional<Row> readHead(const QByteArray &key, const QByteArray &identity);
 	[[nodiscard]] QString openDatabase(const QByteArray &dataKey);
 	[[nodiscard]] StoreEffect write(ArchiveSqlProgram program);
+	[[nodiscard]] QString reserve(int64 logical, int64 physical, bool timed, const QByteArray &keep,
+		const QByteArray &keepBlob = {});
+	[[nodiscard]] QString expire(int64 day, const QByteArray &keep = {});
+	[[nodiscard]] QString trim(int64 bytes, bool timed, const QByteArray &keep, const QByteArray &keepBlob = {}, bool forceOne = false);
+	[[nodiscard]] QString physicalLimit(int64 extra);
+	[[nodiscard]] std::optional<int64> pragma(const QString &query);
+	[[nodiscard]] int64 availableBytes() const;
+	[[nodiscard]] int64 today() const;
 
 	StoreOptions _options;
 	QByteArray _scope;
@@ -140,6 +166,8 @@ private:
 	DesktopArchiveSqlite _db;
 	bool _ready = false;
 	bool _bound = false;
+	int64 _lastTrimDay = -1;
+	int64 _reclaimed = 0;
 };
 
 }

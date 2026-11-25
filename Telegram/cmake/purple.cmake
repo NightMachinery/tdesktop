@@ -66,6 +66,9 @@ PRIVATE
     purple/purple_archive_v2_store.h
     purple/purple_archive_v2_writer.cpp
     purple/purple_archive_v2_writer.h
+    purple/purple_archive_v2_acquisition.cpp
+    purple/purple_archive_v2_acquisition.h
+    purple/purple_archive_v2_quota.cpp
     purple/purple_archive_deleted_box.cpp
     purple/purple_archive_deleted_box.h
     purple/purple_archive_menu.cpp

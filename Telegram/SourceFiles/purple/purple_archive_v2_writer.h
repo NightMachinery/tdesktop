@@ -13,6 +13,7 @@ public:
 	Writer &operator=(const Writer &) = delete;
 
 	[[nodiscard]] StoreEffect post(CapturedEvent event);
+	[[nodiscard]] StoreEffect postBlob(BlobInput input);
 	[[nodiscard]] bool reset(QByteArray expectedId);
 	void logout(QByteArray expectedId);
 

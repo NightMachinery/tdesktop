@@ -15,6 +15,7 @@ StoreOptions Options(const QString &path, int64 user = 17, char profile = 'p', c
 		.account = AccountKey{ 0, user },
 		.profileKey = QByteArray(32, 'k'),
 		.loginSecret = QByteArray(32, login),
+		.now = [] { return int64(1700000100); },
 	};
 }
 

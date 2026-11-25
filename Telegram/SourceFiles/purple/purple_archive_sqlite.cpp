@@ -269,7 +269,21 @@ DesktopArchiveSqlResult DesktopArchiveSqlite::ConfigureV2() {
 	if (!actual.ok || actual.rows != std::vector<std::vector<ArchiveSqlValue>>{{ int64(2) }}) {
 		return Failure(SQLITE_ERROR, u"incremental-vacuum-unavailable"_q);
 	}
-	return Configure();
+	if (const auto configured = Configure(); !configured.ok) return configured;
+	for (const auto &query : { u"PRAGMA cache_spill=OFF"_q, u"PRAGMA temp_store=MEMORY"_q }) {
+		const auto result = Read({ query });
+		if (!result.ok) return result;
+	}
+	return Read({ u"PRAGMA wal_autocheckpoint=0"_q, {}, ArchiveSqlExpectation::OneRow });
+}
+
+DesktopArchiveSqlResult DesktopArchiveSqlite::CheckpointV2() {
+	if (!_impl->Current()) return Failure(SQLITE_MISUSE, u"not-open"_q);
+	const auto code = sqlite3_wal_checkpoint_v2(_impl->db, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
+	if (code != SQLITE_OK) return Failure(code, u"checkpoint"_q);
+	auto result = DesktopArchiveSqlResult();
+	result.ok = true;
+	return result;
 }
 
 DesktopArchiveSqlResult DesktopArchiveSqlite::Read(const ArchiveSqlStatement &statement) {

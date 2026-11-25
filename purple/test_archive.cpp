@@ -8,6 +8,7 @@
 #include "purple/purple_archive_sqlite.h"
 #include "purple/purple_archive_v2_schema.h"
 #include "purple/purple_archive_v2_writer.h"
+#include "purple/purple_archive_v2_acquisition.h"
 #include "purple/purple_desktop_archive_store.h"
 #include "purple/purple_sync_json.h"
 #include "tests/archive_test_support.h"
@@ -2502,6 +2503,7 @@ void ArchiveV2Schema() {
 }
 
 #include "test_archive_v2_writer.inc"
+#include "test_archive_v2_quota.inc"
 
 }
 
@@ -2542,6 +2544,10 @@ int main(int argc, char** argv) {
 	V2Fixtures::LogoutAndOwnership();
 	V2Fixtures::CorruptStoreRefuses();
 	V2Fixtures::QueueCancellation();
+	V2Fixtures::MediaGate();
+	V2Fixtures::SeparatePressure();
+	V2Fixtures::QuotaDiskAndAge();
+	V2Fixtures::VerifiedCompleteFile();
 	LegacyProfileBinding();
 	KeySetMigrationAndRebind();
 	ExplicitDiscardRecovery();

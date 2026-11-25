@@ -2,6 +2,7 @@
 
 #include "purple/purple_archive_files.h"
 #include "purple/purple_archive_v2_schema.h"
+#include "purple/purple_archive_v2_media.h"
 
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QFileInfo>
@@ -167,6 +168,9 @@ StoreEffect Store::capture(const CapturedEvent &event) {
 	if (!old || !exists.ok) return { u"store_unreadable"_q };
 	const auto action = Reduce(old->head, event.event, bodyTag, !exists.rows.empty(), event.fillsMissing, !event.preimage.isEmpty());
 	if (action == Mutation::Ignore) return {};
+	auto weight = int64(event.body.size() + event.preimage.size() + 512);
+	for (const auto &attachment : event.attachments) weight += attachment.description.size() + 192;
+	if (const auto failure = reserve(weight, weight, false, key); !failure.isEmpty()) return { failure };
 	auto program = Program();
 	auto &sql = program.statements;
 	const auto day = std::max(old->activity, event.observedAt / 86400);
@@ -264,6 +268,11 @@ StoreEffect Store::writeBlob(const BlobInput &input) {
 	const auto kind = Column<int64>(row, 3);
 	const auto timed = Column<int64>(row, 4);
 	if (!source || *source != media || !sealed || !kind || !timed) return { u"scope_retired"_q };
+	const auto old = readHead(key, Identity(input.identity));
+	if (!old || !old->head) return { u"scope_retired"_q };
+	if (old->activity <= today() - _options.policy.daysFor(ChatClass(old->kind))) return { u"expired"_q };
+	if (!*timed && input.size > int64(_options.policy.ordinaryFileMiB) * kMiB) return { u"over_file_limit"_q };
+	if (*timed && input.size > int64(_options.policy.timedMiB) * kMiB) return { u"over_allowance"_q };
 	const auto aad = associated("media", key + Number(input.sequence) + Number(input.ordinal) + media
 		+ Number(*kind) + Number(*timed));
 	if (!unseal(u"body", aad, *sealed)) return { u"scope_retired"_q };
@@ -274,17 +283,24 @@ StoreEffect Store::writeBlob(const BlobInput &input) {
 	if (saved && *saved != blob) return { u"scope_retired"_q };
 	const auto parts = (input.size - 1) / kPartSize + 1;
 	const auto manifest = Number(input.size) + Number(parts) + input.digest;
-	const auto previous = _db.Read({ u"SELECT size,sealed_manifest FROM blobs WHERE blob_key=?"_q, { blob }, kRows });
+	const auto previous = _db.Read({ u"SELECT size,sealed_manifest,(SELECT max(timed) FROM media WHERE blob_key=b.blob_key) "
+		"FROM blobs b WHERE blob_key=?"_q, { blob }, kRows });
 	if (!previous.ok) return { u"store_unreadable"_q };
+	auto charge = input.size;
 	if (!previous.rows.empty()) {
 		const auto &record = previous.rows.front();
 		const auto size = Column<int64>(record, 0);
 		const auto sealed = Column<QByteArray>(record, 1);
-		if (!size || *size != input.size || !sealed || unseal(u"body", associated("blob", blob), *sealed) != manifest) {
+		const auto previousTimed = Column<int64>(record, 2);
+		if (!size || *size != input.size || !sealed || !previousTimed
+			|| unseal(u"body", associated("blob", blob), *sealed) != manifest) {
 			return { u"store_unreadable"_q };
 		}
+		charge = *timed && !*previousTimed ? input.size : 0;
 	}
 	if (saved) return previous.rows.empty() ? StoreEffect{ u"store_unreadable"_q } : StoreEffect{};
+	const auto disk = previous.rows.empty() ? input.size + (parts * 64) : 0;
+	if (const auto failure = reserve(charge, disk, *timed, key, blob); !failure.isEmpty()) return { failure };
 	const auto sealedReference = seal(u"body", reference, blob);
 	if (!sealedReference) return { u"key_unavailable"_q };
 	const auto result = _db.ExecuteV2([&](const DesktopArchiveSqlite::Write &put) {
@@ -294,7 +310,8 @@ StoreEffect Store::writeBlob(const BlobInput &input) {
 			auto hash = QCryptographicHash(QCryptographicHash::Sha256);
 			auto remaining = input.size;
 			for (auto part = int64(0); part != parts; ++part) {
-				if (!current() || !step(Phase::BlobPart)) return false;
+				if (!current() || !step(Phase::BlobPart)
+					|| (_options.canWritePart && !_options.canWritePart())) return false;
 				const auto length = std::min<int64>(remaining, kPartSize);
 				auto bytes = input.read(length);
 				const auto clear = gsl::finally([&] { DesktopArchiveCrypto::Clear(bytes); });

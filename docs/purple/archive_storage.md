@@ -38,6 +38,25 @@ that cleanup using the profile key without reopening the old database or
 unwrapping its former login key. The worker keeps live startup and logout
 unwired until cutover.
 
+### Whole files and space limits
+
+A whole-file completion must match the admitted account generation, message
+version and source. Explicit open preserves the normal viewer and receipt
+sequence before scheduling archive work. Timed arrival and unrelated cache
+completion do not create a request. The writer checks the declared length
+and plaintext digest while it encrypts bounded parts, then publishes the
+whole blob and its attachment in one commit. A queued message can stop a
+media write between parts.
+
+Timed and ordinary pressure release copies from their own allowance.
+A blob referenced by timed and ordinary rows is charged once to timed media.
+The active physical usage includes the database, WAL, shared memory and
+owned support files. The page limit reserves space for both the database
+and WAL at checkpoint peak. It is deliberately conservative when a file
+fits its allowance but cannot fit at peak. Cache spill is disabled for
+this bound, so SQLite can keep dirty pages in memory during a whole-file
+transaction. The app encrypts one part at a time.
+
 ## Stream retirement wakeups
 
 Retirement sets the cleanup predicate and notifies under the worker wait mutex.
