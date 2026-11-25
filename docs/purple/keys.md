@@ -260,8 +260,8 @@ on the modal status line and cheatsheet footer.
   mode. Use the mouse or `Tab`, `Enter`, and `Esc`. With modal keys enabled,
   `j`/`k`/`gg`/`G` scroll, `h`/`l` select buttons, `o` selects the
   primary action, `y` copies logs, `?` opens help, and `q` closes. Close is
-  selected on arrival. **Copy logs** copies a redacted description and recent
-  diagnostic events for that feature. Before/after values in the dialog
+  selected on arrival. **Copy logs** copies the visible notice and up to 60
+  recent lines for that subsystem. Before/after values in the dialog
   resolve bare chat IDs in the current account. Hidden, unknown, ambiguous,
   and negative IDs remain literal. Notices wait for the correct active
   window and a pause in typing. Background notices coalesce and also wait

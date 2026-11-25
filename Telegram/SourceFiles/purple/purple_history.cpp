@@ -440,7 +440,7 @@ void History::purpleRefreshShowMode() {
 		// before Data::Changes delivers here, so `was' already matches. The
 		// subscription earns its keep only when refreshHistory() returns early
 		// on list().empty() - an account with no folders at all.
-		LOG(("Purple: show_mode '%1' %2 peer %3."
+		LOG(("Purple Work Mode: show_mode '%1' %2 peer %3."
 			).arg(Purple::ShowModeName(mode)
 			).arg(was ? u"hid"_q : u"revealed"_q
 			).arg(peer->id.value));

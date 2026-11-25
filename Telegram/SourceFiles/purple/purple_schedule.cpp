@@ -77,7 +77,7 @@ void Runner::tick() {
 		state = step->state;
 	});
 	if (step->unpaused) {
-		LOG(("Purple: the schedule pause ran out."));
+		LOG(("Purple Work Mode: the schedule pause ran out."));
 	}
 	if (step->target.isEmpty()) {
 		// Which happens on the one step that lifted a pause with no window to
@@ -85,13 +85,8 @@ void Runner::tick() {
 		// nothing.
 		return;
 	}
-	LOG(("Purple: schedule wants '%1'%2."
-		).arg(step->target
-		).arg(step->applied
-			? QString()
-			: u", keeping '%1' (%2)"_q.arg(
-				step->kept,
-				PresetSourceName(step->keptSource))));
+	LOG(("Purple Work Mode: schedule applied=%1 kept_source=%2."
+		).arg(step->applied ? 1 : 0).arg(PresetSourceName(step->keptSource)));
 }
 
 // The schedule as it stands right now, asked of the core.

@@ -420,7 +420,7 @@ public:
 private:
 	void onTimer() {
 		if (_inFlight) {
-			LOG(("Purple: Last Seen Peek restore still pending."));
+			LOG(("Purple Privacy: Last Seen Peek restore still pending."));
 			_retry.callOnce(kRestoreWatchdog);
 			return;
 		}
@@ -461,7 +461,7 @@ private:
 			return;
 		}
 		if (!rule || !SameRule(*rule, _original)) {
-			LOG(("Purple Error: Last Seen Peek restore not yet verified."));
+			LOG(("Purple Privacy: Error: Last Seen Peek restore not yet verified."));
 			_retry.callOnce(kRestoreRetry);
 			return;
 		}
@@ -472,11 +472,11 @@ private:
 		}
 		_retry.cancel();
 		if (!QFile::remove(_path)) {
-			LOG(("Purple Error: Last Seen Peek journal not removed."));
+			LOG(("Purple Privacy: Error: Last Seen Peek journal not removed."));
 			_retry.callOnce(kRestoreRetry);
 			return;
 		}
-		LOG(("Purple: Last Seen Peek original rules verified and restored."));
+		LOG(("Purple Privacy: Last Seen Peek original rules verified and restored."));
 		crl::on_main([path = _path, weak = weak_from_this()] {
 			const auto i = PendingRestores.find(path);
 			if (i != end(PendingRestores)
@@ -529,7 +529,7 @@ void RestoreJournal(not_null<Main::Session*> session) {
 	}
 	const auto original = ReadJournal(session);
 	if (!original) {
-		LOG(("Purple Error: Last Seen Peek journal unreadable: %1."
+		LOG(("Purple Privacy: Error: Last Seen Peek journal unreadable: %1."
 			).arg(path));
 		return;
 	}
@@ -591,7 +591,7 @@ void LastSeenPeek::start() {
 	if (!session) {
 		return;
 	}
-	LOG(("Purple: Last Seen Peek with %1 - reading our rules."
+	LOG(("Purple Privacy: Last Seen Peek: reading rules; peer=%1."
 		).arg(QString::number(_peer)));
 
 	_hold.callOnce(crl::time(1000) * std::max(Config(session).tradeHoldSeconds, 1));
@@ -616,7 +616,7 @@ void LastSeenPeek::showOurs(const Api::UserPrivacy::Rule &rule) {
 	}
 	if (QFileInfo::exists(JournalPath(session))
 		|| !WriteJournal(session, rule)) {
-		LOG(("Purple Error: Last Seen Peek journal could not be written."));
+		LOG(("Purple Privacy: Error: Last Seen Peek journal could not be written."));
 		finish(u"journal unavailable"_q, false);
 		return;
 	}
@@ -631,7 +631,7 @@ void LastSeenPeek::showOurs(const Api::UserPrivacy::Rule &rule) {
 	if (!ranges::contains(always, peer)) {
 		always.push_back(peer);
 	}
-	LOG(("Purple: Last Seen Peek with %1 - showing ours."
+	LOG(("Purple Privacy: Last Seen Peek: showing ours; peer=%1."
 		).arg(QString::number(_peer)));
 	const auto weak = base::make_weak(this);
 	const auto requestId = session->api().userPrivacy().save(
@@ -694,7 +694,7 @@ void LastSeenPeek::requestStatus() {
 							int64(now),
 							int64(moment));
 					});
-					LOG(("Purple: Last Seen Peek with %1 - read %2."
+					LOG(("Purple Privacy: Last Seen Peek: read; peer=%1 timestamp=%2."
 						).arg(QString::number(strong->_peer),
 							QString::number(moment)));
 					strong->finish(u"read"_q, true);
@@ -703,7 +703,7 @@ void LastSeenPeek::requestStatus() {
 		}
 	}).fail([weak](const MTP::Error &error) {
 		if (const auto strong = weak.get(); strong && !strong->_done) {
-			LOG(("Purple Error: Last Seen Peek could not ask about %1, %2."
+			LOG(("Purple Privacy: Error: Last Seen Peek: request failed; peer=%1 rpc=%2."
 				).arg(QString::number(strong->_peer), error.type()));
 			strong->finish(u"status request failed"_q, false);
 		}
@@ -725,7 +725,7 @@ void LastSeenPeek::finish(const QString &reason, bool read) {
 		UpdateState([&](State &state) {
 			RememberTrade(state, _peer, int64(now), 0);
 		});
-		LOG(("Purple: Last Seen Peek with %1 - nothing read, %2."
+		LOG(("Purple Privacy: Last Seen Peek: nothing read; peer=%1 reason=%2."
 			).arg(QString::number(_peer), reason));
 		if (_show) {
 			const auto msg = tr::lng_lastseen_peek_empty_result(tr::now);

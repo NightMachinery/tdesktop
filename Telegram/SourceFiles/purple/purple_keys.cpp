@@ -1095,7 +1095,7 @@ KeymapData LoadKeymapData() {
 		return candidate;
 	}
 	defaults.error = userErr;
-	LOG(("Purple modal keys: invalid keys.edn (%1), using built-in defaults.").arg(userErr));
+	LOG(("Purple Settings: invalid keys.edn, using built-in defaults."));
 	return defaults;
 }
 

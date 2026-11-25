@@ -386,6 +386,7 @@ void start() {
 #endif // !Q_OS_WINRT
 
 	QDir().mkpath(cWorkingDir() + u"tdata"_q);
+	Purple::Diagnostics::Start(cWorkingDir());
 
 	launcher.workingFolderReady();
 	CrashReports::StartCatching();

@@ -230,17 +230,15 @@ void UpdateTranslationOffer(
 	}
 	const auto now = history->translateOfferedFrom();
 	if (now != was) {
-		LOG(("Purple: %1 translation of %2 - %3 of %4 messages recognised, "
-			"threshold %5."
+		LOG(("Purple Translation: %1 translation for peer=%2; recognized=%3 total=%4 threshold=%5."
 			).arg(QString::fromLatin1(now ? "offering" : "withdrawing")
-			).arg(history->peer->name()
+			).arg(QString::number(history->peer->id.value)
 			).arg(translatable
 			).arg(count
 			).arg(threshold));
 	} else if (!now && count >= kEnoughForTranslation && !languages.empty()) {
-		LOG(("Purple: not offering translation of %1 - %2 of %3 messages "
-			"recognised, need %4."
-			).arg(history->peer->name()
+		LOG(("Purple Translation: not offering translation for peer=%1; recognized=%2 total=%3 threshold=%4."
+			).arg(QString::number(history->peer->id.value)
 			).arg(translatable
 			).arg(count
 			).arg(threshold));

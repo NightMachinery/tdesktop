@@ -430,7 +430,7 @@ constexpr auto kMaxSize = 4 * 1024 * 1024;
 }
 
 void RefuseSwitchedImport(const QString &account) {
-	LOG(("Purple: settings import dropped: "
+	LOG(("Purple Sync: settings import dropped: "
 		"the window that asked was closed or shows another account now."));
 	if (const auto window = Core::App().activeWindow()) {
 		window->uiShow()->showBox(Ui::MakeInformBox(

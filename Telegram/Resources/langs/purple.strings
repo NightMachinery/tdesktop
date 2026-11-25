@@ -33,7 +33,7 @@ docs/purple/upstream_hooks.md.
 "lng_purple_settings_archive_cache_about" = "Telegram’s media cache uses separate storage from this account’s Purple archive.";
 "lng_purple_settings_diagnostics_export" = "Export diagnostic log…";
 "lng_purple_settings_diagnostics_clear" = "Clear diagnostic log…";
-"lng_purple_settings_diagnostics_scope" = "Export includes recent redacted Purple diagnostic events for this install and notices for this account and the app. Clear empties the diagnostic events.";
+"lng_purple_settings_diagnostics_scope" = "Export includes this install’s masked Purple diagnostic log and recent notices for this account and the app. Clear empties this install’s diagnostic log.";
 "lng_purple_birthday_reminders" = "Birthday Reminders";
 "lng_purple_birthday_who" = "Whose birthdays should Purple remind you about?";
 "lng_purple_birthday_audience_about" = "Always Remind includes selected people even when you choose Nobody. Never Remind takes priority. Purple can only remind you about birthdays visible to you.";

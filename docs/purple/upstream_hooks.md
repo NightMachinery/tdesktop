@@ -2027,8 +2027,12 @@ worker's pending database transactions. The existing playlist menu hook in
 
 ### Shareable diagnostics
 
-- `logs.cpp`: passes main-log messages to `Purple::Diagnostics::CaptureMainLog`.
-  That hook retains a bounded set of allowlisted event labels in memory.
+- `logs.cpp`: initializes Purple diagnostics with the validated working
+  directory and forwards Purple main-log messages to its independent rotating
+  log.
+- `data/data_chat_filters.cpp` and `history/view/history_view_translate_tracker.cpp`:
+  tag their existing Purple messages with the Work Mode and Translation
+  subsystems.
 
 ### Purple settings navigation
 

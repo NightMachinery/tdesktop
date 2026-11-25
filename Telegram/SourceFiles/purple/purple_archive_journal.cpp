@@ -444,7 +444,7 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 				return false;
 			}
 			if (!captured.retained) {
-				LOG(("Purple Archive: stale capture, origin %1 model %2 lifecycle %3 send %4 preimage %5 message %6.").arg(
+				LOG(("Purple Archive: stale capture, origin %1 model %2 lifecycle %3 send %4 preimage %5 has_message=%6.").arg(
 					QString::number(int(event.origin)), QString::number(int(captured.model)),
 					QString::number(event.observation.context.contains(u"desktopLifecycle"_q) ? 1 : 0),
 					QString::number(event.observation.context.value(u"desktopSendMetadata"_q).toBool() ? 1 : 0),

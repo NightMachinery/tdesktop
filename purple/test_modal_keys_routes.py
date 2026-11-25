@@ -461,6 +461,8 @@ archive_cpp = read("purple/purple_archive_service.cpp")
 ordered(archive_cpp, "void ShowArchiveRemovalPending()", ".appScoped = true",
         "kArchiveRemovalNoticeKey", "ShowArchiveRemovalPending();", "archive:gap:",
         "void RemoveArchiveAtLogout", "ShowArchiveRemovalPending();", "archive:discard_failed:")
+ordered(archive_cpp, 'failure = u"discard-held"_q', "Could not discard the account's archive; reason=%1",
+        ".arg(i->second.failure)", "ShowPurpleNotice")
 st_cover_cpp = read("purple/purple_screentime_cover.cpp")
 ordered(st_cover_cpp, "ShowPurpleAck", ".persistent = true")
 last_seen_cpp = read("purple/purple_last_seen.cpp")

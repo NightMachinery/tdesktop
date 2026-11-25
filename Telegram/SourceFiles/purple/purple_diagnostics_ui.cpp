@@ -56,7 +56,9 @@ bool IsAppDataPath(const QString &selected) {
 		const auto file = QFileInfo(path);
 		if (file.absolutePath().compare(own, Qt::CaseInsensitive) == 0) {
 			const auto name = file.fileName().toLower();
-			if (name == u"log.txt" || (name.startsWith(u"log_start") && name.endsWith(u".txt"))) {
+			const auto diagnostic = QString::fromLatin1(kLogFile);
+			if (name == u"log.txt" || name == diagnostic || name == diagnostic + u".1"_q
+				|| (name.startsWith(u"log_start") && name.endsWith(u".txt"))) {
 				return true;
 			}
 		}
@@ -114,10 +116,10 @@ void ShowExport(not_null<Window::Controller*> window) {
 				ExportFailure(host, u"Choose a file outside the app's settings, data, and log paths."_q);
 				return;
 			}
-			const auto bytes = (u"Purple diagnostics\n%1\nTelegram Desktop %2\nQt %3\n\nRecent diagnostic events\n%4\n%5"_q
+			const auto bytes = (u"Purple diagnostics\n%1\nTelegram Desktop %2\nQt %3\n\n%4"_q
 				.arg(VersionText(), QString::fromLatin1(AppVersionStr),
-					QString::fromLatin1(qVersion()), ExportText(),
-					ExportRecentPurpleNotices(host))).toUtf8();
+					QString::fromLatin1(qVersion()),
+					ExportText(ExportRecentPurpleNotices(host)))).toUtf8();
 			auto file = QSaveFile(path);
 			if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size()
 				|| !file.commit()) {
@@ -133,13 +135,15 @@ void ShowClear(not_null<Window::Controller*> window) {
 		return;
 	}
 	window->show(Ui::MakeConfirmBox({
-		.text = rpl::single(u"Clear the recent Purple diagnostics used by Copy logs and "
-			"Export logs? Telegram's log files and Screen Time history are kept."_q),
+		.text = rpl::single(u"Clear this install's Purple diagnostic log?"_q),
 		.confirmed = [current = CurrentWindow(window)](Fn<void()> close) {
 			close();
 			if (const auto host = current()) {
-				Clear();
-				Acknowledge(host, u"Purple diagnostics cleared."_q);
+				if (Clear()) {
+					Acknowledge(host, u"Purple diagnostics cleared."_q);
+				} else {
+					ExportFailure(host, u"Could not clear the Purple diagnostic log."_q);
+				}
 			}
 		},
 		.confirmText = u"Clear logs"_q,

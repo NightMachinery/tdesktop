@@ -53,7 +53,7 @@ std::shared_ptr<SessionState> StateFor(not_null<Main::Session*> session) {
 			&& live->account().maybeSession() == live
 			&& !live->account().loggingOut()
 			&& state->rewrittenBytes > 0) {
-			LOG(("Purple: rewrote SessionSettings, %1 bytes"
+			LOG(("Purple Settings: rewrote SessionSettings, %1 bytes"
 				).arg(state->rewrittenBytes));
 		}
 		state->rewrittenBytes = 0;

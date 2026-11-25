@@ -5,6 +5,8 @@
 
 namespace Purple {
 
+void SetArchiveSqliteFailureSink(void (*sink)(int, QStringView));
+
 struct DesktopArchiveSqlResult {
 	bool ok = false;
 	bool committed = false;

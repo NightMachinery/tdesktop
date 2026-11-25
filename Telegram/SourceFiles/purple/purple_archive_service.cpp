@@ -835,6 +835,11 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 					return;
 				}
 				const auto firstFailure = ArchiveFailureNeedsToast(status, failure, i->second.failure);
+				if (!failure.isEmpty()
+					&& (i->second.status != status || i->second.failure != failure)) {
+					LOG(("Purple Archive: status=%1 reason=%2 measured_bytes=%3.")
+						.arg(int(status)).arg(failure).arg(bytes));
+				}
 				i->second.status = status;
 				if ((!failure.isEmpty() && (failure != u"capture-gap"_q || i->second.failure.isEmpty()))
 					|| (status == DesktopArchiveStatus::Ready && i->second.failure.startsWith(u"purge-"_q))) {
@@ -1033,6 +1038,8 @@ Fn<void()> ArchiveDiscardAction(not_null<Main::Session*> session) {
 					} else {
 						i->second.status = DesktopArchiveStatus::Unreadable;
 						i->second.failure = u"discard-held"_q;
+						LOG(("Purple Archive: Could not discard the account's archive; reason=%1.")
+							.arg(i->second.failure));
 						const auto msg = tr::lng_purple_archive_discard_failed(tr::now);
 						const auto acctKey = PurpleNoticeAccountKey(live);
 						ShowPurpleNotice({
@@ -1047,10 +1054,12 @@ Fn<void()> ArchiveDiscardAction(not_null<Main::Session*> session) {
 					Changes.fire({});
 				});
 			}).detach();
-		} catch (const std::system_error &) {
+		} catch (const std::system_error &error) {
 			active->store(false);
 			i->second.status = DesktopArchiveStatus::Unreadable;
 			i->second.failure = u"discard-worker-unavailable"_q;
+			LOG(("Purple Archive: Could not discard the account's archive; reason=%1 errno=%2.")
+				.arg(i->second.failure).arg(error.code().value()));
 			const auto msg = tr::lng_purple_archive_discard_failed(tr::now);
 			const auto acctKey = PurpleNoticeAccountKey(live);
 			ShowPurpleNotice({

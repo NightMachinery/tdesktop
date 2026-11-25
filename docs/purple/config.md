@@ -1468,12 +1468,11 @@ Under **Purple → Diagnostics & logs**, use **Export diagnostic log…** or
 **Clear diagnostic log…**. In M-x, use
 `:log-export` and `:log-clear`.
 
-- Export writes a text file to the location you choose. It includes the Purple,
-  Telegram Desktop, and Qt versions and up to 256 recent Purple diagnostic
-  events from this run. It also includes up to 32 recent notices from the
-  opening account and app history. Both use fixed descriptions that omit
-  message content, names, account and chat IDs, phone numbers, tokens, and
-  local paths.
-- Clear asks for confirmation and empties the same in-memory events used by
-  **Copy logs** in notice dialogs. Telegram's ordinary log files and Screen
-  Time history stay on disk.
+- Purple keeps timestamps, subsystem labels, reason codes, and diagnostic
+  values in two rotating segments of up to 1 MiB each under its working
+  directory. The files use owner-only permissions on POSIX.
+- Export writes both segments, the Purple, Telegram Desktop, and Qt versions,
+  and up to 32 recent notices from the opening account and the app. It masks
+  recognized credentials and contact details, abbreviates home paths, and
+  assigns short pseudonyms to numeric peer and message IDs.
+- Clear asks for confirmation and truncates the two diagnostic segments.

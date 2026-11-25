@@ -164,8 +164,7 @@ void Gate::refresh(bool settingsChanged) {
 		// every chat the user hid, which is the one outcome a work mode must
 		// never produce by accident, so run on the last resolution that worked.
 		next = FromCache(state.resolvedCache);
-		LOG(("Purple Error: Preset '%1' does not resolve; %2."
-			).arg(wanted
+		LOG(("Purple Work Mode: preset does not resolve; %1."
 			).arg(next
 				? u"keeping the cached resolution"_q
 				: u"keeping the one already in effect"_q));
@@ -246,11 +245,8 @@ void Gate::refresh(bool settingsChanged) {
 		return;
 	}
 	_resolved = std::move(*next);
-	LOG(("Purple: preset '%1'%2%3, %4 lists."
-		).arg(_resolved.preset
-		).arg(_resolved.normal ? u" (stock behaviour)"_q : QString()
-		).arg(_resolved.peeking ? u" (peeking)"_q : QString()
-		).arg(_resolved.lists.size()));
+	LOG(("Purple Work Mode: preset resolved; stock=%1 peeking=%2 lists=%3."
+		).arg(_resolved.normal ? 1 : 0).arg(_resolved.peeking ? 1 : 0).arg(_resolved.lists.size()));
 	_changes.fire({});
 
 	// Only ever widened, never cleared: a resolution we could not compute is

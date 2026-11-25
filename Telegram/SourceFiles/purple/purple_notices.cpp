@@ -243,10 +243,7 @@ bool CopyRecord(::MainWindow *window, const ModalNotices::NoticeRecord &rec) {
 	if (!clipboard) {
 		return false;
 	}
-	clipboard->setText(Diagnostics::ForNotice(
-		rec.scope,
-		rec.coalesceKey,
-		rec.severity == ModalNotices::NoticeSeverity::Error));
+	clipboard->setText(Diagnostics::ForNotice(ResolveNoticeLabels(window, rec)));
 	return true;
 }
 
@@ -612,8 +609,6 @@ void SubmitNotice(
 	const auto window = ResolveEligibleMainWindow(origin, accountKey);
 	const auto ctx = Pending().context(window);
 	if (record.kind == ModalNotices::NoticeKind::Dialog) {
-		Diagnostics::RecordNotice(
-			record.scope, record.coalesceKey, record.severity != ModalNotices::NoticeSeverity::Info);
 		fallback = {};
 	}
 	const auto [route, id, enqueue] = Store().submit(

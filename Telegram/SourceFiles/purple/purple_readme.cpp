@@ -788,20 +788,20 @@ void RefreshReadme() {
 	file.close();
 
 	if (!QDir().mkpath(ConfigDirectory())) {
-		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
+		LOG(("Purple Settings: Error: Could not create %1.").arg(ConfigDirectory()));
 		return;
 	}
 	auto out = QSaveFile(path);
 	if (!out.open(QIODevice::WriteOnly)) {
-		LOG(("Purple Error: Could not write %1.").arg(path));
+		LOG(("Purple Settings: Error: Could not write %1.").arg(path));
 		return;
 	}
 	out.write(wanted.toUtf8());
 	if (!out.commit()) {
-		LOG(("Purple Error: Could not commit %1.").arg(path));
+		LOG(("Purple Settings: Error: Could not commit %1.").arg(path));
 		return;
 	}
-	LOG(("Purple: wrote %1.").arg(path));
+	LOG(("Purple Settings: wrote %1.").arg(path));
 }
 
 } // namespace Purple
