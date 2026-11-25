@@ -56,10 +56,22 @@ struct DesktopArchiveDiscardToken {
 	QString profile;
 	QByteArray profileIdentity;
 	QByteArray directoryIdentity;
+	QByteArray detachedIdentity;
 	QByteArray recordDigest;
-	QByteArray fenceDigest;
+	QByteArray fenceStamp;
+	QByteArray intentStamp;
 	QString authority;
 	QByteArray keys;
+};
+
+struct DesktopArchiveDiscardPreparation {
+	std::optional<DesktopArchiveDiscardToken> token;
+	QString reason;
+};
+
+struct DesktopArchiveDiscardResult {
+	QString reason;
+	[[nodiscard]] explicit operator bool() const { return reason.isEmpty(); }
 };
 
 struct DesktopArchiveOptions {
@@ -114,10 +126,10 @@ class DesktopArchiveStore final {
 	~DesktopArchiveStore();
 	[[nodiscard]] DesktopArchiveStatus Open(DesktopArchiveOptions options);
 	[[nodiscard]] bool Close();
-	[[nodiscard]] static std::optional<DesktopArchiveDiscardToken> PrepareDiscard(
+	[[nodiscard]] static DesktopArchiveDiscardPreparation PrepareDiscard(
 		const DesktopArchiveOptions &options);
-	[[nodiscard]] static bool DiscardAccount(DesktopArchiveOptions options,
-		const DesktopArchiveDiscardToken &token, int maximumActions = 64);
+	[[nodiscard]] static DesktopArchiveDiscardResult DiscardAccount(
+		const DesktopArchiveOptions &options, const DesktopArchiveDiscardToken &token);
 	[[nodiscard]] bool Current() const;
 	[[nodiscard]] bool MemoryCurrent() const;
 	[[nodiscard]] DesktopArchiveStagingCounters StagingCountersForTest() const;

@@ -7,6 +7,7 @@
 #include "core/version.h"
 #include "crl/crl_on_main.h"
 #include "lang/lang_keys.h"
+#include "logs.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
@@ -109,6 +110,18 @@ void ShowArchiveRemovalPending() {
 		.summary = tr::lng_purple_archive_removal_pending(tr::now),
 		.coalesceKey = QString::fromLatin1(ModalNotices::kArchiveRemovalNoticeKey),
 		.severity = ModalNotices::NoticeSeverity::Warning,
+		.background = true,
+	});
+}
+
+void ShowArchiveDiscardFailure(Main::Session *session, const QString &reason) {
+	LOG(("Purple Archive: discard failed (%1).").arg(reason));
+	ShowPurpleNotice({
+		.session = session,
+		.scope = u"Local archive"_q,
+		.summary = tr::lng_purple_archive_discard_failed(tr::now) + u" ["_q + reason + ']',
+		.coalesceKey = u"archive:discard_failed:"_q + PurpleNoticeAccountKey(session),
+		.severity = ModalNotices::NoticeSeverity::Error,
 		.background = true,
 	});
 }
@@ -770,6 +783,7 @@ struct ArchiveSession {
 	std::shared_ptr<std::atomic<bool>> routing = std::make_shared<std::atomic<bool>>(true);
 	DesktopArchiveStatus status = DesktopArchiveStatus::Disabled;
 	QString failure;
+	QString discardFailure;
 	uint64_t bytes = 0;
 };
 std::map<Main::Session*, ArchiveSession> Sessions;
@@ -987,7 +1001,6 @@ Fn<void()> ArchiveDiscardAction(not_null<Main::Session*> session) {
 		}
 		const auto active = std::make_shared<std::atomic<bool>>(true);
 		i->second.resetting = active;
-		i->second.routing->store(false);
 		live->lifetime().add([active] { active->store(false); });
 		live->mtp().writeKeysRequests() | rpl::on_next([weak, active, keys = options.loginAuthKeyIds] {
 			const auto live = weak.get();
@@ -995,23 +1008,19 @@ Fn<void()> ArchiveDiscardAction(not_null<Main::Session*> session) {
 				active->store(false);
 			}
 		}, live->lifetime());
-		i->second.status = DesktopArchiveStatus::RemovalPending;
-		i->second.failure = u"explicit-discard"_q;
-		static_cast<void>(worker->Stop(false));
-		Changes.fire({});
 		options.active = [active] { return active->load(); };
 		try {
-			std::thread([weak, worker, options = std::move(options), active]() mutable {
-				auto removed = false;
-				if (worker->WaitForStopped(std::chrono::milliseconds(500)) && active->load()) {
-					const auto token = DesktopArchiveStore::PrepareDiscard(options);
-					const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
-					options.maintenanceAllowed = [deadline] {
-						return std::chrono::steady_clock::now() < deadline;
-					};
-					removed = token && DesktopArchiveStore::DiscardAccount(options, *token, 64);
+			auto reset = std::thread([weak, worker, options, active] {
+				while (!worker->WaitForStopped(std::chrono::seconds(1))) {
 				}
-				crl::on_main([weak, worker, options = std::move(options), active, removed] {
+				auto result = DesktopArchiveDiscardResult{u"discard-account-changed"_q};
+				if (active->load()) {
+					const auto prepared = DesktopArchiveStore::PrepareDiscard(options);
+					result = prepared.token
+						? DesktopArchiveStore::DiscardAccount(options, *prepared.token)
+						: DesktopArchiveDiscardResult{prepared.reason};
+				}
+				crl::on_main([weak, worker, options, active, result = std::move(result)] {
 					const auto live = weak.get();
 					if (!live || Retired.contains(live)) {
 						return;
@@ -1021,46 +1030,34 @@ Fn<void()> ArchiveDiscardAction(not_null<Main::Session*> session) {
 						|| i->second.resetting != active) {
 						return;
 					}
-					const auto current = active->load()
+					const auto current = active->exchange(false)
 						&& live->local().readPref<QByteArray>(kLoginAuthorityPref) == options.loginAuthority
 						&& Options(live->account()).loginAuthKeyIds == options.loginAuthKeyIds;
-					active->store(false);
-					if (removed && current) {
+					if (result && current) {
 						live->local().clearPref(kLoginAuthorityPref);
 						live->local().clearPref(kLoginStorePref);
-						Sessions.erase(i);
-						static_cast<void>(For(live));
-					} else {
-						i->second.status = DesktopArchiveStatus::Unreadable;
-						i->second.failure = u"discard-held"_q;
-						const auto msg = tr::lng_purple_archive_discard_failed(tr::now);
-						const auto acctKey = PurpleNoticeAccountKey(live);
-						ShowPurpleNotice({
-							.session = live,
-							.scope = u"Local archive"_q,
-							.summary = msg,
-							.coalesceKey = u"archive:discard_failed:"_q + acctKey,
-							.severity = ModalNotices::NoticeSeverity::Error,
-							.background = true,
-						});
+					}
+					Sessions.erase(i);
+					auto &restart = For(live);
+					if (!result || !current) {
+						restart.discardFailure = current ? result.reason : u"discard-account-changed"_q;
+						ShowArchiveDiscardFailure(live, restart.discardFailure);
 					}
 					Changes.fire({});
 				});
-			}).detach();
+			});
+			i->second.routing->store(false);
+			i->second.status = DesktopArchiveStatus::RemovalPending;
+			i->second.failure = u"explicit-discard"_q;
+			i->second.discardFailure.clear();
+			static_cast<void>(worker->Stop(false));
+			reset.detach();
+			Changes.fire({});
 		} catch (const std::system_error &) {
 			active->store(false);
-			i->second.status = DesktopArchiveStatus::Unreadable;
-			i->second.failure = u"discard-worker-unavailable"_q;
-			const auto msg = tr::lng_purple_archive_discard_failed(tr::now);
-			const auto acctKey = PurpleNoticeAccountKey(live);
-			ShowPurpleNotice({
-				.session = live,
-				.scope = u"Local archive"_q,
-				.summary = msg,
-				.coalesceKey = u"archive:discard_failed:"_q + acctKey,
-				.severity = ModalNotices::NoticeSeverity::Error,
-				.background = true,
-			});
+			i->second.resetting.reset();
+			i->second.discardFailure = u"discard-worker-unavailable"_q;
+			ShowArchiveDiscardFailure(live, i->second.discardFailure);
 			Changes.fire({});
 		}
 	};
@@ -1513,6 +1510,10 @@ QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 		return tr::lng_purple_archive_removal_pending(tr::now);
 	}
 	const auto &value = For(session);
+	if (!value.discardFailure.isEmpty()) {
+		return tr::lng_purple_archive_discard_failed(tr::now)
+			+ u" ["_q + value.discardFailure + ']';
+	}
 	if (value.status == DesktopArchiveStatus::Maintenance) {
 		return tr::lng_purple_archive_purge_running(tr::now);
 	}

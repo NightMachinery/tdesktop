@@ -136,21 +136,21 @@ deleted. Refusal notices name the action. It does not modify Telegram chat data.
 Confirmation captures the opening session, account, worker instance, nonce and
 live key set. A switched window, newer login/worker, changed context or repeated
 callback refuses. On confirmation the old worker is stopped, its keys and
-pending deliveries are revoked immediately, and a background wait has a 500 ms
-limit. The main thread never waits. Under the account lock, a discard token
-captures the profile and account-directory identities, exact account record and
-fence digest. Cleanup checks every fence again, and targets only the derived
-account directory. It cannot follow a malformed record's store path into another
-account or discard a newer incarnation. The existing removal state machine and
-bounded pages perform deletion, with a 500 ms cooperative cleanup budget.
-Cancellation on logout/session loss/key-set change stops further actions. Kernel
-IO is not preemptible; it remains off the main thread.
+pending deliveries are revoked immediately. A background task waits for the
+worker to close. Under the account and catalogue locks, discard checks the
+profile and account-directory identities, exact account record, fence and
+pending intent again. It renames only the derived account directory to a
+private sibling before changing the account's metadata. That rename detaches
+all of the account's files at once. It does not read the database or replay the
+journal. The detached directory blocks creation of a replacement until cleanup
+finishes.
 
-Only completed cleanup permits a new random nonce and empty store. Failure stays
-visibly held; invoking the action again obtains a fresh fenced continuation.
-A missing or corrupt record can therefore recover without weakening automatic
-admission. Unreadable profile/catalogue metadata that cannot be snapshotted
-safely still refuses. Other accounts and unbound profile roots are never swept.
+Cleanup pages run off the main thread without the logout time or page budget.
+If interrupted after detachment, the same action resumes cleanup of the
+detached directory. Failures give a specific reason in Settings and the log.
+A corrupt or oversized per-account file can be discarded. Unsafe paths or an
+unreadable shared profile catalogue still refuse, so other accounts keep their
+existing binding and data.
 
 ## Logout cleanup
 

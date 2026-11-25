@@ -13,6 +13,7 @@
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFile>
+#include <QtCore/QLockFile>
 #include <QtCore/QTemporaryDir>
 #include <array>
 #include <atomic>
@@ -328,19 +329,17 @@ void LegacyProfileBinding() {
 			CHECK(QFileInfo::exists(root));
 			CHECK(DesktopArchiveRead(root + u"/archive.sqlite"_q, 1048576) == database);
 			if ((scenario >= 6 && scenario <= 10) || scenario == 15) {
-				CHECK(!DesktopArchiveStore::PrepareDiscard(options));
+				CHECK(!DesktopArchiveStore::PrepareDiscard(options).token);
 			}
 			if (scenario == 13) {
 				// A refused record can be discarded without rebinding other accounts.
 				auto refused = options;
 				refused.localKey = QByteArray(256, 'x');
-				const auto token = DesktopArchiveStore::PrepareDiscard(refused);
+				const auto token = DesktopArchiveStore::PrepareDiscard(refused).token;
 				CHECK(token);
 				CHECK(DesktopArchiveRead(marker, 4096) == std::optional(bytes));
 				CHECK(token && !DesktopArchiveStore::DiscardAccount(other, *token));
-				CHECK(token && !DesktopArchiveStore::DiscardAccount(refused, *token, 1));
-				const auto continuation = DesktopArchiveStore::PrepareDiscard(refused);
-				CHECK(continuation && DesktopArchiveStore::DiscardAccount(refused, *continuation));
+				CHECK(token && DesktopArchiveStore::DiscardAccount(refused, *token));
 				CHECK(DesktopArchiveRead(marker, 4096) == std::optional(bytes));
 				CHECK(second.Open(other) == DesktopArchiveStatus::Ready);
 				CHECK(second.epoch() == otherEpoch);
@@ -385,7 +384,7 @@ void ExplicitDiscardRecovery() {
 	CHECK(store.Open(options) == DesktopArchiveStatus::Unreadable);
 	CHECK(QFileInfo::exists(oldRoot));
 	CHECK(store.Close());
-	const auto token = DesktopArchiveStore::PrepareDiscard(options);
+	const auto token = DesktopArchiveStore::PrepareDiscard(options).token;
 	CHECK(token);
 	if (!token) {
 		return;
@@ -400,12 +399,8 @@ void ExplicitDiscardRecovery() {
 	stale = options;
 	stale.maintenanceAllowed = [] { return false; };
 	CHECK(!DesktopArchiveStore::DiscardAccount(stale, *token));
-	CHECK(!DesktopArchiveStore::DiscardAccount(options, *token, 1));
 	CHECK(QFileInfo::exists(oldRoot));
-	CHECK(!DesktopArchiveStore::DiscardAccount(options, *token));
-	const auto continuation = DesktopArchiveStore::PrepareDiscard(options);
-	CHECK(continuation);
-	CHECK(continuation && DesktopArchiveStore::DiscardAccount(options, *continuation));
+	CHECK(DesktopArchiveStore::DiscardAccount(options, *token));
 	CHECK(!QFileInfo::exists(oldRoot));
 	options.loginAuthority = QByteArray(32, 'b');
 	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
@@ -428,11 +423,96 @@ void ExplicitDiscardRecovery() {
 	CHECK(store.Remove());
 	auto virgin = QTemporaryDir();
 	const auto empty = Options(virgin.path());
-	const auto emptyToken = DesktopArchiveStore::PrepareDiscard(empty);
+	const auto emptyToken = DesktopArchiveStore::PrepareDiscard(empty).token;
 	CHECK(emptyToken);
 	CHECK(emptyToken && DesktopArchiveStore::DiscardAccount(empty, *emptyToken));
 	CHECK(store.Open(empty) == DesktopArchiveStatus::Ready);
 	CHECK(store.Remove());
+}
+
+void ExplicitDiscardFixtures() {
+	for (const auto condition : {"locked", "held", "corrupt", "oversized", "gap",
+			"journal-pending", "large", "detached"}) {
+		Section = condition;
+		const auto temporary = QTemporaryDir();
+		auto options = Options(temporary.path());
+		const auto other = Options(temporary.path(), 456);
+		auto store = DesktopArchiveStore();
+		auto second = DesktopArchiveStore();
+		CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+		if (!store.Current()) {
+			continue;
+		}
+		const auto root = store.directory();
+		const auto epoch = store.epoch();
+		const auto account = QFileInfo(root).absolutePath();
+		const auto profile = QFileInfo(QFileInfo(account).absolutePath()).absolutePath();
+		const auto fence = profile + u"/fences/0-123.json"_q;
+		const auto intent = profile + u"/intents/0-123.json"_q;
+		const auto database = root + u"/archive.sqlite"_q;
+		if (!std::strcmp(condition, "gap")) {
+			CHECK(store.Gap(u"fixture-gap"_q, u"fixture-loss"_q, 1));
+		} else if (!std::strcmp(condition, "journal-pending")) {
+			const auto access = store.JournalAccess();
+			CHECK(access);
+			if (access) {
+				auto journal = DesktopArchiveJournal(*access);
+				CHECK(journal.Open());
+				CHECK(journal.Append(Event(Empty(), u"pending"_q, 1, u"fixture"_q)));
+			}
+		}
+		CHECK(store.Close());
+		CHECK(second.Open(other) == DesktopArchiveStatus::Ready);
+		const auto otherRoot = second.directory();
+		const auto otherEpoch = second.epoch();
+		CHECK(second.Capture(Event(Empty(other.account), u"keep"_q, 1,
+			u"other fixture"_q, ArchiveOrigin::Baseline, Key(other.account))).retained);
+		auto held = QLockFile(profile + u"/locks/0-123.lock"_q);
+		auto catalogueHeld = QLockFile(profile + u"/catalogue.lock"_q);
+		if (!std::strcmp(condition, "locked")) {
+			CHECK(held.tryLock(0));
+			const auto prepared = DesktopArchiveStore::PrepareDiscard(options);
+			CHECK(!prepared.token && prepared.reason == u"discard-account-lock-unavailable"_q);
+			held.unlock();
+		} else if (!std::strcmp(condition, "held")) {
+			CHECK(catalogueHeld.tryLock(0));
+			const auto prior = DesktopArchiveRead(fence, 4096);
+			const auto token = DesktopArchiveStore::PrepareDiscard(options).token;
+			CHECK(token && DesktopArchiveStore::DiscardAccount(options, *token).reason
+				== u"discard-catalogue-lock-unavailable"_q);
+			CHECK(DesktopArchiveRead(fence, 4096) == prior);
+			CHECK(QFileInfo::exists(database));
+			catalogueHeld.unlock();
+		} else if (!std::strcmp(condition, "corrupt")) {
+			CHECK(DesktopArchiveWrite(database, QByteArray("corrupt sqlite fixture")));
+		} else if (!std::strcmp(condition, "oversized")) {
+			CHECK(DesktopArchiveWrite(fence, QByteArray(8192, 'x')));
+			CHECK(DesktopArchiveWrite(intent, QByteArray(8192, 'y')));
+		} else if (!std::strcmp(condition, "large")) {
+			for (auto i = 0; i != 8200; ++i) {
+				auto file = QFile(root + u"/blobs/fixture-"_q + QString::number(i));
+				CHECK(file.open(QIODevice::WriteOnly));
+				CHECK(file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+			}
+		} else if (!std::strcmp(condition, "detached")) {
+			CHECK(QDir().rename(account, account + u".discard"_q));
+			CHECK(store.Open(options) == DesktopArchiveStatus::RemovalPending);
+			CHECK(store.Close());
+		}
+		const auto token = DesktopArchiveStore::PrepareDiscard(options).token;
+		CHECK(token && DesktopArchiveStore::DiscardAccount(options, *token));
+		CHECK(!QFileInfo::exists(root));
+		CHECK(!QFileInfo::exists(account + u".discard"_q));
+		CHECK(!QFileInfo::exists(intent));
+		options.loginAuthority = QByteArray(32, 'b');
+		CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+		CHECK(store.epoch().storeId != epoch.storeId);
+		CHECK(store.Versions(Key()).versions.empty());
+		CHECK(second.directory() == otherRoot && second.epoch() == otherEpoch);
+		CHECK(second.Versions(Key(other.account)).versions.size() == 1);
+		CHECK(store.Close());
+		CHECK(second.Close());
+	}
 }
 
 void AdmissionAuthentication() {
@@ -2192,6 +2272,7 @@ int main(int argc, char** argv) {
 	StaleLogoutCleanup();
 	HistoricalObservationRevision();
 	ShortSendAcknowledgement();
+	ExplicitDiscardFixtures();
 	AttentionRecovery();
 	PageDelivery();
 	SourceFiles();

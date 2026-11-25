@@ -7,6 +7,7 @@
 #include "purple/purple_archive_media_lifecycle.h"
 #include "purple/purple_sync_json.h"
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFileInfo>
@@ -168,7 +169,6 @@ struct Layout {
 	QString lock;
 	uint64_t generation = 0;
 	QJsonObject record;
-	std::optional<QJsonValue> discardRecord;
 };
 
 QString Marker(const DesktopArchiveOptions &options) {
@@ -369,6 +369,36 @@ std::optional<QJsonObject> Catalogue(const Layout &layout, bool create) {
 			   : std::nullopt;
 }
 
+QString DetachedAccountDirectory(const Layout &layout) {
+	return layout.accountDirectory + u".discard"_q;
+}
+
+QByteArray DiscardStamp(const QString &path) {
+	if (!Exists(path)) {
+		return QByteArray("absent");
+	}
+	const auto identity = DesktopArchiveIdentity(path);
+	if (identity.isEmpty() || !DesktopArchivePrivate(path, false)) {
+		return {};
+	}
+	const auto info = QFileInfo(path);
+	const auto bytes = DesktopArchiveRead(path, 4096);
+	return identity + ':' + QByteArray::number(info.size()) + ':'
+		+ QByteArray::number(info.lastModified().toMSecsSinceEpoch()) + ':'
+		+ (bytes ? QCryptographicHash::hash(*bytes, QCryptographicHash::Sha256) : "opaque");
+}
+
+QByteArray DiscardRecordDigest(const QJsonValue &entry) {
+	return QCryptographicHash::hash(
+		QJsonDocument(QJsonArray{entry}).toJson(QJsonDocument::Compact),
+		QCryptographicHash::Sha256);
+}
+
+QString DiscardAuthority(const DesktopArchiveOptions &options) {
+	return QString::fromLatin1(QCryptographicHash::hash(
+		options.loginAuthority, QCryptographicHash::Sha256).toHex());
+}
+
 bool AdmissionShape(const QJsonObject &record) {
 	const auto fields = {u"store"_q, u"key"_q, u"generation"_q, u"phase"_q,
 		u"slot"_q, u"loginAuthority"_q, u"loginAuthorityVersion"_q,
@@ -501,10 +531,7 @@ bool UpdateRecord(const Layout &layout, const std::optional<QJsonObject> &record
 	}
 	auto accounts = catalogue->value(u"accounts"_q).toObject();
 	const auto old = accounts.value(layout.account);
-	if (layout.discardRecord && (record || old != *layout.discardRecord)) {
-		return false;
-	}
-	if (!layout.discardRecord && !old.isUndefined()
+	if (!old.isUndefined()
 		&& (!old.isObject()
 			|| old.toObject().value(u"store"_q) != QJsonValue(layout.store))) {
 		return false;
@@ -922,6 +949,10 @@ DesktopArchiveStatus DesktopArchiveStore::Open(DesktopArchiveOptions options) {
 	if (!RecoverReleasedLock(self.layout.lock) || !self.lock->tryLock(0)) {
 		self.lock.reset();
 		self.Fail(DesktopArchiveStatus::Busy, u"account-lock"_q);
+		return self.status;
+	}
+	if (Exists(DetachedAccountDirectory(self.layout))) {
+		self.Fail(DesktopArchiveStatus::RemovalPending, u"discard-cleanup-pending"_q);
 		return self.status;
 	}
 	if (Exists(self.layout.intent)) {
@@ -1440,114 +1471,161 @@ bool DesktopArchiveStore::Remove(int maximumActions) {
 	return result;
 }
 
-std::optional<DesktopArchiveDiscardToken> DesktopArchiveStore::PrepareDiscard(
+DesktopArchiveDiscardPreparation DesktopArchiveStore::PrepareDiscard(
 	const DesktopArchiveOptions &options) {
-	if (options.loginAuthority.size() != 32
-		|| !DesktopArchiveLoginKeysValid(options.loginAuthKeyIds)
-		|| (options.active && !options.active())) {
-		return {};
+	if (options.active && !options.active()) {
+		return {{}, u"discard-account-changed"_q};
 	}
+	if (options.loginAuthority.size() != 32 || !DesktopArchiveLoginKeysValid(options.loginAuthKeyIds)) {
+		return {{}, u"discard-login-authority-unavailable"_q};
+	}
+	const auto native = DesktopArchiveIdentity(options.profileRoot);
+	if (native.isEmpty()) {
+		return {{}, u"discard-profile-identity-unavailable"_q};
+	}
+	auto token = DesktopArchiveDiscardToken{
+		.account = options.account,
+		.profileIdentity = native,
+		.authority = DiscardAuthority(options),
+		.keys = options.loginAuthKeyIds,
+	};
 	if (NoProfileBinding(options)) {
-		return DesktopArchiveDiscardToken{options.account, {},
-			DesktopArchiveIdentity(options.profileRoot), {}, {}, {},
-			QString::fromLatin1(QCryptographicHash::hash(options.loginAuthority, QCryptographicHash::Sha256).toHex()),
-			options.loginAuthKeyIds};
+		return {std::move(token), {}};
 	}
 	const auto profile = Profile(options, false, true);
 	if (!profile) {
-		return {};
+		return {{}, u"discard-profile-binding-unavailable"_q};
 	}
 	auto lock = std::make_unique<QLockFile>(profile->lock);
 	const auto release = gsl::finally([&] { ReleaseAccountLock(lock, profile->lock); });
 	lock->setStaleLockTime(0);
 	if (!RecoverReleasedLock(profile->lock) || !lock->tryLock(0)) {
-		return {};
+		return {{}, u"discard-account-lock-unavailable"_q};
 	}
-	const auto catalogue = Catalogue(*profile, false);
-	const auto fence = Exists(profile->fence)
-		? DesktopArchiveRead(profile->fence, 4096) : std::optional(QByteArray("absent"));
-	if (!catalogue || !fence) {
-		return {};
+	const auto catalogue = Catalogue(*profile, true);
+	if (!catalogue) {
+		return {{}, u"discard-catalogue-unreadable"_q};
 	}
-	const auto entry = catalogue->value(u"accounts"_q).toObject().value(profile->account);
-	const auto identity = DesktopArchiveIdentity(profile->accountDirectory);
-	if (Exists(profile->accountDirectory) && identity.isEmpty()) {
-		return {};
+	const auto detached = DetachedAccountDirectory(*profile);
+	if ((Exists(profile->accountDirectory) && !DesktopArchivePrivate(profile->accountDirectory, true))
+		|| (Exists(detached) && !DesktopArchivePrivate(detached, true))) {
+		return {{}, u"discard-account-directory-unsafe"_q};
 	}
-	return DesktopArchiveDiscardToken{options.account, profile->profile,
-		DesktopArchiveIdentity(options.profileRoot), identity,
-		QCryptographicHash::hash(QJsonDocument(QJsonArray{entry}).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256),
-		QCryptographicHash::hash(*fence, QCryptographicHash::Sha256),
-		QString::fromLatin1(QCryptographicHash::hash(options.loginAuthority, QCryptographicHash::Sha256).toHex()),
-		options.loginAuthKeyIds};
+	token.profile = profile->profile;
+	token.directoryIdentity = DesktopArchiveIdentity(profile->accountDirectory);
+	token.detachedIdentity = DesktopArchiveIdentity(detached);
+	if (!token.directoryIdentity.isEmpty() && !token.detachedIdentity.isEmpty()) {
+		return {{}, u"discard-account-directory-conflict"_q};
+	}
+	token.fenceStamp = DiscardStamp(profile->fence);
+	token.intentStamp = DiscardStamp(profile->intent);
+	if (token.fenceStamp.isEmpty() || token.intentStamp.isEmpty()) {
+		return {{}, u"discard-account-metadata-unsafe"_q};
+	}
+	token.recordDigest = DiscardRecordDigest(
+		catalogue->value(u"accounts"_q).toObject().value(profile->account));
+	return {std::move(token), {}};
 }
 
-bool DesktopArchiveStore::DiscardAccount(DesktopArchiveOptions options,
-	const DesktopArchiveDiscardToken &token, int maximumActions) {
-	DesktopArchiveCrypto::Clear(options.localKey);
+DesktopArchiveDiscardResult DesktopArchiveStore::DiscardAccount(
+	const DesktopArchiveOptions &options, const DesktopArchiveDiscardToken &token) {
 	if (options.account != token.account || options.loginAuthority.size() != 32
-		|| options.loginAuthKeyIds != token.keys
-		|| QString::fromLatin1(QCryptographicHash::hash(options.loginAuthority, QCryptographicHash::Sha256).toHex()) != token.authority
-		|| maximumActions < 1 || maximumActions > 64
-		|| (options.maintenanceAllowed && !options.maintenanceAllowed())
+		|| options.loginAuthKeyIds != token.keys || DiscardAuthority(options) != token.authority
 		|| (options.active && !options.active())) {
-		return false;
+		return {u"discard-account-changed"_q};
+	}
+	if (DesktopArchiveIdentity(options.profileRoot) != token.profileIdentity) {
+		return {u"discard-profile-changed"_q};
 	}
 	if (token.profile.isEmpty()) {
-		return NoProfileBinding(options)
-			&& DesktopArchiveIdentity(options.profileRoot) == token.profileIdentity;
+		return {NoProfileBinding(options) ? QString() : u"discard-profile-changed"_q};
 	}
 	const auto profile = Profile(options, false, true);
-	if (!profile || profile->profile != token.profile
-		|| DesktopArchiveIdentity(options.profileRoot) != token.profileIdentity) {
-		return false;
+	if (!profile || profile->profile != token.profile) {
+		return {u"discard-profile-changed"_q};
 	}
-	auto layout = *profile;
+	const auto &layout = *profile;
 	auto lock = std::make_unique<QLockFile>(layout.lock);
 	const auto release = gsl::finally([&] { ReleaseAccountLock(lock, layout.lock); });
 	lock->setStaleLockTime(0);
 	if (!RecoverReleasedLock(layout.lock) || !lock->tryLock(0)) {
-		return false;
+		return {u"discard-account-lock-unavailable"_q};
 	}
-	const auto catalogue = Catalogue(layout, false);
-	const auto fenceBytes = Exists(layout.fence)
-		? DesktopArchiveRead(layout.fence, 4096) : std::optional(QByteArray("absent"));
-	if (!catalogue || !fenceBytes) {
-		return false;
+	const auto detached = DetachedAccountDirectory(layout);
+	{
+		const auto serial = std::lock_guard(CatalogueMutex);
+		auto catalogueLock = QLockFile(layout.profileDirectory + u"/catalogue.lock"_q);
+		catalogueLock.setStaleLockTime(0);
+		if (!catalogueLock.tryLock(0)) {
+			return {u"discard-catalogue-lock-unavailable"_q};
+		}
+		auto catalogue = Catalogue(layout, true);
+		if (!catalogue) {
+			return {u"discard-catalogue-unreadable"_q};
+		}
+		auto accounts = catalogue->value(u"accounts"_q).toObject();
+		const auto entry = accounts.value(layout.account);
+		if (DesktopArchiveIdentity(layout.accountDirectory) != token.directoryIdentity
+			|| DesktopArchiveIdentity(detached) != token.detachedIdentity
+			|| (Exists(layout.accountDirectory) && !DesktopArchivePrivate(layout.accountDirectory, true))
+			|| (Exists(detached) && !DesktopArchivePrivate(detached, true))
+			|| (Exists(layout.accountDirectory) && Exists(detached))
+			|| DiscardRecordDigest(entry) != token.recordDigest
+			|| DiscardStamp(layout.fence) != token.fenceStamp
+			|| DiscardStamp(layout.intent) != token.intentStamp) {
+			return {u"discard-archive-changed"_q};
+		}
+		if ((options.active && !options.active())
+			|| DesktopArchiveIdentity(options.profileRoot) != token.profileIdentity) {
+			return {u"discard-account-changed"_q};
+		}
+		if (options.maintenanceAllowed && !options.maintenanceAllowed()) {
+			return {u"discard-cancelled"_q};
+		}
+		if (entry.isUndefined() && !Exists(layout.accountDirectory) && !Exists(detached)
+			&& !Exists(layout.intent) && !Exists(layout.fence)) {
+			return {};
+		}
+		const auto oldFence = Fence(layout);
+		const auto generation = std::max(oldFence ? oldFence->generation : uint64_t(0),
+			Number(entry.toObject().value(u"generation"_q)).value_or(0));
+		const auto store = NewToken();
+		if (store.isEmpty()) {
+			return {u"discard-fence-token-unavailable"_q};
+		}
+		// The rename is the commit point. The detached directory also blocks a
+		// fresh store if cleanup is interrupted, including before metadata changes.
+		if (!Exists(detached) && (Exists(layout.accountDirectory)
+				? !QDir().rename(layout.accountDirectory, detached)
+				: !DesktopArchiveDirectory(detached))) {
+			return {u"discard-detach-failed"_q};
+		}
+		if (!DesktopArchiveSyncDirectory(QFileInfo(detached).absolutePath())) {
+			return {u"discard-detach-sync-failed"_q};
+		}
+		const auto freshGeneration = generation == std::numeric_limits<uint64_t>::max()
+			? uint64_t(1) : generation + 1;
+		if (!WriteFence(layout, {options.account, store, freshGeneration, true})) {
+			return {u"discard-fence-write-failed"_q};
+		}
+		if (!DesktopArchiveRemoveFile(layout.intent)) {
+			return {u"discard-intent-remove-failed"_q};
+		}
+		if (!entry.isUndefined()) {
+			accounts.remove(layout.account);
+			catalogue->insert(u"accounts"_q, accounts);
+			if (!WriteObject(layout.catalogue, *catalogue)) {
+				return {u"discard-catalogue-write-failed"_q};
+			}
+		}
 	}
-	const auto entry = catalogue->value(u"accounts"_q).toObject().value(layout.account);
-	if (DesktopArchiveIdentity(layout.accountDirectory) != token.directoryIdentity
-		|| QCryptographicHash::hash(QJsonDocument(QJsonArray{entry}).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256) != token.recordDigest
-		|| QCryptographicHash::hash(*fenceBytes, QCryptographicHash::Sha256) != token.fenceDigest
-		|| (options.active && !options.active())) {
-		return false;
+	auto complete = false;
+	while (!complete) {
+		if (!DesktopArchiveRemoveTreePage(detached, 128, complete)) {
+			return {u"discard-detached-cleanup-failed"_q};
+		}
 	}
-	const auto oldFence = Fence(layout);
-	const auto durable = Exists(layout.intent)
-		? DesktopArchiveRead(layout.intent, 4096) : std::optional<QByteArray>();
-	auto removal = durable ? ResumeArchiveRemoval(*durable)
-		: BeginArchiveRemoval({options.account,
-			oldFence ? oldFence->storeId : NewToken(),
-			oldFence ? oldFence->generation : 1, false}, NewToken());
-	if (!removal || removal->epoch.account != options.account) {
-		return false;
-	}
-	layout.store = removal->epoch.storeId;
-	layout.generation = removal->epoch.generation;
-	layout.root = layout.accountDirectory;
-	layout.discardRecord = entry;
-	auto fence = removal->epoch;
-	fence.removalPending = true;
-	if ((options.active && !options.active())
-		|| (options.maintenanceAllowed && !options.maintenanceAllowed())
-		|| !WriteFence(layout, fence)) {
-		return false;
-	}
-	return RunRemoval(layout, *removal, nullptr, maximumActions, 0,
-		[&] {
-			return (!options.active || options.active())
-				&& (!options.maintenanceAllowed || options.maintenanceAllowed());
-		});
+	return {};
 }
 
 bool DesktopArchiveStore::RemoveAccount(
@@ -1564,6 +1642,9 @@ bool DesktopArchiveStore::RemoveAccount(
 	auto lock = QLockFile(layout.lock);
 	lock.setStaleLockTime(0);
 	if (!RecoverReleasedLock(layout.lock) || !lock.tryLock(0)) {
+		return false;
+	}
+	if (Exists(DetachedAccountDirectory(layout))) {
 		return false;
 	}
 	const auto catalogue = Catalogue(layout, false);
@@ -1622,6 +1703,12 @@ bool DesktopArchiveStore::Recover(const DesktopArchiveOptions &options) {
 			return false;
 		}
 		const auto path = iterator.next();
+		const auto name = iterator.fileName();
+		if (name.endsWith(u".json"_q) && ParseAccountKey(name.chopped(5))
+			&& DesktopArchivePrivate(profile->profileDirectory + u"/accounts/"_q
+				+ name.chopped(5) + u".discard"_q, true)) {
+			continue;
+		}
 		const auto bytes = DesktopArchiveRead(path, 4096);
 		const auto removal = bytes ? ResumeArchiveRemoval(*bytes) : std::nullopt;
 		if (!removal) {
