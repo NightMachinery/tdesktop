@@ -4364,7 +4364,7 @@ void MarkdownArticle::Impl::forEachVisibleLinkText(
 				.geometry = TextGeometry(segment.textWidth),
 				.align = segment.align,
 				.clip = visible,
-				.ratio = currentDevicePixelRatio(),
+				.ratio = float64(currentDevicePixelRatio()),
 			});
 		}
 	}
