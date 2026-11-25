@@ -117,6 +117,15 @@ ChatMusicLayout AddChatMusicLayout(
 	box->addButton(rpl::single(u"Actions"_q), [=] { tracks->showActions(); });
 	const auto more = box->addLeftButton(tr::lng_purple_music_more(), std::move(args.loadMore));
 	more->hide();
+	if (style::RightToLeft()) {
+		box->setInitScrollCallback([=] {
+			const auto body = box->verticalLayout();
+			// The wrapper positions hidden RTL content before its width is ready.
+			body->positionValue() | rpl::on_next([=](QPoint position) {
+				if (!position.isNull()) body->move(0, 0);
+			}, body->lifetime());
+		});
+	}
 	return { filter, status, tracks, more };
 }
 
