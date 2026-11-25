@@ -129,6 +129,7 @@ private:
 	bool _pendingG = false;
 	bool _pendingLocal = false;
 	bool _tail = false;
+	bool _closed = false;
 
 };
 
@@ -197,6 +198,10 @@ ChatMusicBox::ChatMusicBox(
 		else _search->setFocusFast();
 	});
 	box->setCloseByEscape(false);
+	box->boxClosing() | rpl::on_next([=] {
+		_closed = true;
+		_viewer.destroy();
+	}, box->lifetime());
 	box->setWidth(std::max(st::boxWidth, std::min(
 		st::purpleChatMusicWidth,
 		controller->content()->width() - 2 * st::purpleMusicMargin)));
@@ -222,7 +227,7 @@ ChatMusicBox::ChatMusicBox(
 
 bool ChatMusicBox::current() const {
 	const auto controller = _controller.get();
-	return controller && &controller->session() == _session.get()
+	return !_closed && controller && &controller->session() == _session.get()
 		&& _session->account().maybeSession() == _session.get()
 		&& !_session->account().loggingOut()
 		&& !Core::App().passcodeLocked() && !controller->window().locked()
@@ -570,9 +575,12 @@ void ChatMusicBox::goTo(uint64_t key) {
 	}
 	if (const auto source = item(key)) {
 		const auto controller = _controller;
+		const auto id = source->fullId();
 		_box->closeBox();
 		if (const auto strong = controller.get()) {
-			strong->showMessage(source, Window::SectionShow::Way::Forward);
+			if (const auto live = strong->session().data().message(id)) {
+				strong->showMessage(live, Window::SectionShow::Way::Forward);
+			}
 		}
 	} else {
 		setStatus(tr::lng_purple_music_track_unavailable(tr::now));
