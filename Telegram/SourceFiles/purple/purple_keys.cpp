@@ -3366,8 +3366,8 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 	case KeyUse::FullscreenBack:
 		if (target.history) {
 			target.history->escape();
-		} else if (target.messages) {
-			target.controller->showBackFromStack();
+		} else if (target.messages.section) {
+			target.messages.section->delegate()->listCancelRequest();
 		}
 		break;
 	case KeyUse::Cancel:
