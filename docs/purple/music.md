@@ -63,7 +63,8 @@ While an input method is composing text, Down stays in search.
 
 Choose **List** or **Tiles**, or press `, t` to switch between them. The
 switch shows its shortcut once, beside both labels. The library and chat
-music dialog share the saved view. In Tiles, Left and Right
+music dialog share the saved view. An accent fill shows the active view.
+In Tiles, Left and Right
 or `h` and `l` move horizontally. Both views use document thumbnails when
 available and draw a cover from the track and artist names while art loads.
 A track can show the cursor border, mark, and playback badge at the same

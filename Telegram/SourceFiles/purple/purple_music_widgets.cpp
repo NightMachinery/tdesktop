@@ -327,10 +327,14 @@ object_ptr<Ui::RpWidget> MakeMusicViewControl(
 		group, tr::lng_purple_music_tracks(), st::purpleMusicTitle);
 	const auto toggle = Ui::CreateChild<Ui::RpWidget>(group);
 	const auto hint = Ui::CreateChild<KeyHint>(toggle, keys, toggle);
-	const auto list = Ui::CreateChild<MusicActionButton>(
-		toggle, tr::lng_purple_music_list(), rpl::single(QStringList()), [=] { select(false); });
-	const auto grid = Ui::CreateChild<MusicActionButton>(
-		toggle, tr::lng_purple_music_tiles(), rpl::single(QStringList()), [=] { select(true); });
+	const auto list = Ui::CreateChild<Ui::RoundButton>(
+		toggle, tr::lng_purple_music_list(), st::purpleMusicViewOption);
+	const auto grid = Ui::CreateChild<Ui::RoundButton>(
+		toggle, tr::lng_purple_music_tiles(), st::purpleMusicViewOption);
+	list->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+	grid->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
+	list->setClickedCallback([=] { select(false); });
+	grid->setClickedCallback([=] { select(true); });
 	toggle->paintRequest() | rpl::on_next([=] {
 		auto p = Painter(toggle);
 		auto quality = PainterHighQualityEnabler(p);
@@ -357,10 +361,16 @@ object_ptr<Ui::RpWidget> MakeMusicViewControl(
 	rpl::combine(group->widthValue(), list->naturalWidthValue(),
 		grid->naturalWidthValue(), hint->widthValue()
 	) | rpl::on_next(place, group->lifetime());
-	std::move(tiles) | rpl::on_next([=](bool isTiles) {
-		const auto brush = std::optional<QBrush>(st::windowBgRipple->b);
-		list->setBrushOverride(isTiles ? std::nullopt : brush);
-		grid->setBrushOverride(isTiles ? brush : std::nullopt);
+	rpl::combine(std::move(tiles), rpl::single() | rpl::then(style::PaletteChanged()))
+		| rpl::on_next([=](bool isTiles) {
+		const auto selected = st::activeButtonBg->c;
+		const auto surface = st::windowBgOver->c;
+		const auto set = [&](not_null<Ui::RoundButton*> button, bool active) {
+			button->setBrushOverride(active ? std::optional<QBrush>(st::activeButtonBg->b) : std::nullopt);
+			button->setTextFgOverride(MusicReadableColor(st::windowFg->c, active ? selected : surface, 4.5));
+		};
+		set(list, !isTiles);
+		set(grid, isTiles);
 	}, group->lifetime());
 	return result;
 }

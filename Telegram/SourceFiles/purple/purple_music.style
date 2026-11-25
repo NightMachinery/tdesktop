@@ -67,6 +67,16 @@ purpleMusicTitle: FlatLabel(boxTitle) {
 	}
 }
 
+purpleMusicViewOption: RoundButton(defaultLightButton) {
+	width: -20px;
+	textBg: windowBgOver;
+	textBgOver: windowBgOver;
+	radius: purpleMusicCoverRadius;
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: windowBgRipple;
+	}
+}
+
 purpleMusicSearch: InputField(defaultInputField) {
 	textBg: windowBgOver;
 	textBgActive: windowBgOver;
