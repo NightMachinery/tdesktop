@@ -562,14 +562,13 @@ void WhichKeyOverlay::updateBounds(QRect availableAboveStatusBar) {
 		hide();
 		return;
 	}
-	const auto drawerW = std::min(availableAboveStatusBar.width(), 1120);
+	const auto drawerW = availableAboveStatusBar.width();
 	const auto maxH = std::max(140, int(availableAboveStatusBar.height() * 0.44));
 	const auto drawerH = computeHeight(drawerW, maxH);
 	_columns = computeColumns(drawerW);
 	_columnWidth = std::max(1, (drawerW - 36 - (_columns - 1) * 18) / _columns);
 
-	const auto left = availableAboveStatusBar.x()
-		+ (availableAboveStatusBar.width() - drawerW) / 2;
+	const auto left = availableAboveStatusBar.x();
 	const auto top = availableAboveStatusBar.y()
 		+ availableAboveStatusBar.height() - drawerH;
 	setGeometry(left, top, drawerW, drawerH);
@@ -586,20 +585,21 @@ void WhichKeyOverlay::paintEvent(QPaintEvent *) {
 	const auto sepFm = QFontMetrics(st::normalFont);
 	const auto rtl = IsRtl(this);
 
-	// Elevated rounded-top drawer surface.
-	constexpr auto kRadius = 10.0;
-	auto path = QPainterPath();
-	path.moveTo(0, r.height());
-	path.lineTo(0, kRadius);
-	path.quadTo(0, 0, kRadius, 0);
-	path.lineTo(r.width() - kRadius, 0);
-	path.quadTo(r.width(), 0, r.width(), kRadius);
-	path.lineTo(r.width(), r.height());
-	path.closeSubpath();
+	const auto line = qreal(st::lineWidth);
+	const auto radius = std::min(qreal(st::boxRadius), r.width() / 2.);
+	const auto bounds = QRectF(r).adjusted(line / 2, line / 2, -line / 2, 0);
+	auto edge = QPainterPath();
+	edge.moveTo(bounds.bottomLeft());
+	edge.lineTo(bounds.left(), bounds.top() + radius);
+	edge.quadTo(bounds.topLeft(), QPointF(bounds.left() + radius, bounds.top()));
+	edge.lineTo(bounds.right() - radius, bounds.top());
+	edge.quadTo(bounds.topRight(), QPointF(bounds.right(), bounds.top() + radius));
+	edge.lineTo(bounds.bottomRight());
 
-	p.setPen(QPen(st::boxDividerBg->c, 1));
-	p.setBrush(st::windowBg->c);
-	p.drawPath(path);
+	const auto fill = st::windowBg->c;
+	const auto contrast = ReadableText(st::windowSubTextFg->c, fill);
+	p.fillPath(edge, fill);
+	p.strokePath(edge, QPen(BlendColor(fill, contrast, .82), line));
 
 	// Header strip.
 	constexpr auto kHeaderH = 38;

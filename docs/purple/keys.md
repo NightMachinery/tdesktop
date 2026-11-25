@@ -45,7 +45,8 @@ the active layout. On macOS, `M-` (Option) chords such as `M-x`, `M-p`, and
 ## Docked which-key drawer
 
 Pausing ~280 ms inside a prefix opens a docked which-key drawer flush above the
-modal status line (reusing stock `Ui::KeysLegend` keycaps and theme colors).
+modal status line. Its rounded top edge uses the window theme and spans the
+window width. Keycaps reuse the stock `Ui::KeysLegend` style.
 The header displays the pending chord, group or localleader title, and
 `DEL back · ESC cancel`. The responsive multi-column grid lists only applicable continuations, placing
 `+group` prefixes in accent color above a hairline divider and merging duplicate
