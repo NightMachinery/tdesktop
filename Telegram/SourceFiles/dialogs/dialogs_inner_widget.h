@@ -181,6 +181,7 @@ public:
 		MsgId pressedTopicRootId = {},
 		PeerId pressedSublistPeerId = {});
 	bool processKeyDispatch(QKeyEvent *e);
+	[[nodiscard]] Key purpleKeyboardSelection() const;
 
 	void scrollToEntry(const RowDescriptor &entry);
 

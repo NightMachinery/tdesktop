@@ -14,7 +14,7 @@ int main() {
 		}
 	};
 
-	enum class Action { Up, Down, ChatNext };
+	enum class Action { Up, Down, ChatNext, FolderNext };
 	using Hold = HeldMotion<Action>;
 	const auto focus = int();
 	const auto other = int();
@@ -29,6 +29,8 @@ int main() {
 	expect(!CanArm(Policy::SameTarget, false, 1, false), "Insert mode");
 	expect(!CanArm(Policy::SameTarget, true, 2, false), "multi-stroke binding");
 	expect(!CanArm(Policy::SameTarget, true, 1, true), "describe-key capture");
+	expect(CanArm(Policy::FolderNavigation, true, 1, false), "single folder motion can repeat");
+	expect(!CanArm(Policy::FolderNavigation, true, 2, false), "prefixed folder motion is single-shot");
 
 	auto held = Hold();
 	expect(!held.next(repeat, target), "orphan repeat is ignored");
@@ -65,13 +67,22 @@ int main() {
 	held.start(press, target, Action::Down, Policy::SameTarget);
 	expect(!held.next(repeat, { &focus, &scope, false }), "mode change");
 	held.start(press, target, Action::Down, Policy::SameTarget);
-	held.cancel(true);
+	held.cancel(Policy::ChatNavigation);
 	expect(!held.next(repeat, target), "ordinary scroll stops on chat switch");
 	held.start(press, target, Action::ChatNext, Policy::ChatNavigation);
-	held.cancel(true);
+	held.cancel(Policy::ChatNavigation);
 	expect(held.next(repeat, target) == Action::ChatNext, "chat navigation can cross a chat switch");
 	held.cancel();
 	expect(!held.next(repeat, target), "every navigation stops on focus or protection change");
+	held.start(press, target, Action::FolderNext, Policy::FolderNavigation);
+	held.cancel(Policy::FolderNavigation);
+	expect(held.next(repeat, target) == Action::FolderNext, "own folder switch preserves hold");
+	expect(!held.next(repeat, target), "folder repeats coalesce too");
+	held.cancel(Policy::ChatNavigation);
+	expect(!held.action(), "ordinary chat switch cancels folder hold");
+	held.start(press, target, Action::ChatNext, Policy::ChatNavigation);
+	held.cancel(Policy::FolderNavigation);
+	expect(!held.action(), "folder switch cancels chat navigation");
 
 	std::cout << checks << " checks, " << failures << " failures\n";
 	return failures ? 1 : 0;

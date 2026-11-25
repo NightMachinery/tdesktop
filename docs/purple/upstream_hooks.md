@@ -66,6 +66,9 @@ the numbers.
   modal commands can use Telegram's contextual shortcut handlers.
 - `dialogs/dialogs_widget.*` and `history/history_widget.*`: focus eligibility
   adapters expose the existing dialogs cursor and eligible history controls.
+- `dialogs/dialogs_widget.*` and `dialogs/dialogs_inner_widget.*`: expose the
+  visible dialogs list and its keyboard-selected entry to open or preview
+  the same row from another pane.
 - `platform/mac/main_window_mac.mm`: keeps the preliminary typing notification
   from moving focus to search while Normal mode owns the chat list.
 - `history/history_inner_widget.*`: visible message enumeration and geometry

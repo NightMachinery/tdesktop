@@ -11,8 +11,14 @@ never covers messages or the composer).
   Switching chats, folders, or panes stays in Normal mode while clearing any
   in-flight prefix or count.
 - Hold a single-key motion such as `j`, `k`, `J`, `K`, `C-d`, or `C-u`
-  to repeat it. A numeric count applies to the first press. Each repeat moves
-  one step and ends with key release or when its context changes.
+  to repeat it. A numeric count applies to the first press. Changing focus
+  or leaving Normal mode ends the motion.
+- In history and topics, a tap of `j` or `k` eases one step. The first repeat
+  starts continuous pixel scrolling, and release stops it with a short ease-out.
+  The cheatsheet, notice bodies, and Customize review scroll the same way.
+  Repeated half-page and page motions retarget the current scroll animation.
+  Lists and pickers still move one row at a time. Turning off Animations
+  restores discrete scroll steps.
 - **Insert** (blue badge): press `i` or `a`, start a reply or edit hint, open
   search, or click directly inside the message composer to type. Ordinary
   typing, IME composition, and Telegram shortcuts work normally. Press `Esc`,
@@ -50,7 +56,8 @@ window width. Keycaps reuse the stock `Ui::KeysLegend` style.
 The header displays the pending chord, group or localleader title, and
 `DEL back · ESC cancel`. The responsive multi-column grid lists only applicable continuations, placing
 `+group` prefixes in accent color above a hairline divider and merging duplicate
-alias keys (such as `SPC / :` or `, / RET`) into one command row. Pressing `,`
+alias keys (such as `SPC / :` or `, / RET`) into one command row. In the chat
+list, the folder rows also show the bare folder shortcuts when bound. Pressing `,`
 or `SPC m` where no context bindings apply reports `No local keys here` on the
 status line and swallows the next keystroke.
 
@@ -61,13 +68,22 @@ prefix (`g`, `y`, `[`, `]`, `C-w`), or a localleader context map (`,` / `SPC m`)
 with at most four strokes per chord:
 
 - **Navigate:** `j` / `k` move the chat cursor (in the chat list) or scroll the
-  conversation (in a chat), repeatable with counts (`5j`). `J` / `K` (`C-j` /
-  `C-k`) step through chats from any pane. `RET` / `o` open the highlighted
-  chat. `h` / `l` (`SPC w h` / `SPC w l` / `C-w h` / `C-w l`) switch between
-  the chat list and conversation; `SPC w w` (`C-w w`) toggles panes. `C-d` /
+  conversation (in a chat), repeatable with counts (`5j`). `C-j` / `C-k` and
+  `] c` / `[ c` step through the visible chat list from either pane.
+  `J` / `K` step the chat cursor from a conversation. In the main chat list,
+  they move to the next or previous folder, keep list focus and wrap past the
+  ends. Use a count (`3J`) or hold the key to advance through visible folders.
+  Work Mode-hidden folders are skipped. Archive and forum topic lists show a
+  status message when you try to switch folders with `J` / `K`.
+  `RET` / `o` open the highlighted row from the list or after one of those
+  steps. The status line shows `RET open` while the same row stays highlighted.
+  Moving the pointer over the list, clicking, or switching folders clears the
+  cursor picked from another pane. `h` / `l` (`SPC w h` / `SPC w l` / `C-w h` / `C-w l`)
+  switch between the chat list and conversation, and `SPC w w` (`C-w w`)
+  toggles panes. `C-d` /
   `C-u` scroll half a page, `C-f` / `C-b` (`]` / `[` `m`) scroll a full page,
   `G` / `] ]` jump to latest, `] u` / `g u` jump to unread, `] f` / `[ f` step
-  folders.
+  through folders with wrapping when the main chat list is focused.
 - **Leader (`SPC`):**
   - `SPC SPC`, `M-x`, `:`, `SPC :`: command palette (`M-x`).
   - `SPC ,`, `SPC RET`: chat switcher palette. `SPC b b`: recently viewed chats.
@@ -214,8 +230,11 @@ keymap exists yet, Purple creates a commented starter `keys.edn` beside
 
 Maps are `:normal`, `:insert`, `:chat`, `:chats`, and `:music`. Optional
 top-level keys are `:localleader` (vector of chord strings) and `:keyless`
-(vector of deliberately unbound command keywords). String values inside a map
-label a prefix in which-key and the status line. Uppercase letters (`"G"`)
+(vector of deliberately unbound command keywords). `J` / `K` in `:chats` apply
+directly in the chat list. A user `:chats` binding takes precedence there, and
+a user `:normal` binding or removal takes precedence over the built-in
+`:chats` default. Other `:chats` chords use the localleader. String values
+inside a map label a prefix in which-key and the status line. Uppercase letters (`"G"`)
 normalize to `S-g`. Files up to 32 KiB and 256 entries are validated atomically:
 any invalid entry keeps built-in defaults active and displays the exact reason
 on the modal status line and cheatsheet footer.

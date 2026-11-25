@@ -28,6 +28,7 @@
 #include "history/history_widget.h"
 #include "history/view/controls/history_view_compose_controls.h"
 #include "history/view/history_view_chat_section.h"
+#include "history/view/history_view_list_widget.h"
 #include "history/view/history_view_pinned_section.h"
 #include "history/view/history_view_scheduled_section.h"
 #include "info/downloads/info_downloads_widget.h"
@@ -47,7 +48,9 @@
 #include "purple/purple_config.h"
 #include "purple/purple_diagnostics_ui.h"
 #include "purple/purple_exact_search.h"
+#include "purple/purple_folder_strip.h"
 #include "purple/purple_key_repeat.h"
+#include "purple/purple_key_scroll.h"
 #include "purple/purple_keys_mx.h"
 #include "purple/purple_keys_ui.h"
 #include "purple/purple_keys_unread.h"
@@ -72,6 +75,7 @@
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/scroll_area.h"
 #include "ui/wrap/slide_wrap.h"
 #include "window/themes/window_theme.h"
 #include "window/window_controller.h"
@@ -91,12 +95,15 @@
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
 #include <QtCore/QTimer>
+#include <QtGui/QCursor>
 #include <QtGui/QInputMethodEvent>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QTextBlock>
 #include <QtGui/QTextLayout>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QAbstractScrollArea>
+#include <QtWidgets/QScrollBar>
 #include <QtWidgets/QTextEdit>
 
 #include <algorithm>
@@ -114,6 +121,10 @@ namespace Purple {
 
 class KeyboardAttachment final {
 public:
+	static bool ScrollAnimating(const HistoryWidget *history) {
+		return history && (history->_scrollToAnimation.animating() || history->_itemsRevealHeight);
+	}
+
 	static QTextEdit *Composer(QWidget *widget) {
 		for (auto parent = widget; parent; parent = parent->parentWidget()) {
 			auto field = static_cast<Ui::InputField*>(nullptr);
@@ -180,6 +191,28 @@ constexpr auto kWhichKeyDelay = 280;
 constexpr auto kFeedbackDurationMs = 3500;
 constexpr auto kMaxCount = 200;
 constexpr auto kLineScrollPx = 84;
+
+struct ScrollReadout {
+	int top = 0;
+	int maximum = 0;
+};
+
+struct ScrollPress {
+	int physical = 0;
+	bool repeat = false;
+};
+
+enum class ScrollStyle { Step, Continuous };
+
+void ScrollTo(QWidget *view, int top) {
+	if (const auto elastic = dynamic_cast<Ui::ElasticScroll*>(view)) {
+		elastic->scrollToY(top);
+	} else if (const auto scroll = dynamic_cast<Ui::ScrollArea*>(view)) {
+		scroll->scrollToY(top);
+	} else {
+		static_cast<QAbstractScrollArea*>(view)->verticalScrollBar()->setValue(top);
+	}
+}
 #ifdef Q_OS_MAC
 constexpr auto kCtrl = Qt::MetaModifier;
 constexpr auto kSuper = Qt::ControlModifier;
@@ -406,7 +439,7 @@ const Command kCommands[] = {
 	{ Action::NextChat, "chat-cursor-next", "chats", "Needs chat list visible",
 		"next conversation cursor down",
 		[] { return tr::lng_purple_keys_chat_next(tr::now); }, RepeatPolicy::ChatNavigation },
-	{ Action::OpenChat, "chat-cursor-open", "chats", "Needs chat list focus",
+	{ Action::OpenChat, "chat-cursor-open", "chats", "J/K to pick a chat first",
 		"visit conversation enter selected",
 		[] { return tr::lng_purple_keys_chat_open(tr::now); } },
 	{ Action::ChatPalette, "chat-palette", "chats", "",
@@ -451,12 +484,12 @@ const Command kCommands[] = {
 	{ Action::TopicParent, "topic-parent", "topics", "Needs a forum group or threaded bot",
 		"thread forum back list",
 		[] { return u"Show forum topic list"_q; } },
-	{ Action::PreviousFolder, "folder-previous", "chats", "Needs main chat list focus",
+	{ Action::PreviousFolder, "folder-previous", "chats", "Folders are available in the main chat list",
 		"tab filter previous left",
-		[] { return tr::lng_purple_keys_folder_previous(tr::now); }, RepeatPolicy::Count },
-	{ Action::NextFolder, "folder-next", "chats", "Needs main chat list focus",
+		[] { return tr::lng_purple_keys_folder_previous(tr::now); }, RepeatPolicy::FolderNavigation },
+	{ Action::NextFolder, "folder-next", "chats", "Folders are available in the main chat list",
 		"tab filter next right",
-		[] { return tr::lng_purple_keys_folder_next(tr::now); }, RepeatPolicy::Count },
+		[] { return tr::lng_purple_keys_folder_next(tr::now); }, RepeatPolicy::FolderNavigation },
 	{ Action::SelectMessage, "message-hint-select", "messages", "Needs visible messages",
 		"mark pick visible bubble hints",
 		[] { return tr::lng_purple_keys_message_select(tr::now); } },
@@ -554,7 +587,7 @@ const Command kCommands[] = {
 	{ Action::OpenChatMenu, "open-chat-menu", "chat", "Needs chat list or open chat",
 		"options actions context conversation",
 		[] { return tr::lng_shortcuts_show_chat_menu(tr::now); } },
-	{ Action::PreviewChat, "preview-chat", "chats", "Needs chat list focus",
+	{ Action::PreviewChat, "preview-chat", "chats", "J/K to pick a chat first",
 		"peek quick view conversation",
 		[] { return tr::lng_shortcuts_show_chat_preview(tr::now); } },
 	{ Action::MessageMenu, "message-hint-menu", "messages", "Needs visible messages",
@@ -684,28 +717,49 @@ enum class MapKind {
 };
 
 constexpr auto kCtrlG = int(kCtrl) | Qt::Key_G;
+constexpr auto kShiftJ = int(Qt::ShiftModifier) | Qt::Key_J;
+constexpr auto kShiftK = int(Qt::ShiftModifier) | Qt::Key_K;
 
 struct Binding {
 	Action action;
 	Chord keys;
 	MapKind map = MapKind::Normal;
+	bool user = false;
 };
+
+bool IsDirectChatListChord(const Chord &keys) {
+	return keys.size() == 1 && (keys.front() == kShiftJ || keys.front() == kShiftK);
+}
+
+bool UsesLocalleader(const Binding &binding) {
+	return binding.map != MapKind::Normal && binding.map != MapKind::Insert
+		&& (binding.map != MapKind::Chats || !IsDirectChatListChord(binding.keys)
+			|| binding.user);
+}
 
 struct KeymapData {
 	std::vector<Binding> bindings;
 	std::vector<Chord> localleaders;
 	std::map<std::pair<MapKind, Chord>, QString> labels;
 	QSet<Action> keyless;
+	QSet<int> normalChatListOverrides;
 	QString userPath;
 	QString error;
 };
 
-QString MapName(MapKind map) {
+bool IsActiveDirectChatListBinding(const Binding &binding, const KeymapData &data) {
+	return binding.map == MapKind::Chats && IsDirectChatListChord(binding.keys)
+		&& (binding.user || !data.normalChatListOverrides.contains(binding.keys.front()));
+}
+
+QString MapName(MapKind map, bool localleader = true) {
 	switch (map) {
 	case MapKind::Normal: return u"everywhere"_q;
 	case MapKind::Insert: return u"in Insert mode"_q;
 	case MapKind::Chat: return u"in a chat (after localleader)"_q;
-	case MapKind::Chats: return u"in the chat list (after localleader)"_q;
+	case MapKind::Chats: return localleader
+		? u"in the chat list (after localleader)"_q
+		: u"in the chat list"_q;
 	case MapKind::Music: return u"in Music (after localleader)"_q;
 	}
 	return u"everywhere"_q;
@@ -1114,6 +1168,9 @@ bool ParseEdnOverlay(
 				errorOut = u"cannot override protected help chord \""_q + *chordStr + u"\""_q;
 				return false;
 			}
+			if (isUserOverlay && *mapKind == MapKind::Normal && IsDirectChatListChord(chord)) {
+				data.normalChatListOverrides.insert(chord.front());
+			}
 			if (edn_type(val) == EDN_TYPE_NIL) {
 				if (current != data.bindings.end()) {
 					data.bindings.erase(current);
@@ -1128,8 +1185,9 @@ bool ParseEdnOverlay(
 			}
 			if (current != data.bindings.end()) {
 				current->action = *action;
+				current->user = isUserOverlay;
 			} else {
-				data.bindings.push_back({ *action, std::move(chord), *mapKind });
+				data.bindings.push_back({ *action, std::move(chord), *mapKind, isUserOverlay });
 			}
 		}
 	}
@@ -1137,7 +1195,8 @@ bool ParseEdnOverlay(
 	// Validate no command/prefix collision within any single map.
 	for (const auto &a : data.bindings) {
 		for (const auto &b : data.bindings) {
-			if (a.map == b.map && a.keys.size() < b.keys.size() && StartsWith(b, a.keys)) {
+			if (a.map == b.map && UsesLocalleader(a) == UsesLocalleader(b)
+				&& a.keys.size() < b.keys.size() && StartsWith(b, a.keys)) {
 				errorOut = u"prefix collision between \""_q + ChordLabel(a.keys)
 					+ u"\" and \""_q + ChordLabel(b.keys) + u"\""_q;
 				return false;
@@ -1147,7 +1206,7 @@ bool ParseEdnOverlay(
 	// Validate localleader chords do not collide with :normal commands or prefixes.
 	for (const auto &ll : data.localleaders) {
 		for (const auto &b : data.bindings) {
-			if (b.map == MapKind::Normal
+			if ((b.map == MapKind::Normal || IsActiveDirectChatListBinding(b, data))
 					&& (StartsWith(b.keys, ll) || StartsWith(ll, b.keys))) {
 				errorOut = u":localleader \""_q + ChordLabel(ll)
 					+ u"\" collides with :normal \""_q + ChordLabel(b.keys) + u"\""_q;
@@ -1285,6 +1344,7 @@ void SaveMxHistory() {
 struct Target {
 	QPointer<QWidget> focus;
 	Dialogs::InnerWidget *list = nullptr;
+	bool chatCursorAvailable = false;
 	HistoryWidget *history = nullptr;
 	MessageHints::Target messages;
 	Fn<void(Data::MessagePosition)> jumpInSection;
@@ -1433,7 +1493,7 @@ Dialogs::Widget *ChatsPane(Window::SessionController *controller) {
 	for (const auto child : controller->content()->children()) {
 		const auto dialogs = dynamic_cast<Dialogs::Widget*>(child);
 		if (dialogs && dialogs->controller() == controller
-			&& dialogs->isEnabled() && dialogs->purpleKeysList(dialogs)) {
+			&& dialogs->isEnabled() && dialogs->purpleVisibleKeysList()) {
 			return dialogs;
 		}
 	}
@@ -1442,7 +1502,7 @@ Dialogs::Widget *ChatsPane(Window::SessionController *controller) {
 
 Dialogs::InnerWidget *ChatsInnerList(Window::SessionController *controller) {
 	const auto dialogs = ChatsPane(controller);
-	return dialogs ? dialogs->purpleKeysList(dialogs) : nullptr;
+	return dialogs ? dialogs->purpleVisibleKeysList() : nullptr;
 }
 
 Ui::ElasticScroll *HistoryScroll(const Target &target) {
@@ -1642,7 +1702,7 @@ bool Available(Action action, const Target &target) {
 	case Action::NextChat:
 		return target.list != nullptr || ChatsInnerList(target.controller) != nullptr;
 	case Action::PreviewChat:
-	case Action::OpenChat: return target.list != nullptr;
+	case Action::OpenChat: return target.list != nullptr || target.chatCursorAvailable;
 	case Action::PreviousFolder:
 	case Action::NextFolder: return target.folders;
 	case Action::SelectMessage:
@@ -1791,10 +1851,19 @@ std::vector<EffectiveBinding> EffectiveBindings(
 		}
 		return result;
 	}
+	auto directKeys = QSet<int>();
+	if (contextMap == MapKind::Chats) {
+		for (const auto &b : km.bindings) {
+			if (IsActiveDirectChatListBinding(b, km)) {
+				directKeys.insert(b.keys.front());
+				result.push_back({ b.action, b.keys, b.map, false });
+			}
+		}
+	}
 	if (contextMap) {
 		for (const auto &ll : km.localleaders) {
 			for (const auto &b : km.bindings) {
-				if (b.map != *contextMap) {
+				if (b.map != *contextMap || !UsesLocalleader(b)) {
 					continue;
 				}
 				auto combined = ll;
@@ -1804,11 +1873,22 @@ std::vector<EffectiveBinding> EffectiveBindings(
 		}
 	}
 	for (const auto &b : km.bindings) {
-		if (b.map == MapKind::Normal) {
+		if (b.map == MapKind::Normal && !directKeys.contains(b.keys.front())) {
 			result.push_back({ b.action, b.keys, MapKind::Normal, false });
 		}
 	}
 	return result;
+}
+
+bool HasFolderKeys() {
+	const auto bindings = EffectiveBindings(true, MapKind::Chats);
+	const auto has = [&](int key, Action action) {
+		return ranges::any_of(bindings, [&](const EffectiveBinding &binding) {
+			return binding.action == action && binding.keys.size() == 1
+				&& binding.keys.front() == key;
+		});
+	};
+	return has(kShiftJ, Action::NextFolder) && has(kShiftK, Action::PreviousFolder);
 }
 
 bool IsLocalleaderPrefix(const Chord &prefix) {
@@ -1875,6 +1955,12 @@ public:
 
 	bool handle(QObject *receiver, QEvent *event);
 	bool layerKey(const QKeyEvent &event, not_null<QWidget*> layer, bool motion);
+	void scrollKey(
+		not_null<QWidget*> view,
+		QWidget *layer,
+		int delta,
+		ScrollStyle style,
+		ScrollPress press);
 #ifdef Q_OS_MAC
 	[[nodiscard]] bool swallowNativeRepeat(int physical) const;
 #endif // Q_OS_MAC
@@ -1899,12 +1985,14 @@ private:
 		QObject *receiver,
 		bool allowUnmapped = false) const;
 	[[nodiscard]] Target activeTarget() const;
+	[[nodiscard]] Dialogs::InnerWidget *liveChatCursor(
+		Window::SessionController *controller) const;
 	[[nodiscard]] bool chromeVisible() const;
 	[[nodiscard]] KeyUse classify(
 		const QKeyEvent &event,
 		int key,
 		const Target &target) const;
-	void clearPrefix(bool keepChatNavigation = false);
+	void clearPrefix(RepeatPolicy keepMotion = RepeatPolicy::Never, bool keepChatCursor = false);
 	void enterNormal(bool silent = true);
 	void enterInsert(bool silent = true);
 	void showFeedback(QString text, bool isError = false, int durationMs = 0);
@@ -1921,7 +2009,10 @@ private:
 	void hideWhichKey();
 	void stroke(KeyRepeat::Stroke press, const Target &target);
 	void repeat(const QKeyEvent &event, QObject *receiver);
-	void dispatch(Action action, const Target &target, int count);
+	void dispatch(Action action, const Target &target, int count, ScrollPress press = {});
+	[[nodiscard]] std::optional<ScrollReadout> readScroll(QWidget *view, QWidget *layer) const;
+	[[nodiscard]] bool advanceScroll(crl::time now);
+	void cancelScroll();
 	void showHelpLayer(bool startOnAllBindings, const Target &target);
 	void showDescribeKeyResult(const Chord &chord, const Target &target);
 	void showDescribeCommandResult(Action action, const Target &target);
@@ -1935,6 +2026,13 @@ private:
 	QPointer<ModalUi::WhichKeyOverlay> _whichKey;
 	QPointer<QTextEdit> _normalComposer;
 	QPointer<QWidget> _preeditInput;
+	struct ChatCursor {
+		QPointer<Dialogs::InnerWidget> list;
+		Dialogs::Key row;
+		QPoint pointer;
+	};
+	ChatCursor _chatCursor;
+	bool _steppingFolders = false;
 	int _composerCursorWidth = 0;
 	QTimer _whichKeyTimer;
 	QTimer _feedbackTimer;
@@ -1948,6 +2046,17 @@ private:
 	QSet<int> _held;
 	KeyRepeat::HeldMotion<Action> _motion;
 	KeyRepeat::HeldMotion<int> _layerMotion;
+	struct PixelScroll {
+		QPointer<QWidget> view;
+		QPointer<QWidget> layer;
+		QPointer<QWidget> focus;
+		KeyScroll::Motion motion;
+		int physical = 0;
+		int expectedTop = 0;
+	};
+	PixelScroll _pixel;
+	uint64 _scrollRevision = 0;
+	Ui::Animations::Basic _scrollFrame{ [this](crl::time now) { return advanceScroll(now); } };
 	bool _normal = true; // Starts in Normal mode when modal keys are enabled.
 	bool _inspect = false;
 	bool _swallowNext = false;
@@ -2116,7 +2225,14 @@ Keys::Keys(not_null<MainWindow*> window)
 	Purple::PeekCountdownChanges() | rpl::on_next([=] {
 		_motion.cancel();
 		_layerMotion.cancel();
+		cancelScroll();
 		schedulePendingNoticeFlush();
+	}, _lifetime);
+
+	anim::Disables() | rpl::filter([](bool disabled) {
+		return disabled;
+	}) | rpl::on_next([=] {
+		cancelScroll();
 	}, _lifetime);
 
 	Core::App().screenIsLockedValue() | rpl::filter([](bool locked) {
@@ -2223,29 +2339,38 @@ Keys::Keys(not_null<MainWindow*> window)
 			}, _sessionLifetime);
 		}
 		StateChanges() | rpl::on_next([=] {
+			if (_chatCursor.row && !liveChatCursor(this->owner())) {
+				_chatCursor = {};
+				refreshStatusBar();
+			}
 			scheduleUnreadRefresh();
 			closeAllNoticeLayers();
 		}, _sessionLifetime);
 		refreshUnreadSummary();
 
-		const auto contextChanged = [=](bool keepChatNavigation) {
+		const auto contextChanged = [=](RepeatPolicy keepMotion) {
 			++_revision;
 			recordActiveTopic();
 			if (_zenMode && !owner->activeChatCurrent().thread()) {
 				owner->setPurpleZenHidden(true);
 			}
-			clearPrefix(keepChatNavigation);
+			clearPrefix(keepMotion);
+		};
+		const auto folderMotion = [=] {
+			return _steppingFolders ? RepeatPolicy::FolderNavigation : RepeatPolicy::Never;
 		};
 		owner->activeChatEntryChanges() | rpl::on_next([=](auto) {
-			contextChanged(true);
+			contextChanged(_steppingFolders ? folderMotion() : RepeatPolicy::ChatNavigation);
+		}, _sessionLifetime);
+		owner->activeChatsFilter() | rpl::on_next([=](FilterId) {
+			contextChanged(folderMotion());
 		}, _sessionLifetime);
 		rpl::merge(
-			owner->activeChatsFilter() | rpl::to_empty,
 			owner->openedFolder().changes() | rpl::to_empty,
 			owner->shownForum().changes() | rpl::to_empty,
 			owner->openedCommunity().changes() | rpl::to_empty
 		) | rpl::on_next([=] {
-			contextChanged(false);
+			contextChanged(RepeatPolicy::Never);
 		}, _sessionLifetime);
 	}, _lifetime);
 
@@ -2315,6 +2440,21 @@ bool Keys::eventFilter(QObject *watched, QEvent *event) {
 	}
 #endif // Q_OS_MAC
 	if (watched->isWidgetType() && static_cast<QWidget*>(watched)->window() == _window) {
+		if (_chatCursor.row) {
+			const auto list = _chatCursor.list.data();
+			const auto viewport = list ? list->parentWidget() : nullptr;
+			const auto widget = static_cast<QWidget*>(watched);
+			const auto hovered = (type == QEvent::MouseMove) && viewport
+				&& (viewport == widget || viewport->isAncestorOf(widget))
+				&& static_cast<QMouseEvent*>(event)->globalPosition().toPoint() != _chatCursor.pointer;
+			if (!list || hovered || type == QEvent::MouseButtonPress
+				|| type == QEvent::TouchBegin || type == QEvent::Wheel
+				|| (watched == list && (type == QEvent::Hide
+					|| (type == QEvent::Paint && !liveChatCursor(owner()))))) {
+				_chatCursor = {};
+				refreshStatusBar();
+			}
+		}
 		if (type == QEvent::KeyPress || type == QEvent::ShortcutOverride
 			|| type == QEvent::KeyRelease) {
 			const auto key = static_cast<QKeyEvent*>(event);
@@ -2324,12 +2464,15 @@ bool Keys::eventFilter(QObject *watched, QEvent *event) {
 				_held.remove(physical);
 				_motion.cancel();
 				_layerMotion.cancel();
+				cancelScroll();
 			} else if (ClaimedKeys.contains(physical) && handle(watched, event)) {
 				return true;
 			}
-		} else if (type == QEvent::MouseButtonPress) {
+		} else if (type == QEvent::MouseButtonPress
+			|| type == QEvent::Wheel || type == QEvent::TouchBegin) {
 			_motion.cancel();
 			_layerMotion.cancel();
+			cancelScroll();
 		}
 	}
 	// Clicking directly into a message composer enters Insert mode so mouse typing works immediately.
@@ -2422,7 +2565,7 @@ void Keys::raiseChrome() {
 Target Keys::currentTarget(QObject *receiver, bool allowUnmapped) const {
 	const auto focus = QApplication::focusWidget();
 	const auto current = owner();
-	return (focus
+	auto target = (focus
 			&& focus->isVisible()
 			&& focus->isEnabled()
 			&& focus->window() == _window
@@ -2431,6 +2574,27 @@ Target Keys::currentTarget(QObject *receiver, bool allowUnmapped) const {
 			&& !_window->controller().isLayerShown())
 		? FindTarget(current, focus, allowUnmapped)
 		: Target();
+	if (target.focus && !target.list) {
+		target.chatCursorAvailable = (liveChatCursor(current) != nullptr);
+	}
+	return target;
+}
+
+Dialogs::InnerWidget *Keys::liveChatCursor(Window::SessionController *controller) const {
+	if (!_chatCursor.list || !_normal || !Enabled() || !controller || controller != owner()
+		|| _window->controller().isLayerShown()) {
+		return nullptr;
+	}
+	const auto list = ChatsInnerList(controller);
+	if (!list || list != _chatCursor.list || !list->isVisible()) {
+		return nullptr;
+	}
+	const auto key = list->purpleKeyboardSelection();
+	if (!key || key != _chatCursor.row) {
+		return nullptr;
+	}
+	const auto history = key.owningHistory();
+	return (history && history->purpleHiddenFromView()) ? nullptr : list;
 }
 
 QWidget *Keys::windowFocusWidget() const {
@@ -2935,9 +3099,13 @@ void Keys::hideWhichKey() {
 	}
 }
 
-void Keys::clearPrefix(bool keepChatNavigation) {
-	_motion.cancel(keepChatNavigation);
+void Keys::clearPrefix(RepeatPolicy keepMotion, bool keepChatCursor) {
+	_motion.cancel(keepMotion);
 	_layerMotion.cancel();
+	cancelScroll();
+	if (!keepChatCursor) {
+		_chatCursor = {};
+	}
 	const auto wasPending = !_prefix.empty() || _count > 0 || _inspect || _hints.active();
 	_hints.clear();
 	_prefix.clear();
@@ -3144,6 +3312,12 @@ void Keys::refreshStatusBar() {
 		state.message = _persistentCue;
 	}
 
+	if (state.rightCue.isEmpty() && target.focus && liveChatCursor(target.controller)) {
+		state.rightCue = u"RET open"_q;
+	} else if (state.rightCue.isEmpty() && _normal && target.folders
+		&& StepModalChatsFilter(target.controller, 1, false) && HasFolderKeys()) {
+		state.rightCue = u"J/K folders"_q;
+	}
 	state.localleaderHint = u"SPC leader  ·  "_q + FirstLocalleaderLabel() + u" local"_q;
 	_statusBar->setState(std::move(state));
 }
@@ -3284,6 +3458,10 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		}
 		_motion.release(physical);
 		_layerMotion.release(physical);
+		if (_pixel.physical == physical) {
+			_pixel.motion.release(crl::now());
+			_pixel.physical = 0;
+		}
 		const auto held = _held.remove(physical);
 		const auto handled = ClaimedKeys.erase(physical);
 		if (held && _held.isEmpty()) {
@@ -3428,8 +3606,9 @@ void Keys::repeat(const QKeyEvent &event, QObject *receiver) {
 	const auto target = currentTarget(receiver);
 	if (!target.focus || !Available(*action, target)) {
 		_motion.cancel();
+		cancelScroll();
 	} else if (_motion.next(HoldStroke(event), MotionContext(target, *action))) {
-		dispatch(*action, target, 1);
+		dispatch(*action, target, 1, { PhysicalIdentity(event), true });
 	}
 }
 
@@ -3450,6 +3629,125 @@ bool Keys::layerKey(const QKeyEvent &event, not_null<QWidget*> layer, bool motio
 		stroke.chord,
 		(current && motion) ? RepeatPolicy::SameTarget : RepeatPolicy::Never);
 	return true;
+}
+
+std::optional<ScrollReadout> Keys::readScroll(QWidget *view, QWidget *layer) const {
+	const auto focus = QApplication::focusWidget();
+	if (!view || !view->isVisible() || !view->isEnabled()
+		|| !owner() || !focus || focus == _preeditInput) {
+		return std::nullopt;
+	}
+	if (layer) {
+		if (!layer->isVisible() || (focus != layer && !layer->isAncestorOf(focus))) {
+			return std::nullopt;
+		}
+		const auto bar = static_cast<QAbstractScrollArea*>(view)->verticalScrollBar();
+		return ScrollReadout{ bar->value(), bar->maximum() };
+	}
+	const auto target = currentTarget(focus);
+	const auto scroll = HistoryScroll(target);
+	if (!Enabled() || !_normal || scroll != view
+		|| scroll->movement() != Ui::ElasticScroll::Movement::None
+		|| KeyboardAttachment::ScrollAnimating(target.history)
+		|| (target.messages.section && target.messages.section->animatedScrolling())) {
+		return std::nullopt;
+	}
+	return ScrollReadout{ scroll->scrollTop(), scroll->scrollTopMax() };
+}
+
+void Keys::scrollKey(
+		not_null<QWidget*> view,
+		QWidget *layer,
+		int delta,
+		ScrollStyle style,
+		ScrollPress press) {
+	if (!press.physical) {
+		const auto scroll = static_cast<Ui::ElasticScroll*>(view.get());
+		scroll->scrollToY(scroll->scrollTop() + delta);
+		return;
+	}
+	const auto current = readScroll(view, layer);
+	if (!current) {
+		if (layer) {
+			_layerMotion.cancel();
+		} else {
+			_motion.cancel();
+		}
+		cancelScroll();
+		return;
+	} else if (anim::Disabled()) {
+		cancelScroll();
+		ScrollTo(view, current->top + delta);
+		return;
+	}
+	const auto atEnd = (delta < 0) ? (current->top <= 0) : (current->top >= current->maximum);
+	if (atEnd) {
+		cancelScroll();
+		return;
+	}
+	const auto focus = QApplication::focusWidget();
+	if (!press.repeat) {
+		cancelScroll();
+		_pixel.view = view.get();
+		_pixel.layer = layer;
+		_pixel.focus = focus;
+		_pixel.physical = press.physical;
+		_pixel.expectedTop = current->top;
+	} else if (_pixel.physical != press.physical || _pixel.view != view.get()
+		|| _pixel.focus != focus || _pixel.layer != layer || _pixel.expectedTop != current->top) {
+		cancelScroll();
+		return;
+	}
+	const auto now = crl::now();
+	if (press.repeat && style == ScrollStyle::Continuous) {
+		_pixel.motion.startHold(now, (delta < 0) ? -1 : 1);
+	} else {
+		_pixel.motion.step(now, current->top, current->maximum, delta);
+	}
+	if (!_scrollFrame.animating() && _pixel.motion.active()) {
+		_scrollFrame.start();
+	}
+}
+
+bool Keys::advanceScroll(crl::time now) {
+	const auto disabled = anim::Disabled();
+	const auto current = readScroll(_pixel.view, _pixel.layer);
+	if (disabled || _pixel.focus != QApplication::focusWidget()
+		|| !current || current->top != _pixel.expectedTop) {
+		if (!disabled) {
+			if (_pixel.layer) {
+				_layerMotion.cancel();
+			} else {
+				_motion.cancel();
+			}
+		}
+		cancelScroll();
+		return false;
+	}
+	const auto continuous = _pixel.motion.continuous();
+	const auto next = _pixel.motion.advance(now, current->top, current->maximum);
+	if (next != current->top) {
+		const auto guard = QPointer(this);
+		const auto revision = _scrollRevision;
+		_pixel.expectedTop = next;
+		ScrollTo(_pixel.view, next);
+		if (!guard || revision != _scrollRevision) {
+			return false;
+		}
+	}
+	if (continuous && !_pixel.motion.active()) {
+		cancelScroll();
+		return false;
+	}
+	return _pixel.motion.active();
+}
+
+void Keys::cancelScroll() {
+	if (_pixel.view || _pixel.physical || _scrollFrame.animating()) {
+		++_scrollRevision;
+		_pixel = {};
+		_scrollFrame.stop();
+	}
 }
 
 #ifdef Q_OS_MAC
@@ -3521,12 +3819,23 @@ void Keys::showWhichKey() {
 					existing.push_back(keyLbl);
 				}
 			} else {
+				auto label = (b.action == Action::UnreadBuffer)
+					? u"Unread unmuted chats"_q
+					: CommandLabel(b.action, target);
+				if (target.folders && IsExactLocalleader(_prefix)
+					&& (b.action == Action::NextFolder || b.action == Action::PreviousFolder)) {
+					const auto direct = ranges::find_if(effective, [&](const EffectiveBinding &other) {
+						return other.action == b.action && other.sourceMap == MapKind::Chats
+							&& !other.viaLocalleader;
+					});
+					if (direct != end(effective)) {
+						label += u" (%1 from list)"_q.arg(ChordLabel(direct->keys));
+					}
+				}
 				leafIndexByAction.emplace(b.action, leaves.size());
 				leaves.push_back({
 					.keys = { keyLbl },
-					.label = (b.action == Action::UnreadBuffer)
-						? u"Unread unmuted chats"_q
-						: CommandLabel(b.action, target),
+					.label = std::move(label),
 					.isGroup = false,
 				});
 			}
@@ -3638,7 +3947,9 @@ void Keys::stroke(KeyRepeat::Stroke press, const Target &target) {
 		const auto policy = FindCommand(action).repeat;
 		const auto arm = KeyRepeat::CanArm(policy, _normal, captured.size(), inspect);
 		const auto guard = QPointer(this);
-		clearPrefix();
+		const auto opensCursor = !inspect && target.chatCursorAvailable
+			&& (action == Action::OpenChat || action == Action::PreviewChat);
+		clearPrefix(RepeatPolicy::Never, opensCursor);
 		if (!guard) {
 			return;
 		} else if (inspect) {
@@ -3647,7 +3958,7 @@ void Keys::stroke(KeyRepeat::Stroke press, const Target &target) {
 			if (arm) {
 				_motion.start(press, MotionContext(target, action), action, policy);
 			}
-			dispatch(action, target, count);
+			dispatch(action, target, count, { .physical = arm ? press.physical : 0 });
 		} else {
 			const auto &cmd = FindCommand(action);
 			showFeedback((cmd.need && *cmd.need)
@@ -3677,7 +3988,7 @@ void Keys::stroke(KeyRepeat::Stroke press, const Target &target) {
 	}
 }
 
-void Keys::dispatch(Action action, const Target &target, int count) {
+void Keys::dispatch(Action action, const Target &target, int count, ScrollPress press) {
 	const auto current = owner();
 	if (!current || current != target.controller || !target.focus
 		|| !CommandAvailable(action, target)) {
@@ -3702,15 +4013,22 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		}
 	};
 	const auto stepChatList = [&](bool down) {
-		const auto list = target.list ? target.list : ChatsInnerList(current);
+		const auto list = QPointer(target.list ? target.list : ChatsInnerList(current));
 		if (!list) {
 			return;
 		}
-		for (auto i = 0; i < repeat; ++i) {
+		const auto guard = QPointer(this);
+		const auto original = base::make_weak(current);
+		for (auto i = 0; i < repeat && guard && list && original; ++i) {
 			auto ev = QKeyEvent(QEvent::KeyPress,
 				down ? Qt::Key_Down : Qt::Key_Up,
 				Qt::NoModifier);
 			list->processKeyDispatch(&ev);
+		}
+		if (guard && original && _normal && !target.list && owner() == original.get()) {
+			const auto row = list ? list->purpleKeyboardSelection() : Dialogs::Key();
+			_chatCursor = row ? ChatCursor{ list, row, QCursor::pos() } : ChatCursor();
+			refreshStatusBar();
 		}
 	};
 	switch (action) {
@@ -3759,11 +4077,9 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		if (target.list) {
 			stepChatList(action == Action::MoveDown);
 		} else if (const auto scroll = HistoryScroll(target)) {
-			const auto delta = kLineScrollPx * repeat;
-			const auto top = scroll->scrollTop();
-			scroll->scrollToY((action == Action::MoveUp)
-				? std::max(0, top - delta)
-				: (top + delta));
+			const auto direction = (action == Action::MoveUp) ? -1 : 1;
+			scrollKey(scroll, nullptr, direction * kLineScrollPx * repeat,
+				ScrollStyle::Continuous, press);
 		}
 		break;
 	case Action::PreviousChat:
@@ -3771,15 +4087,60 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		stepChatList(action == Action::NextChat);
 		break;
 	case Action::OpenChat:
-		target.list->chooseRow();
-		break;
-	case Action::PreviousFolder:
-	case Action::NextFolder:
-		for (auto i = 0; i < repeat; ++i) {
-			Window::CheckAndJumpToNearChatsFilter(
-				current, action == Action::NextFolder, true);
+	case Action::PreviewChat: {
+		const auto list = target.list ? target.list : liveChatCursor(current);
+		const auto picked = target.list ? Dialogs::Key() : _chatCursor.row;
+		_chatCursor = {};
+		const auto guard = QPointer(this);
+		const auto original = base::make_weak(current);
+		if (!list) {
+			showFeedback(QString::fromLatin1(FindCommand(action).need));
+			break;
+		}
+		if (action == Action::PreviewChat) {
+			if (!list->showChatPreview() && guard) {
+				showFeedback(tr::lng_purple_keys_action_unavailable(tr::now));
+			}
+		} else {
+			const auto focusConversation = picked && picked.thread();
+			if (list->chooseRow() && focusConversation && guard && original
+				&& guard->owner() == original.get()
+				&& original->activeChatCurrent() == picked) {
+				original->content()->activate();
+			}
+		}
+		if (guard) {
+			refreshStatusBar();
 		}
 		break;
+	}
+	case Action::PreviousFolder:
+	case Action::NextFolder: {
+		const auto guard = QPointer(this);
+		const auto original = base::make_weak(current);
+		const auto delta = (action == Action::NextFolder) ? repeat : -repeat;
+		const auto wasStepping = std::exchange(_steppingFolders, true);
+		const auto switched = StepModalChatsFilter(current, delta, true);
+		if (!guard) {
+			break;
+		}
+		_steppingFolders = wasStepping;
+		if (!switched) {
+			_motion.cancel();
+			showFeedback(u"No other folders"_q);
+		} else if (original && owner() == original.get()) {
+			if (const auto pane = ChatsPane(current);
+				pane && !pane->purpleKeysList(QApplication::focusWidget())) {
+				pane->setInnerFocus(true);
+			}
+			if (const auto list = (guard && original && owner() == original.get())
+					? ChatsInnerList(current) : nullptr;
+				list && !list->purpleKeyboardSelection()) {
+				list->selectSkip(1);
+			}
+		}
+		break;
+	}
 	case Action::Search:
 		if (target.contextMap == MapKind::Music) {
 			if (Enabled()) {
@@ -3943,9 +4304,6 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 	case Action::OpenChatMenu:
 		launch(Native::ShowChatMenu);
 		break;
-	case Action::PreviewChat:
-		launch(Native::ShowChatPreview);
-		break;
 	case Action::TogglePlayback:
 		launch(Native::MediaPlayPause);
 		break;
@@ -3990,21 +4348,17 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 	case Action::HistoryHalfUp:
 	case Action::HistoryHalfDown:
 		if (const auto scroll = HistoryScroll(target)) {
-			const auto delta = std::max(80, scroll->height() / 2) * repeat;
-			const auto top = scroll->scrollTop();
-			scroll->scrollToY((action == Action::HistoryHalfUp)
-				? std::max(0, top - delta)
-				: (top + delta));
+			const auto direction = (action == Action::HistoryHalfUp) ? -1 : 1;
+			scrollKey(scroll, nullptr, direction * std::max(80, scroll->height() / 2) * repeat,
+				ScrollStyle::Step, press);
 		}
 		break;
 	case Action::OlderMessagesPage:
 	case Action::NewerMessagesPage:
 		if (const auto scroll = HistoryScroll(target)) {
-			const auto delta = scroll->height() * repeat;
-			const auto top = scroll->scrollTop();
-			scroll->scrollToY((action == Action::OlderMessagesPage)
-				? std::max(0, top - delta)
-				: (top + delta));
+			const auto direction = (action == Action::OlderMessagesPage) ? -1 : 1;
+			scrollKey(scroll, nullptr, direction * scroll->height() * repeat,
+				ScrollStyle::Step, press);
 		}
 		break;
 	case Action::LatestMessages:
@@ -4133,7 +4487,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 			if (!dup) {
 				candidates.push_back({
 					.caps = std::move(caps),
-					.contextTag = b.viaLocalleader ? mapContextTag(b.sourceMap) : QString(),
+					.contextTag = mapContextTag(b.sourceMap),
 				});
 			}
 		}
@@ -4181,7 +4535,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		auto nav = ModalUi::HelpSection{ .title = u"NAVIGATE"_q };
 		pushRow(nav.rows, rowFor(Action::MoveDown, u"Down (chat list or scroll)"_q));
 		pushRow(nav.rows, rowFor(Action::MoveUp, u"Up (chat list or scroll)"_q));
-		pushRow(nav.rows, rowFor(Action::NextChat, u"Next chat from any pane"_q));
+		pushRow(nav.rows, rowFor(Action::NextChat, u"Next chat in the list"_q));
 		pushRow(nav.rows, rowFor(Action::OpenChat, u"Open highlighted chat"_q));
 		pushRow(nav.rows, rowFor(Action::HistoryHalfDown, u"Half-page scroll down"_q));
 		pushRow(nav.rows, rowFor(Action::HistoryHalfUp, u"Half-page scroll up"_q));
@@ -4242,7 +4596,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		auto local = ModalUi::HelpSection{ .title = std::move(localTitle) };
 		const auto addLocalRow = [&](MapKind map, Action action, QString shortLabel = {}) {
 			for (const auto &b : Keymap().bindings) {
-				if (b.map == map && b.action == action) {
+				if (b.map == map && b.action == action && UsesLocalleader(b)) {
 					auto full = primaryLl;
 					full.insert(full.end(), b.keys.begin(), b.keys.end());
 					const auto ctx = (map == MapKind::Chat) ? u"chat"_q
@@ -4288,6 +4642,8 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		pushRow(panes.rows, rowFor(Action::FocusChats, u"Focus chat list"_q, 1));
 		pushRow(panes.rows, rowFor(Action::FocusConversation, u"Focus conversation"_q, 1));
 		pushRow(panes.rows, rowFor(Action::FocusOtherPane, u"Toggle pane"_q, 1));
+		pushRow(panes.rows, rowFor(Action::NextFolder));
+		pushRow(panes.rows, rowFor(Action::PreviousFolder));
 		pushRow(panes.rows, rowFor(Action::ToggleZenMode, u"Zen fullscreen chat"_q, 1));
 		pushRow(panes.rows, rowFor(Action::TogglePrivacyScreen, u"Privacy screen"_q, 1));
 		pushRow(panes.rows, rowFor(Action::ToggleNightMode, u"Toggle night mode"_q, 1));
@@ -4437,7 +4793,7 @@ namespace {
 		if (b.action != action) {
 			continue;
 		}
-		if (b.map == MapKind::Chat || b.map == MapKind::Chats || b.map == MapKind::Music) {
+		if (UsesLocalleader(b)) {
 			for (const auto &ll : Keymap().localleaders) {
 				auto full = ll;
 				full.insert(full.end(), b.keys.begin(), b.keys.end());
@@ -4446,10 +4802,12 @@ namespace {
 					.where = MapName(b.map),
 				});
 			}
-		} else {
+		}
+		if (b.map == MapKind::Normal || b.map == MapKind::Insert
+			|| IsActiveDirectChatListBinding(b, Keymap())) {
 			out.push_back({
 				.caps = ChordCaps(b.keys),
-				.where = MapName(b.map),
+				.where = MapName(b.map, false),
 			});
 		}
 	}
@@ -4503,7 +4861,8 @@ void Keys::showDescribeKeyResult(const Chord &chord, const Target &target) {
 			}
 			data.elsewhere.push_back({
 				.caps = ChordCaps(b.keys),
-				.where = FindCommand(b.action).label() + u" ("_q + MapName(b.map) + u")"_q,
+				.where = FindCommand(b.action).label() + u" ("_q
+					+ MapName(b.map, !(b.map == MapKind::Chats && IsDirectChatListChord(b.keys))) + u")"_q,
 			});
 		}
 	}
@@ -4784,6 +5143,22 @@ bool AllowModalLayerKey(const QKeyEvent &event, not_null<QWidget*> layer, bool m
 	const auto window = dynamic_cast<MainWindow*>(layer->window());
 	const auto keys = window ? FindKeys(window) : nullptr;
 	return keys ? keys->layerKey(event, layer, motion) : !event.isAutoRepeat();
+}
+
+void ScrollModalLayer(
+		const QKeyEvent &event,
+		not_null<QWidget*> layer,
+		not_null<QAbstractScrollArea*> scroll,
+		int delta) {
+	const auto window = dynamic_cast<MainWindow*>(layer->window());
+	if (const auto keys = window ? FindKeys(window) : nullptr) {
+		keys->scrollKey(scroll, layer, delta, ScrollStyle::Continuous, {
+			.physical = PhysicalIdentity(event),
+			.repeat = event.isAutoRepeat(),
+		});
+	} else {
+		ScrollTo(scroll, scroll->verticalScrollBar()->value() + delta);
+	}
 }
 
 #ifdef Q_OS_MAC

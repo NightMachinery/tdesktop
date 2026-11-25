@@ -1031,7 +1031,7 @@ public:
 			const auto step = ListStep(key, mods, false);
 			if (step) {
 				if (AllowModalLayerKey(*k, this, true)) {
-					_scroll->scrollToY(std::max(0, _scroll->scrollTop() + 48 * step));
+					ScrollModalLayer(*k, this, _scroll, 48 * step);
 				}
 				return base::EventFilterResult::Cancel;
 			}
@@ -1109,7 +1109,7 @@ protected:
 			toggleTab();
 			return;
 		} else if (step) {
-			_scroll->scrollToY(std::max(0, _scroll->scrollTop() + 48 * step));
+			ScrollModalLayer(*e, this, _scroll, 48 * step);
 			return;
 		} else if (modal && key == Qt::Key_Slash && !mods) {
 			if (!_showAll) {
@@ -3866,7 +3866,7 @@ protected:
 			_scroll->scrollToY(_scroll->scrollTopMax());
 			return;
 		} else if (step) {
-			scrollBy(44 * step);
+			ScrollModalLayer(*e, this, _scroll, 44 * step);
 			return;
 		} else if (key == Qt::Key_Tab && !mods) {
 			moveButton(1);
@@ -4042,11 +4042,6 @@ private:
 				x -= kGap;
 			}
 		}
-	}
-
-	void scrollBy(int dy) {
-		const auto next = std::clamp(_scroll->scrollTop() + dy, 0, _scroll->scrollTopMax());
-		_scroll->scrollToY(next);
 	}
 
 	void moveButton(int delta) {

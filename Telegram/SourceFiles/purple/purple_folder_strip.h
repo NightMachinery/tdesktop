@@ -78,6 +78,10 @@ private:
 	not_null<Window::SessionController*> controller,
 	bool isNext,
 	bool jump);
+[[nodiscard]] bool StepModalChatsFilter(
+	not_null<Window::SessionController*> controller,
+	int delta,
+	bool jump);
 void EscapeToHome(not_null<Window::SessionController*> controller);
 
 } // namespace Purple
