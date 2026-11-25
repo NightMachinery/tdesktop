@@ -48,13 +48,24 @@ int main(int argc, char **argv) {
 		Check(sources && sources->size() == 1 && sources->front().latest == 22
 			&& sources->front().before == 20 && !sources->front().complete,
 			"arrival advances neither history checkpoint");
+		auto head = sources->front();
+		head.headBefore = 50;
+		head.headNewest = 90;
+		Check(index.savePage(*scope, sources->front(), head,
+			{Track(7, 50, 50, 110)}), "checkpoint newer-track reconciliation");
 	}
 	{
 		auto index = Purple::MusicIndex();
 		Check(index.open(arrivalsPath), "reopen arrival fixture");
-		Check(index.savePage(arrivalScope, {7, 20, 22, false}, {7, 20, 90, false},
-			{Track(7, 50, 50, 110), Track(7, 90, 90, 120)}),
-			"resumed history scan still fills the arrival gap");
+		const auto sources = index.sources();
+		Check(sources && sources->size() == 1 && sources->front().latest == 22
+			&& sources->front().headBefore == 50 && sources->front().headNewest == 90,
+			"resumed head scan remembers the page and the previous watermark");
+		Check(index.savePage(arrivalScope, sources->front(), {7, 20, 90, false},
+			{Track(7, 90, 90, 120)}), "finishing the head scan promotes the watermark");
+		const auto finished = index.sources();
+		Check(finished && !finished->front().headBefore && !finished->front().headNewest,
+			"finishing the head scan clears its checkpoint");
 		const auto list = index.page(arrivalScope, u""_q, {7, 8}, {});
 		Check(list && list->size() == 3 && list->front().document == 90,
 			"arrivals persist once and sort by posted date");

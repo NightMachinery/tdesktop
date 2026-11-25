@@ -82,6 +82,10 @@ bool MusicIndex::open(const QString &path) {
 		{ u"CREATE TABLE IF NOT EXISTS music_source(peer TEXT PRIMARY KEY, "
 		  "older_before INTEGER CHECK(older_before > 0), newest_seen INTEGER CHECK(newest_seen > 0), "
 		  "complete INTEGER NOT NULL DEFAULT 0 CHECK(complete IN(0, 1))) WITHOUT ROWID"_q },
+		{ u"CREATE TABLE IF NOT EXISTS music_head("
+		  "peer TEXT PRIMARY KEY REFERENCES music_source(peer) ON DELETE CASCADE, "
+		  "older_before INTEGER NOT NULL CHECK(older_before > 0), "
+		  "newest_seen INTEGER NOT NULL CHECK(newest_seen >= older_before)) WITHOUT ROWID"_q },
 		{ u"CREATE TABLE IF NOT EXISTS music_occurrence("
 		  "peer TEXT NOT NULL REFERENCES music_source(peer) ON DELETE CASCADE, "
 		  "message INTEGER NOT NULL CHECK(message BETWEEN 1 AND 2147483647), "
@@ -135,8 +139,10 @@ std::optional<std::vector<MusicSourceCursor>> MusicIndex::sources() {
 	auto sources = std::vector<MusicSourceCursor>();
 	while (true) {
 		const auto result = _database.Read({
-			u"SELECT peer, older_before, newest_seen, complete FROM music_source "
-			"WHERE peer > ? ORDER BY peer LIMIT ?"_q,
+			u"SELECT s.peer, s.older_before, s.newest_seen, s.complete, "
+			"h.older_before, h.newest_seen FROM music_source s "
+			"LEFT JOIN music_head h ON h.peer = s.peer "
+			"WHERE s.peer > ? ORDER BY s.peer LIMIT ?"_q,
 			{ after, kPageSize }, ArchiveSqlExpectation::Rows,
 		});
 		if (!result.ok) {
@@ -149,6 +155,8 @@ std::optional<std::vector<MusicSourceCursor>> MusicIndex::sources() {
 				.before = ReadOptionalNumber(row[1]),
 				.latest = ReadOptionalNumber(row[2]),
 				.complete = std::get<int64>(row[3]) == 1,
+				.headBefore = ReadOptionalNumber(row[4]),
+				.headNewest = ReadOptionalNumber(row[5]),
 			});
 		}
 		if (result.rows.size() < kPageSize) return sources;
@@ -162,7 +170,8 @@ bool MusicIndex::savePage(
 		const MusicSourceCursor &cursor,
 		const std::vector<MusicIndexEntry> &rows) {
 	_lastError.clear();
-	if (rows.size() > kPageSize || !cursor.peer || expected.peer != cursor.peer) {
+	if (rows.size() > kPageSize || !cursor.peer || expected.peer != cursor.peer
+		|| cursor.headBefore.has_value() != cursor.headNewest.has_value()) {
 		_lastError = u"invalid page arguments"_q;
 		return false;
 	}
@@ -178,11 +187,28 @@ bool MusicIndex::savePage(
 	statements.emplace_back(
 		u"UPDATE music_source SET older_before = ?, newest_seen = ?, complete = ? WHERE peer = ? "
 		"AND (SELECT generation FROM music_folder WHERE id = 1) = ? "
-		"AND older_before IS ? AND newest_seen IS ? AND complete = ?"_q,
+		"AND older_before IS ? AND newest_seen IS ? AND complete = ? "
+		"AND (SELECT older_before FROM music_head WHERE peer = music_source.peer) IS ? "
+		"AND (SELECT newest_seen FROM music_head WHERE peer = music_source.peer) IS ?"_q,
 		std::vector<ArchiveSqlValue>{ SqlNumber(cursor.before), SqlNumber(cursor.latest),
 			int64(cursor.complete), peer, int64(scope.generation),
-			SqlNumber(expected.before), SqlNumber(expected.latest), int64(expected.complete) },
+			SqlNumber(expected.before), SqlNumber(expected.latest), int64(expected.complete),
+			SqlNumber(expected.headBefore), SqlNumber(expected.headNewest) },
 		ArchiveSqlExpectation::OneChange);
+	if (cursor.headBefore) {
+		statements.push_back({
+			u"INSERT INTO music_head VALUES(?, ?, ?) ON CONFLICT(peer) "
+			"DO UPDATE SET older_before=excluded.older_before, newest_seen=excluded.newest_seen"_q,
+			{ peer, SqlNumber(cursor.headBefore), SqlNumber(cursor.headNewest) },
+			ArchiveSqlExpectation::OneChange,
+		});
+	} else if (expected.headBefore) {
+		statements.push_back({
+			u"DELETE FROM music_head WHERE peer = ?"_q,
+			{ peer },
+			ArchiveSqlExpectation::OneChange,
+		});
+	}
 	return write(std::move(statements));
 }
 

@@ -358,7 +358,7 @@
     {
       "name": "music-index",
       "driver": "purple/test_archive.py",
-      "coverage": "Physical SQLite music pagination, alias visibility, durable cursor and scope transitions, revocation rollback",
+      "coverage": "Physical SQLite music pagination, alias visibility, restart of head and history scans, scope transitions and revocation rollback",
       "compiles": true,
       "args": [
         "--build-dir",
@@ -914,7 +914,7 @@
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/music_diagnostics_cases.cpp"
       ],
-      "coverage": "Desktop Music empty-state diagnostics, roster dialog-list gating, offline, search filter and error reporting"
+      "coverage": "Desktop Music empty-state diagnostics, roster dialog-list gating, fake-clock flood waits, bounded backoff and error reporting"
     },
     {
       "name": "cases-translation-exclusion",

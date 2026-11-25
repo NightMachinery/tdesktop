@@ -25,6 +25,8 @@ struct MusicSourceCursor {
 	std::optional<qint64> before;
 	std::optional<qint64> latest;
 	bool complete = false;
+	std::optional<qint64> headBefore;
+	std::optional<qint64> headNewest;
 };
 
 struct MusicIndexScope {

@@ -3,10 +3,26 @@
 #include "purple/purple_types.h"
 
 #include <QtCore/QStringList>
+#include <QtCore/QRandomGenerator>
 #include <algorithm>
 
 namespace Purple {
 namespace {
+
+constexpr auto kMillisecondsPerSecond = qint64(1000);
+constexpr auto kPageInterval = qint64(350);
+constexpr auto kTransientRetryLimit = 8;
+
+qint64 FloodWait(const QString &type) {
+	const auto flood = u"FLOOD_WAIT_";
+	const auto premium = u"FLOOD_PREMIUM_WAIT_";
+	const auto prefix = type.startsWith(flood) ? QStringView(flood)
+		: type.startsWith(premium) ? QStringView(premium) : QStringView();
+	if (prefix.isEmpty()) return 0;
+	auto ok = false;
+	const auto seconds = QStringView(type).sliced(prefix.size()).toInt(&ok);
+	return ok && seconds > 0 ? seconds * kMillisecondsPerSecond : 0;
+}
 
 QString FolderLabel(const MusicDiagnosticsSnapshot &state) {
 	return state.folderName.trimmed().isEmpty()
@@ -44,6 +60,44 @@ QString ErrorDetail(const MusicDiagnosticsSnapshot &state) {
 }
 
 } // namespace
+
+void MusicScanPacer::sent(qint64 now) {
+	_nextRequest = now + kPageInterval;
+}
+
+void MusicScanPacer::succeeded() {
+	_failures = 0;
+}
+
+void MusicScanPacer::restore(qint64 now, qint64 remaining) {
+	if (remaining > 0) _retryAt = now + remaining;
+}
+
+qint64 MusicScanPacer::retry(qint64 now, int code, const QString &type) {
+	const auto flood = FloodWait(type);
+	if (flood) {
+		_retryAt = now + flood;
+		return flood;
+	}
+	if ((code < 0 || code >= 500 || code == 420 || code == 429)
+		&& _failures < kTransientRetryLimit) {
+		const auto base = 1000 << _failures++;
+		const auto delay = base + QRandomGenerator::global()->bounded(base / 4);
+		_retryAt = now + delay;
+		return delay;
+	}
+	_failures = 0;
+	return 0;
+}
+
+qint64 MusicScanPacer::delay(qint64 now) const {
+	return std::max(qint64(0), std::max(_nextRequest, _retryAt) - now);
+}
+
+qint64 MusicScanPacer::retrySeconds(qint64 now) const {
+	const auto remaining = std::max(qint64(0), _retryAt - now);
+	return (remaining + kMillisecondsPerSecond - 1) / kMillisecondsPerSecond;
+}
 
 QString DescribeMusicState(const MusicDiagnosticsSnapshot &state) {
 	if (!state.transientNotice.isEmpty()) {
@@ -93,6 +147,12 @@ QString DescribeMusicState(const MusicDiagnosticsSnapshot &state) {
 		state.totalIndexedTracks,
 		std::max<qint64>(state.displayedTracks, state.tracksIndexedInScan));
 	if (state.scanning) {
+		if (state.retrySeconds > 0 && !state.offline && state.chatsToScan > 0) {
+			return u"Indexing %1 of %2, continues in %3 s"_q
+				.arg(state.chatsScanned)
+				.arg(state.chatsToScan)
+				.arg(state.retrySeconds);
+		}
 		auto details = QStringList();
 		if (state.chatsToScan > 0) {
 			details.push_back(u"%1/%2 %3 scanned"_q.arg(

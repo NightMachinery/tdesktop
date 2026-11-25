@@ -38,6 +38,7 @@
 #include "purple/purple_playlists_service.h"
 #include "rpl/variable.h"
 #include "settings/settings_common.h"
+#include "storage/storage_account.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/boxes/single_choice_box.h"
@@ -79,6 +80,7 @@ namespace Purple {
 namespace {
 
 constexpr auto kHideChatsPref = "purple.music.show-chats";
+constexpr auto kScanRetryPref = "purple.music.scan-retry";
 constexpr auto kSearchPageSize = 100;
 constexpr auto kRefreshDelay = crl::time(180);
 constexpr auto kConnectionPollDelay = crl::time(1500);
@@ -124,6 +126,27 @@ struct Scan {
 	qint64 newest = 0;
 	bool head = false;
 };
+
+struct ScanSchedule {
+	MusicScanPacer pacer;
+	QPointer<QWidget> owner;
+	quint64 retryPeer = 0;
+};
+
+std::shared_ptr<ScanSchedule> ScanScheduleFor(Main::Session &session) {
+	static auto schedules = std::map<Main::Session*, std::shared_ptr<ScanSchedule>>();
+	if (const auto i = schedules.find(&session); i != schedules.end()) {
+		return i->second;
+	}
+	auto result = std::make_shared<ScanSchedule>();
+	const auto saved = session.local().readPref<QString>(kScanRetryPref);
+	const auto until = saved.section(u' ', 0, 0).toLongLong();
+	result->pacer.restore(crl::now(), until - QDateTime::currentMSecsSinceEpoch());
+	result->retryPeer = saved.section(u' ', 1, 1).toULongLong();
+	schedules.emplace(&session, result);
+	session.lifetime().add([key = &session] { schedules.erase(key); });
+	return result;
+}
 
 class MusicSection final : public Window::SectionWidget {
 public:
@@ -184,10 +207,12 @@ private:
 	Ui::SlideWrap<Ui::RoundButton> *_playChosen = nullptr;
 	QPointer<PlaylistSongList> _list;
 	base::unique_qptr<Ui::PopupMenu> _menu;
+	std::shared_ptr<ScanSchedule> _schedule;
 	MTP::Sender _api;
 	base::Timer _refreshTimer;
 	base::Timer _readTimer;
 	base::Timer _connectionTimer;
+	base::Timer _scanTimer;
 	mtpRequestId _request = 0;
 	FilterId _folder = 0;
 	QString _folderName;
@@ -211,6 +236,8 @@ private:
 	bool _savingSelection = false;
 	bool _waitingMainDialogs = false;
 	bool _waitingArchiveDialogs = false;
+	bool _waitingForScanner = false;
+	bool _savingPage = false;
 	bool _offline = false;
 	int _loadedMainDialogs = 0;
 	int _loadedArchiveDialogs = 0;
@@ -261,13 +288,15 @@ MusicSection::MusicSection(
 	_content,
 	object_ptr<Ui::FlatLabel>(_content, QString(), st::boxLabel),
 	st::purpleMusicStatusMargin)))
+, _schedule(ScanScheduleFor(session()))
 , _api(&session().mtp())
 , _refreshTimer([=] { refresh(); })
 , _readTimer([=] {
 	read(_search->getLastText().trimmed() == _displayedSearch
 		? CatalogRead::Scan : CatalogRead::Reload);
 })
-, _connectionTimer([=] { pollConnection(); }) {
+, _connectionTimer([=] { pollConnection(); })
+, _scanTimer([=] { scan(); }) {
 	setFocusPolicy(Qt::StrongFocus);
 	_search->customUpDown(true);
 	const auto searchIcon = Ui::CreateChild<Ui::RpWidget>(_search);
@@ -531,6 +560,10 @@ void MusicSection::reset(bool keepRows) {
 	++_query;
 	_readTimer.cancel();
 	_connectionTimer.cancel();
+	_scanTimer.cancel();
+	_waitingForScanner = false;
+	_savingPage = false;
+	if (_schedule->owner == this) _schedule->owner.clear();
 	_scope.reset();
 	_resolver.reset();
 	_bookmarkResolver.reset();
@@ -631,11 +664,23 @@ void MusicSection::refresh(bool force) {
 			}
 			_indexError.clear();
 			_scope = result.roster->scope;
+			read(CatalogRead::Reload);
+			if (_schedule->owner && _schedule->owner != this) {
+				_waitingForScanner = true;
+				updateStatus();
+				return;
+			}
+			_schedule->owner = this;
 			auto queuedPeers = std::set<quint64>();
 			for (const auto &cursor : result.roster->sources) {
 				if (!inRoster(cursor.peer)) continue;
 				if (cursor.latest) {
-					_pending.push_back({ .saved = cursor, .head = true });
+					_pending.push_back({
+						.saved = cursor,
+						.offset = cursor.headBefore.value_or(0),
+						.newest = cursor.headNewest.value_or(0),
+						.head = true,
+					});
 					queuedPeers.insert(cursor.peer);
 				} else if (!cursor.complete) {
 					addBackfill(cursor);
@@ -643,9 +688,13 @@ void MusicSection::refresh(bool force) {
 				}
 			}
 			_chatsToScan = int(queuedPeers.size());
-			read(CatalogRead::Reload);
+			const auto retry = std::ranges::find_if(_pending, [&](const Scan &scan) {
+				return scan.saved.peer == _schedule->retryPeer;
+			});
+			if (retry != _pending.end()) {
+				std::rotate(_pending.begin(), retry, std::next(retry));
+			}
 			scan();
-			updateStatus();
 		}));
 }
 
@@ -656,7 +705,10 @@ void MusicSection::addBackfill(MusicSourceCursor cursor) {
 }
 
 void MusicSection::scan() {
-	if (!current() || !_scope || _request) return;
+	if (!current() || !_scope || _request || _savingPage
+		|| _schedule->owner != this) {
+		return;
+	}
 	if (!rosterCurrent()) {
 		refresh();
 		return;
@@ -666,9 +718,21 @@ void MusicSection::scan() {
 	}
 	_offline = IsOfflineState(session());
 	if (_pending.empty()) {
+		_schedule->owner.clear();
 		updateStatus();
 		return;
 	}
+	if (_offline) {
+		updateStatus();
+		return;
+	}
+	const auto now = crl::now();
+	if (const auto delay = _schedule->pacer.delay(now)) {
+		_scanTimer.callOnce(std::min(delay, qint64(60000)));
+		updateStatus();
+		return;
+	}
+	_schedule->pacer.sent(now);
 	const auto next = _pending.front();
 	_pending.pop_front();
 	const auto peer = session().data().peer(PeerId(uint64(next.saved.peer)));
@@ -694,6 +758,7 @@ void MusicSection::scan() {
 		if (_route != route) return;
 		_request = 0;
 		_offline = IsOfflineState(session());
+		_schedule->pacer.succeeded();
 		if (rosterCurrent() && inRoster(next.saved.peer)) {
 			advance(next, result);
 		} else {
@@ -703,6 +768,16 @@ void MusicSection::scan() {
 		if (_route != route) return;
 		_request = 0;
 		_offline = IsOfflineState(session());
+		if (const auto delay = _schedule->pacer.retry(
+				crl::now(), error.code(), error.type())) {
+			_pending.push_front(next);
+			_schedule->retryPeer = next.saved.peer;
+			const auto until = QDateTime::currentMSecsSinceEpoch() + delay;
+			session().local().writePref<QString>(kScanRetryPref,
+				QString::number(until) + u' ' + QString::number(next.saved.peer));
+			scan();
+			return;
+		}
 		_scanIncomplete = true;
 		_failedPeers.insert(next.saved.peer);
 		++_serverSearchErrors;
@@ -711,7 +786,7 @@ void MusicSection::scan() {
 		}
 		if (next.head) addBackfill(next.saved);
 		scan();
-	}).handleFloodErrors().send();
+	}).handleAllErrors().send();
 	updateStatus();
 }
 
@@ -780,7 +855,14 @@ void MusicSection::advance(Scan next, const MTPmessages_Messages &result) {
 	const auto finished = boundary || !anyMessages;
 	auto saved = next.saved;
 	if (next.head) {
-		if (finished && next.newest) saved.latest = next.newest;
+		if (finished) {
+			if (next.newest) saved.latest = next.newest;
+			saved.headBefore.reset();
+			saved.headNewest.reset();
+		} else {
+			saved.headBefore = oldest;
+			saved.headNewest = next.newest;
+		}
 	} else {
 		if (oldest) saved.before = oldest;
 		if (next.newest && !saved.latest) saved.latest = next.newest;
@@ -788,9 +870,11 @@ void MusicSection::advance(Scan next, const MTPmessages_Messages &result) {
 	}
 	const auto hasTracks = !rows.empty();
 	const auto savedCount = int(rows.size());
+	_savingPage = true;
 	SaveMusicIndexPage(&session(), *_scope, next.saved, saved, std::move(rows),
 		crl::guard(this, [=](MusicIndexSaveResult saveResult) mutable {
 			if (_route != route || !current() || folder() != _folder) return;
+			_savingPage = false;
 			if (!saveResult.ok) {
 				_scanIncomplete = true;
 				_failedPeers.insert(next.saved.peer);
@@ -799,6 +883,10 @@ void MusicSection::advance(Scan next, const MTPmessages_Messages &result) {
 					_lastServerError = saveResult.error;
 				}
 			} else {
+				if (_schedule->retryPeer == saved.peer) {
+					_schedule->retryPeer = 0;
+					session().local().clearPref(kScanRetryPref);
+				}
 				_tracksIndexedInScan += savedCount;
 				if (!finished) {
 					next.saved = saved;
@@ -950,9 +1038,11 @@ void MusicSection::updateStatus() {
 		.totalChatsInFolder = int(_peers.size()),
 		.configuring = _configuring,
 		.reading = _reading,
-		.scanning = _request != 0 || !_pending.empty(),
+		.scanning = _request != 0 || _savingPage || !_pending.empty()
+			|| _waitingForScanner,
 		.chatsToScan = _chatsToScan,
 		.chatsScanned = int(_completedPeers.size()),
+		.retrySeconds = _schedule->pacer.retrySeconds(crl::now()),
 		.chatsFailed = int(_failedPeers.size()),
 		.serverSearchErrors = _serverSearchErrors,
 		.lastServerError = _lastServerError,
@@ -1008,13 +1098,18 @@ void MusicSection::pollConnection() {
 	const auto offline = IsOfflineState(session());
 	const auto offlineChanged = (offline != _offline);
 	_offline = offline;
-	if (offlineChanged) {
+	if (offlineChanged || _schedule->pacer.retrySeconds(crl::now()) > 0) {
 		updateStatus();
 	}
 	if (_offline) {
 		_dialogStallTicks = 0;
 		return;
 	}
+	if (_waitingForScanner && !_schedule->owner) {
+		refresh(true);
+		return;
+	}
+	if (offlineChanged && _schedule->owner == this) scan();
 	auto &data = session().data();
 	if (!data.chatsFilters().loaded()) {
 		if (++_dialogStallTicks >= 3) {

@@ -28,8 +28,11 @@ audio messages, or a search filter that hides indexed tracks. Once you focus,
 scroll, or select in the list, indexing leaves the displayed rows in place.
 Search again or use **Refresh music** to see the latest results. Refresh also
 checks for new tracks and resumes unfinished history. It keeps your picks while
-the source folder and its chats stay the same. A failed chat search leaves its
-previous results intact and reports the error and affected chat count.
+the source folder and its chats stay the same. One paced scan runs per account.
+If Telegram asks it to wait, Music displays the remaining time, then resumes
+the same page. Temporary server errors retry with increasing delays and jitter.
+A chat the server cannot search is skipped and its cached tracks stay available.
+Both the older-history cursor and the newer-track cursor survive a restart.
 
 After the first scan, Purple also indexes eligible new tracks it receives
 from the configured folder while the Music screen is closed. Opening Music
