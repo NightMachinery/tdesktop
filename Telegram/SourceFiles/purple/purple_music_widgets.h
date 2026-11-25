@@ -4,6 +4,8 @@
 #include "purple/purple_playlist_song_list.h"
 #include "ui/rp_widget.h"
 
+#include <optional>
+
 class QPainter;
 namespace Ui {
 class FlatLabel;
@@ -69,7 +71,7 @@ struct ChatMusicLayoutArgs {
 	const MusicKeyHint &playlistKeys,
 	Fn<void()> back,
 	Fn<void()> playlists,
-	Fn<void(not_null<Ui::IconButton*>)> more);
+	Fn<void(not_null<Ui::IconButton*>, std::optional<QString>)> more);
 [[nodiscard]] object_ptr<Ui::InputField> MakeMusicFilter(
 	QWidget *parent,
 	const MusicKeyHint &keys);
@@ -78,6 +80,12 @@ struct ChatMusicLayoutArgs {
 	rpl::producer<bool> tiles,
 	Fn<void(bool)> select,
 	const MusicKeyHint &keys);
-void PaintMusicText(QPainter &p, const QRect &rect, const QString &text, int lines = 1);
+[[nodiscard]] QColor MusicReadableColor(QColor foreground, QColor background, double minimum);
+void PaintMusicText(
+	QPainter &p,
+	const QRect &rect,
+	const QString &text,
+	int lines = 1,
+	Qt::Alignment horizontal = {});
 
 } // namespace Purple

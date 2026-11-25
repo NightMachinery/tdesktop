@@ -22,6 +22,9 @@ purpleMusicCoverRadius: 6px;
 purpleMusicTrackInset: 8px;
 purpleMusicTrackGap: 16px;
 purpleMusicBadgeSize: 18px;
+purpleMusicTileCursor: 2px;
+purpleMusicButtonInset: 10px;
+purpleMusicSkipGlyphSize: 18px;
 purpleMusicTileMin: 150px;
 purpleMusicTileMax: 180px;
 purpleMusicTileNarrowMax: 224px;
@@ -38,7 +41,7 @@ purpleMusicNowEyebrow: font(12px semibold);
 purpleMusicPlayButton: MediaPlayerPlayButton(mediaPlayerPlayButton) {
 	size: size(36px, 36px);
 	iconPosition: point(6px, 6px);
-	color: windowFg;
+	color: activeButtonFg;
 	rippleAreaPosition: point(0px, 0px);
 	rippleAreaSize: 36px;
 	ripple: RippleAnimation(defaultRippleAnimation) {
@@ -46,9 +49,15 @@ purpleMusicPlayButton: MediaPlayerPlayButton(mediaPlayerPlayButton) {
 	}
 }
 
+purpleMusicSkipButton: IconButton(mediaPlayerNextButton) {
+	icon: icon {};
+	iconOver: icon {};
+}
+
 purpleMusicProgress: MediaSlider(mediaPlayerPanelPlayback) {
 	activeFg: windowActiveTextFg;
 	activeFgOver: windowActiveTextFg;
+	inactiveFgDisabled: windowFg;
 }
 
 purpleMusicTitle: FlatLabel(boxTitle) {

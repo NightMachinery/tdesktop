@@ -16,6 +16,8 @@
 #include <QtGui/QFontMetrics>
 #include <QtGui/QTextLayout>
 
+#include <cmath>
+
 namespace Purple {
 namespace {
 
@@ -85,7 +87,95 @@ void KeyHint::paintEvent(QPaintEvent *) {
 	}
 }
 
+class MusicActionButton final : public Ui::RoundButton {
+public:
+	MusicActionButton(
+		QWidget *parent,
+		rpl::producer<QString> label,
+		const MusicKeyHint &keys,
+		Fn<void()> callback);
+
+	QString accessibilityName() override;
+	[[nodiscard]] int textBaseline() const;
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
+
+private:
+	void fit();
+
+	const not_null<KeyHint*> _hint;
+	QString _label;
+	int _labelWidth = 0;
+};
+
+MusicActionButton::MusicActionButton(
+		QWidget *parent,
+		rpl::producer<QString> label,
+		const MusicKeyHint &keys,
+		Fn<void()> callback)
+: Ui::RoundButton(parent, rpl::single(QString()), st::defaultLightButton)
+, _hint(Ui::CreateChild<KeyHint>(this, keys, this)) {
+	setClickedCallback(std::move(callback));
+	std::move(label) | rpl::on_next([=](QString text) {
+		_label = std::move(text);
+		_labelWidth = QFontMetrics(st().style.font->f).horizontalAdvance(_label);
+		fit();
+	}, lifetime());
+	_hint->widthValue() | rpl::on_next([=] { fit(); }, lifetime());
+}
+
+QString MusicActionButton::accessibilityName() {
+	return _label;
+}
+
+int MusicActionButton::textBaseline() const {
+	return st().textTop + st().style.font->ascent;
+}
+
+void MusicActionButton::fit() {
+	const auto inset = st::purpleMusicButtonInset;
+	const auto caps = _hint->width();
+	setFullWidth(2 * inset + _labelWidth + (caps ? st::purpleMusicShortcutGap + caps : 0));
+	_hint->moveToRight(inset, (height() - _hint->height()) / 2);
+}
+
+void MusicActionButton::paintEvent(QPaintEvent *e) {
+	Ui::RoundButton::paintEvent(e);
+	auto p = Painter(this);
+	p.setFont(st().style.font);
+	p.setPen((isOver() || isDown()) ? st().textFgOver : st().textFg);
+	const auto area = style::rtlrect(st::purpleMusicButtonInset, 0, _labelWidth, height(), width());
+	p.drawText(area.left(), textBaseline(), _label);
+}
+
+double RelativeLuminance(QColor color) {
+	const auto channel = [](double value) {
+		return (value <= 0.04045)
+			? value / 12.92
+			: std::pow((value + 0.055) / 1.055, 2.4);
+	};
+	return 0.2126 * channel(color.redF()) + 0.7152 * channel(color.greenF())
+		+ 0.0722 * channel(color.blueF());
+}
+
 } // namespace
+
+QColor MusicReadableColor(QColor foreground, QColor background, double minimum) {
+	const auto bg = RelativeLuminance(background);
+	const auto target = (bg > 0.18) ? 0. : 1.;
+	for (auto step = 0; step != 9; ++step) {
+		const auto fg = RelativeLuminance(foreground);
+		if ((std::max(bg, fg) + 0.05) / (std::min(bg, fg) + 0.05) >= minimum) {
+			return foreground;
+		}
+		foreground = QColor::fromRgbF(
+			(foreground.redF() + target) / 2.,
+			(foreground.greenF() + target) / 2.,
+			(foreground.blueF() + target) / 2.);
+	}
+	return QColor::fromRgbF(target, target, target);
+}
 
 int ChatMusicWidth(int windowWidth) {
 	return std::max(st::boxWidth, std::min(
@@ -141,23 +231,7 @@ object_ptr<Ui::RpWidget> MakeMusicActionButton(
 		rpl::producer<QString> label,
 		const MusicKeyHint &keys,
 		Fn<void()> callback) {
-	auto action = object_ptr<Ui::RpWidget>(parent);
-	const auto group = action.data();
-	const auto button = Ui::CreateChild<Ui::RoundButton>(
-		group, std::move(label), st::defaultLightButton);
-	button->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-	button->setClickedCallback(std::move(callback));
-	const auto hint = Ui::CreateChild<KeyHint>(group, keys, button);
-	const auto place = [=] {
-		const auto height = std::max(button->height(), hint->height());
-		const auto hintLeft = button->width() + (hint->width() ? st::purpleMusicShortcutGap : 0);
-		group->resize(hintLeft + hint->width(), height);
-		button->moveToLeft(0, (height - button->height()) / 2);
-		hint->moveToLeft(hintLeft, (height - hint->height()) / 2);
-	};
-	button->setWidthChangedCallback(place);
-	hint->widthValue() | rpl::on_next(place, group->lifetime());
-	return action;
+	return object_ptr<MusicActionButton>(parent, std::move(label), keys, std::move(callback));
 }
 
 object_ptr<Ui::RpWidget> MakeMusicHeader(
@@ -165,7 +239,7 @@ object_ptr<Ui::RpWidget> MakeMusicHeader(
 		const MusicKeyHint &playlistKeys,
 		Fn<void()> back,
 		Fn<void()> playlists,
-		Fn<void(not_null<Ui::IconButton*>)> more) {
+		Fn<void(not_null<Ui::IconButton*>, std::optional<QString>)> more) {
 	auto result = object_ptr<Ui::RpWidget>(parent);
 	const auto header = result.data();
 	header->setFixedHeight(st::purpleMusicHeaderHeight);
@@ -174,27 +248,40 @@ object_ptr<Ui::RpWidget> MakeMusicHeader(
 	previous->setClickedCallback(std::move(back));
 	const auto title = Ui::CreateChild<Ui::FlatLabel>(
 		header, tr::lng_purple_music_title(), st::purpleMusicTitle);
-	const auto playlist = MakeMusicActionButton(
-		header, tr::lng_purple_playlists_title(), playlistKeys, std::move(playlists)).release();
+	const auto playlist = Ui::CreateChild<MusicActionButton>(
+		header, tr::lng_purple_playlists_title(), playlistKeys, std::move(playlists));
 	const auto menu = Ui::CreateChild<Ui::IconButton>(header, st::purpleMusicMore);
 	menu->setAccessibleName(tr::lng_purple_music_options(tr::now));
-	menu->setClickedCallback([=] { more(menu); });
+	menu->setClickedCallback([=] {
+		more(menu, playlist->isHidden()
+			? std::optional(playlist->accessibleDescription())
+			: std::nullopt);
+	});
 	const auto place = [=] {
 		const auto centerY = header->height() / 2;
 		const auto gap = st::purpleMusicActionGap;
+		const auto playlistTop = centerY - playlist->height() / 2;
+		const auto baseline = playlistTop + playlist->textBaseline();
 		previous->moveToLeft(0, centerY - previous->height() / 2);
 		menu->moveToRight(0, centerY - menu->height() / 2);
-		playlist->moveToRight(menu->width() + gap, centerY - playlist->height() / 2);
 		const auto left = previous->width() + gap;
-		const auto right = header->width() - menu->width() - playlist->width()
-			- gap - st::purpleMusicShortcutGap;
+		const auto menuEdge = header->width() - menu->width() - gap;
+		const auto playlistEdge = menuEdge - playlist->width() - gap;
+		const auto centered = (header->width() - title->naturalWidth()) / 2;
+		const auto showPlaylist = centered >= left
+			&& centered + title->naturalWidth() <= playlistEdge;
+		playlist->setVisible(showPlaylist);
+		playlist->moveToRight(menu->width() + gap, playlistTop);
+		const auto right = showPlaylist ? playlistEdge : menuEdge;
 		title->resizeToNaturalWidth(std::max(1, right - left));
 		const auto x = std::clamp((header->width() - title->width()) / 2,
 			left, std::max(left, right - title->width()));
-		title->moveToLeft(x, centerY - title->height() / 2);
+		title->moveToLeft(x, baseline - title->getMargins().top()
+			- st::purpleMusicTitle.style.font->ascent);
 	};
 	header->widthValue() | rpl::on_next(place, header->lifetime());
-	playlist->widthValue() | rpl::on_next(place, header->lifetime());
+	playlist->naturalWidthValue() | rpl::on_next(place, header->lifetime());
+	title->naturalWidthValue() | rpl::on_next(place, header->lifetime());
 	return result;
 }
 
@@ -238,34 +325,35 @@ object_ptr<Ui::RpWidget> MakeMusicViewControl(
 	const auto title = Ui::CreateChild<Ui::FlatLabel>(
 		group, tr::lng_purple_music_tracks(), st::purpleMusicTitle);
 	const auto toggle = Ui::CreateChild<Ui::RpWidget>(group);
-	const auto list = Ui::CreateChild<Ui::RoundButton>(
-		toggle, tr::lng_purple_music_list(), st::defaultLightButton);
-	const auto grid = Ui::CreateChild<Ui::RoundButton>(
-		toggle, tr::lng_purple_music_tiles(), st::defaultLightButton);
-	list->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-	grid->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-	list->setClickedCallback([=] { select(false); });
-	grid->setClickedCallback([=] { select(true); });
-	const auto hint = Ui::CreateChild<KeyHint>(toggle, keys);
+	const auto mode = group->lifetime().make_state<rpl::variable<bool>>();
+	std::move(tiles) | rpl::on_next([=](bool isTiles) {
+		*mode = isTiles;
+	}, group->lifetime());
+	const auto forView = [&](bool targetTiles) -> MusicKeyHint {
+		return rpl::combine(mode->value(), rpl::duplicate(keys)) | rpl::map(
+			[=](bool isTiles, const QStringList &caps) {
+				return isTiles == targetTiles ? QStringList() : caps;
+			});
+	};
+	const auto list = Ui::CreateChild<MusicActionButton>(
+		toggle, tr::lng_purple_music_list(), forView(false), [=] { select(false); });
+	const auto grid = Ui::CreateChild<MusicActionButton>(
+		toggle, tr::lng_purple_music_tiles(), forView(true), [=] { select(true); });
 	const auto gap = st::purpleMusicShortcutGap;
-	group->setFixedHeight(std::max({ list->height(), grid->height(), hint->height() }));
+	group->setFixedHeight(std::max(list->height(), grid->height()));
 	const auto place = [=] {
 		const auto height = group->height();
-		const auto width = list->width() + grid->width() + gap
-			+ (hint->width() ? gap + hint->width() : 0);
+		const auto width = list->width() + grid->width() + gap;
 		toggle->resize(width, height);
 		toggle->moveToRight(0, 0);
 		list->moveToLeft(0, (height - list->height()) / 2);
 		grid->moveToLeft(list->width() + gap, (height - grid->height()) / 2);
-		hint->moveToRight(0, (height - hint->height()) / 2);
 		title->resizeToNaturalWidth(std::max(1, group->width() - width - gap));
 		title->moveToLeft(0, (height - title->height()) / 2);
 	};
-	list->setWidthChangedCallback(place);
-	grid->setWidthChangedCallback(place);
-	rpl::combine(group->widthValue(), hint->widthValue())
+	rpl::combine(group->widthValue(), list->naturalWidthValue(), grid->naturalWidthValue())
 		| rpl::on_next(place, group->lifetime());
-	std::move(tiles) | rpl::on_next([=](bool isTiles) {
+	mode->value() | rpl::on_next([=](bool isTiles) {
 		const auto brush = std::optional<QBrush>(st::windowBgRipple->b);
 		list->setBrushOverride(isTiles ? std::nullopt : brush);
 		grid->setBrushOverride(isTiles ? brush : std::nullopt);
@@ -273,11 +361,17 @@ object_ptr<Ui::RpWidget> MakeMusicViewControl(
 	return result;
 }
 
-void PaintMusicText(QPainter &p, const QRect &rect, const QString &text, int lines) {
+void PaintMusicText(
+		QPainter &p,
+		const QRect &rect,
+		const QString &text,
+		int lines,
+		Qt::Alignment horizontal) {
 	if (text.isEmpty() || rect.isEmpty()) return;
 	const auto rtl = text.isRightToLeft();
 	const auto direction = rtl ? Qt::TextForceRightToLeft : Qt::TextForceLeftToRight;
-	const auto align = (rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignAbsolute | Qt::AlignTop;
+	const auto align = (horizontal ? horizontal : (rtl ? Qt::AlignRight : Qt::AlignLeft))
+		| Qt::AlignAbsolute | Qt::AlignTop;
 	const auto metrics = QFontMetrics(p.font());
 	if (lines == 1 || metrics.horizontalAdvance(text) <= rect.width()) {
 		p.drawText(rect, align | direction,
