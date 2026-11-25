@@ -145,9 +145,8 @@ struct DeliveryContext {
 	if (kind == NoticeKind::Dialog) {
 		if (!ctx.canInterruptWindow || ctx.recentTyping || ctx.hasImePreedit
 			|| (background
-				&& (ctx.inInsertMode
-				|| ctx.hasPendingPrefix
-				|| ctx.hasBlockingLayerOrBox))) {
+				&& (ctx.hasBlockingLayerOrBox
+					|| (ctx.modalEnabled && (ctx.inInsertMode || ctx.hasPendingPrefix))))) {
 			return DeliveryRoute::QueueDialogWithCue;
 		}
 		return DeliveryRoute::OpenDialogNow;
@@ -168,9 +167,8 @@ struct DeliveryContext {
 	return !ctx.passcodeLocked
 		&& !ctx.privacyScreenActive
 		&& !ctx.recentTyping
-		&& !ctx.inInsertMode
 		&& !ctx.hasImePreedit
-		&& !ctx.hasPendingPrefix
+		&& (!ctx.modalEnabled || (!ctx.inInsertMode && !ctx.hasPendingPrefix))
 		&& !ctx.hasBlockingLayerOrBox
 		&& ctx.canInterruptWindow;
 }

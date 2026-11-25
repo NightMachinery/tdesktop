@@ -99,6 +99,15 @@ int main() {
 		ctx.hasImePreedit = false;
 		ctx.canInterruptWindow = false;
 		Check(!PendingRoute(NoticeRecord{}, ctx, false), "pending dialogs wait for the active window");
+		ctx.canInterruptWindow = true;
+		ctx.inInsertMode = ctx.hasPendingPrefix = true;
+		const auto background = NoticeRecord{ .background = true };
+		Check(DecideDelivery(NoticeKind::Dialog, true, false, ctx) == DeliveryRoute::OpenDialogNow,
+			"disabled modal keys ignore old Insert and prefix state for new background notices");
+		Check(PendingRoute(background, ctx, false) == DeliveryRoute::OpenDialogNow,
+			"disabling modal keys releases a queued background notice with old modal state");
+		ctx.hasBlockingLayerOrBox = true;
+		Check(!PendingRoute(background, ctx, false), "a stock layer still holds a background dialog");
 	}
 
 	// 2. Passcode locked or privacy screen active queues silently and hides history.
