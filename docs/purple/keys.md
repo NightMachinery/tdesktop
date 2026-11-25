@@ -187,6 +187,11 @@ closes directly from the list. Command and chat palettes still open with the
 filter focused. In the Customize collection picker, use `i` or `/` to filter
 and `a` to add the selected chat.
 
+In All Bindings, M-x and Describe Command, `Esc` in the search field clears
+the query and moves focus to the results. Press `Esc` again to close.
+`F6` switches between M-x search and results while keeping the query.
+Keypad Enter runs or describes the highlighted command, just like Return.
+
 With modal keyboard shortcuts off, **Option+X** on macOS (**Alt+X** elsewhere)
 still opens M-x in an active, unlocked account window. The palette includes
 `:keys-help`, `:cheatsheet`, `:command-describe`, and

@@ -30,6 +30,13 @@ int main() {
 		!Exit(Qt::Key_BracketLeft, kControl, false),
 		!Exit(Qt::Key_G, Qt::NoModifier),
 		!Exit(Qt::Key_BracketLeft, Qt::NoModifier),
+		Submit(Qt::Key_Return),
+		Submit(Qt::Key_Enter),
+		!Submit(Qt::Key_Space),
+		ProtectPreedit(Qt::Key_Escape, Qt::NoModifier, true),
+		ProtectPreedit(Qt::Key_Escape, Qt::NoModifier, false),
+		ProtectPreedit(Qt::Key_Enter, Qt::KeypadModifier, true),
+		!ProtectPreedit(Qt::Key_E, Qt::NoModifier, true),
 	};
 	auto failures = 0;
 	for (const auto check : checks) failures += !check;

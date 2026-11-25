@@ -5154,7 +5154,7 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 		}
 	};
 	auto layer = ModalUi::CreateCommandPaletteLayer({
-		.promptBadge = (describe && Enabled()) ? u"SPC h f"_q : u"M-x"_q,
+		.promptBadge = describe ? u"Describe"_q : u"M-x"_q,
 		.placeholder = describe
 			? u"Describe any command (orderless, e.g. \"pin\")..."_q
 			: u"Execute command (orderless, e.g. \"opm\", M-p/n history)..."_q,

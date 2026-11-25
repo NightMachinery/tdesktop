@@ -56,6 +56,19 @@ int main() {
 		{ 9, Q("preview-chat"), Q("Show chat preview"), Q("chats"), Q(", p"), false },
 	};
 
+	{
+		const auto actions = std::vector<Candidate>{
+			{ 0, Q("describe-command"), Q("Describe command"), Q("help"), Q("SPC h v"), true },
+			{ 1, Q("cafe"), Q("Café"), Q("fixture"), Q("SPC z"), true },
+		};
+		const auto remapped = RankAndFilter(actions, {}, Q("h v"));
+		Expect(remapped.size() == 1 && actions[remapped.front()].id == Q("describe-command"),
+			"the effective remapped chord finds Describe Command");
+		const auto composed = RankAndFilter(actions, {}, Q("Café"));
+		Expect(composed.size() == 1 && actions[composed.front()].id == Q("cafe"),
+			"a committed composed character is searchable");
+	}
+
 	// 1. Title match beats shorter group/id-only matches ("Open chat" beats "GIFs" for "chat").
 	{
 		History h;

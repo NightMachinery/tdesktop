@@ -31,6 +31,17 @@ inline constexpr auto kControl = Qt::ControlModifier;
 		|| (mods == kControl && (key == Qt::Key_G || (modal && key == Qt::Key_BracketLeft)));
 }
 
+[[nodiscard]] inline bool Submit(int key) {
+	return key == Qt::Key_Return || key == Qt::Key_Enter;
+}
+
+[[nodiscard]] inline bool ProtectPreedit(
+		int key,
+		Qt::KeyboardModifiers mods,
+		bool modal) {
+	return Submit(key) || Exit(key, mods & ~Qt::KeypadModifier, modal);
+}
+
 inline constexpr auto kFieldProperty = "purpleListFilterField";
 
 inline void Mark(QWidget *field) {

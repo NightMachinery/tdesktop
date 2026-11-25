@@ -152,20 +152,28 @@ for required_ui in (
 # Verify IME safety in palette filter input.
 palette_ui = between(keys_ui, "class CommandPaletteLayer", "class UnreadBufferRowsWidget")
 ordered(keys_ui, "void InstallListFilter", "ListFilter::Mark(edit)", "preeditAreaText().isEmpty()",
-        "FilterResult::Continue", "handler(static_cast<QKeyEvent*>")
-ordered(palette_ui, "InstallListFilter(this, _input", "Qt::Key_Return", "AllowModalLayerKey",
-        "ListFilter::Exit", "setFocus()", "Qt::Key_F6", "ListStep(key, mods, false)",
+        "ListFilter::ProtectPreedit", "FilterResult::Cancel", "FilterResult::Continue", "handler(key)")
+ordered(palette_ui, "InstallListFilter(this, _input", "ListFilter::Submit(key)", "AllowModalLayerKey",
+        "ListFilter::Exit", "_input->setText(QString())", "setFocus()", "cancel()",
+        "Qt::Key_F6", "ListStep(key, mods, false)",
         "Qt::AltModifier", "stepHistory(")
 ordered(palette_ui, "void keyPressEvent", "ListStep(key, mods, ModalKeysEnabled())",
-        "AllowModalLayerKey(*event, this, true)", "moveSelection(step)")
+        "AllowModalLayerKey(*event, this, true)", "moveSelection(step)",
+        "ListFilter::Submit(key)", "activateRow(_selected)", "ListFilter::Exit", "cancel()")
 ordered(palette_ui, "void doSetInnerFocus()", "_input->setFocusFast()")
-for layer, last in (("UnreadBufferLayer", "TopicRowsWidget"), ("TopicPickerLayer", "NoticeBodyWidget"),
-                    ("ModalHelpLayer", "DescribeLayer")):
+for layer, last in (("UnreadBufferLayer", "TopicRowsWidget"), ("TopicPickerLayer", "NoticeBodyWidget")):
     body = between(keys_ui, f"class {layer}", f"class {last}")
     input_keys = between(body, "InstallListFilter(this, _filter", "\n\t\t});")
     ordered(input_keys, "ListFilter::Exit", "AllowModalLayerKey", "setFocus()")
     assert "setText(" not in input_keys
     ordered(body, "void keyPressEvent", "ClearListFilterOrClose(this, _filter)", "ListFilter::Enter(*e, key)")
+help_layer = between(keys_ui, "class ModalHelpLayer", "class DescribeLayer")
+ordered(help_layer, "InstallListFilter(this, _filter", "ListFilter::Exit", "AllowModalLayerKey",
+        "_filter->setText(QString())", "setFocus()", "closeLayer()", "FilterResult::Cancel")
+ordered(help_layer, "void keyPressEvent", "ClearListFilterOrClose(this, _filter)", "ListFilter::Enter(*e, key)")
+ordered(keys, "void Keys::showPalette", "EffectiveBindings(true, target.contextMap)",
+        "ChordsForAction(cmd.action, effective)", "fromInsert", "origin->setFocus",
+        ".describeMode = describe", ".onCancel", "restoreOrigin()")
 unread = between(keys_ui, "class UnreadBufferLayer", "class TopicRowsWidget")
 ordered(unread, 'u"i or / to filter"_q', "_filter->submits()", "openRow(_selected)", "InstallListFilter")
 ordered(unread, "void keyPressEvent", "key == Qt::Key_Q", "closeLayer()", "_pendingConfirmTargets.empty()")
