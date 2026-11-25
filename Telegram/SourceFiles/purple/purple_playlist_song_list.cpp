@@ -21,9 +21,11 @@
 #include "styles/style_overview.h"
 #include "styles/style_widgets.h"
 
+#include "purple/purple_hint_targets.h"
+
 namespace Purple {
 
-class PlaylistSongList::Rows final : public Ui::RpWidget {
+class PlaylistSongList::Rows final : public Ui::RpWidget, public WindowHintSource {
 public:
 	Rows(
 		QWidget *parent,
@@ -57,6 +59,7 @@ public:
 	int accessibilityChildIndexByIdentity(quintptr identity) const override;
 	void accessibilityChildSetFocus(quintptr identity) override;
 	void accessibilityChildActivate(quintptr identity) override;
+	void collectWindowHints(const QRect &clip, std::vector<WindowHintTarget> &out) override;
 
 protected:
 	int resizeGetHeight(int width) override;
@@ -648,6 +651,39 @@ void PlaylistSongList::Rows::accessibilityChildActivate(quintptr identity) {
 		const auto callback = _play;
 		callback(_data[index].documentId);
 	});
+}
+
+void PlaylistSongList::Rows::collectWindowHints(
+		const QRect &clip,
+		std::vector<WindowHintTarget> &out) {
+	const auto guard = QPointer(this);
+	const auto origin = mapToGlobal(QPoint());
+	for (auto row = 0; row < int(_data.size()); ++row) {
+		const auto bounds = accessibilityChildRect(row).translated(origin).intersected(clip);
+		if (bounds.isEmpty() || _dragging) {
+			continue;
+		}
+		const auto document = _data[row].documentId;
+		out.push_back({
+			.widget = this,
+			.bounds = bounds,
+			.name = accessibilityChildName(row),
+			.current = [=] {
+				return guard && !_dragging && row < int(_data.size())
+					&& _data[row].documentId == document
+					&& accessibilityChildRect(row).translated(mapToGlobal(QPoint()))
+						.intersected(WindowHintClip(this)) == bounds;
+			},
+			.activate = [=] {
+				const auto callback = _play;
+				cancelInteraction();
+				select(row);
+				if (guard && callback) {
+					callback(document);
+				}
+			},
+		});
+	}
 }
 
 PlaylistSongList::PlaylistSongList(

@@ -105,6 +105,8 @@
 #include <QtWidgets/QAbstractScrollArea>
 #include <QtWidgets/QScrollBar>
 #include <QtWidgets/QTextEdit>
+#include <QtWidgets/QLineEdit>
+#include <QtWidgets/QPlainTextEdit>
 
 #include <algorithm>
 #include <array>
@@ -334,6 +336,7 @@ enum class Action {
 	CopyMessageLink,
 	CopyMessageUrl,
 	OpenMessageUrl,
+	WindowHint,
 	ReplyToMessage,
 	EditMessage,
 	Search,
@@ -674,6 +677,9 @@ const Command kCommands[] = {
 	{ Action::OpenMessageUrl, "message-hint-open-url", "messages", "Needs visible messages",
 		"hyperlink visit browser address",
 		[] { return tr::lng_polls_option_open_link_title(tr::now); } },
+	{ Action::WindowHint, "window-hint", "window", "Needs an active window",
+		"follow link button mouse keyboard activate",
+		[] { return u"Click a visible target"_q; } },
 	{ Action::ReplyToMessage, "message-hint-reply", "messages", "Needs a chat you can reply in",
 		"respond answer quote",
 		[] { return tr::lng_context_reply_msg(tr::now); } },
@@ -1695,6 +1701,7 @@ std::vector<Data::ForumTopic*> OrderedForumTopics(not_null<Data::Forum*> forum) 
 
 bool Available(Action action, const Target &target) {
 	switch (action) {
+	case Action::WindowHint: return target.controller != nullptr;
 	case Action::MoveUp:
 	case Action::MoveDown:
 		return target.list != nullptr || HistoryScroll(target) != nullptr;
@@ -1799,6 +1806,7 @@ bool Available(Action action, const Target &target) {
 
 bool RequiresModalInput(Action action) {
 	switch (action) {
+	case Action::WindowHint:
 	case Action::EnterNormalMode:
 	case Action::EnterInsertMode:
 	case Action::SelectMessage:
@@ -1985,6 +1993,9 @@ private:
 		QObject *receiver,
 		bool allowUnmapped = false) const;
 	[[nodiscard]] Target activeTarget() const;
+	[[nodiscard]] Ui::RpWidget *hintRoot() const;
+	[[nodiscard]] bool handleWindowHints(QWidget *receiver, QKeyEvent *event, int key);
+	void startWindowHints();
 	[[nodiscard]] Dialogs::InnerWidget *liveChatCursor(
 		Window::SessionController *controller) const;
 	[[nodiscard]] bool chromeVisible() const;
@@ -2440,6 +2451,13 @@ bool Keys::eventFilter(QObject *watched, QEvent *event) {
 	}
 #endif // Q_OS_MAC
 	if (watched->isWidgetType() && static_cast<QWidget*>(watched)->window() == _window) {
+		if (_hints.windowActive() && (type == QEvent::Wheel || type == QEvent::TouchBegin
+			|| type == QEvent::MouseButtonPress || ((type == QEvent::Show || type == QEvent::Hide
+				|| type == QEvent::Move || type == QEvent::Resize || type == QEvent::LayoutRequest)
+				&& _hints.affectedBy(static_cast<QWidget*>(watched))))) {
+			_hints.clear();
+			refreshStatusBar();
+		}
 		if (_chatCursor.row) {
 			const auto list = _chatCursor.list.data();
 			const auto viewport = list ? list->parentWidget() : nullptr;
@@ -2614,6 +2632,96 @@ Target Keys::activeTarget() const {
 	return (focus && current)
 		? FindTarget(current, focus)
 		: Target();
+}
+
+Ui::RpWidget *Keys::hintRoot() const {
+	if (!owner()) {
+		return nullptr;
+	}
+	const auto body = _window->bodyWidget();
+	for (const auto child : body->children()) {
+		if (const auto stack = dynamic_cast<Ui::LayerStackWidget*>(child);
+			stack && stack->isVisible()) {
+			return const_cast<Ui::LayerWidget*>(stack->topShownLayer());
+		}
+	}
+	return _window->controller().isLayerShown() ? nullptr : body;
+}
+
+void Keys::startWindowHints() {
+	const auto current = owner();
+	if (!current || !_normal) {
+		return;
+	}
+	const auto guard = QPointer(this);
+	const auto original = base::make_weak(current);
+	clearPrefix();
+	if (!guard || !original || owner() != original.get()) {
+		return;
+	}
+	if (_hints.startWindow(hintRoot(), &current->session(), windowFocusWidget())) {
+		refreshStatusBar();
+	} else {
+		showFeedback(u"No clickable targets"_q);
+	}
+}
+
+bool Keys::handleWindowHints(QWidget *receiver, QKeyEvent *event, int key) {
+	const auto current = owner();
+	if (!current || !_normal || receiver == _preeditInput) {
+		return false;
+	}
+	const auto combo = KeyStroke(*event, key);
+	const auto mods = event->modifiers() & ~Qt::KeypadModifier;
+	const auto active = _hints.windowActive();
+	const auto cancel = (key == Qt::Key_Escape && !mods) || combo == kCtrlG;
+	if (active) {
+		if (!cancel && mods != Qt::NoModifier && mods != Qt::ShiftModifier) {
+			return false;
+		}
+	} else {
+		if (!_prefix.empty() || _inspect || _hints.active()
+			|| (mods != Qt::NoModifier && mods != Qt::ShiftModifier)) {
+			return false;
+		}
+		const auto focus = QApplication::focusWidget();
+		if (focus && focus != _normalComposer && (qobject_cast<QLineEdit*>(focus)
+			|| qobject_cast<QTextEdit*>(focus) || qobject_cast<QPlainTextEdit*>(focus))) {
+			return false;
+		}
+		const auto target = focus ? FindTarget(current, focus) : Target();
+		const auto bindings = EffectiveBindings(true, target.contextMap);
+		if (!ranges::any_of(bindings, [=](const EffectiveBinding &binding) {
+			return binding.action == Action::WindowHint && binding.keys.size() == 1
+				&& binding.keys.front() == combo;
+		})) {
+			return false;
+		}
+	}
+	event->accept();
+	if (event->type() != QEvent::KeyPress || event->isAutoRepeat()) {
+		return true;
+	}
+	const auto physical = PhysicalIdentity(*event);
+	_held.insert(physical);
+	ClaimedKeys.emplace(physical, nullptr);
+	if (!active) {
+		startWindowHints();
+	} else if (cancel) {
+		clearPrefix();
+	} else {
+		const auto guard = QPointer(this);
+		const auto result = _hints.typeWindow(key, hintRoot(), &current->session());
+		if (guard) {
+			if (result == MessageHints::Input::LeaveNormal) {
+				enterInsert(true);
+			} else if (result == MessageHints::Input::Unknown) {
+				showFeedback(u"Unknown hint key"_q);
+			}
+			refreshStatusBar();
+		}
+	}
+	return true;
 }
 
 bool Keys::ownsChatListFocus() const {
@@ -3509,6 +3617,9 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 	if (receiver == _preeditInput) {
 		return false;
 	}
+	if (handleWindowHints(static_cast<QWidget*>(receiver), keyEvent, key)) {
+		return true;
+	}
 	const auto target = currentTarget(receiver);
 	if (!target.focus) {
 		if (receiver == QApplication::focusWidget()) {
@@ -4397,6 +4508,9 @@ void Keys::dispatch(Action action, const Target &target, int count, ScrollPress 
 		break;
 	case Action::OpenMessageUrl:
 		startHint(Hint::OpenUrl, tr::lng_purple_keys_message_link_empty(tr::now));
+		break;
+	case Action::WindowHint:
+		startWindowHints();
 		break;
 	case Action::ReplyToMessage:
 		startHint(Hint::Reply, tr::lng_purple_keys_message_menu_empty(tr::now));

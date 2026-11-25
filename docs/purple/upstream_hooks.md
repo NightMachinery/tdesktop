@@ -69,6 +69,8 @@ the numbers.
 - `dialogs/dialogs_widget.*` and `dialogs/dialogs_inner_widget.*`: expose the
   visible dialogs list and its keyboard-selected entry to open or preview
   the same row from another pane.
+- `dialogs/dialogs_inner_widget.h` and `info/media/info_media_list_widget.h`:
+  admit the hint adapters to the stock row geometry and identity checks.
 - `platform/mac/main_window_mac.mm`: keeps the preliminary typing notification
   from moving focus to search while Normal mode owns the chat list.
 - `history/history_inner_widget.*`: visible message enumeration and geometry

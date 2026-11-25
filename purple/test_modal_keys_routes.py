@@ -364,6 +364,24 @@ ordered(read("dialogs/dialogs_inner_widget.cpp"), "InnerWidget::computeChosenRow
         "!_mouseSelection", "computeChosenRow().key")
 assert '"J/K to pick a chat first"' in keys
 
+# Universal hints use the active layer, reuse the message engine, and validate again after capture.
+universal = read("purple/purple_message_hints.cpp")
+hint_targets = read("purple/purple_hint_targets.cpp")
+ordered(keys, "Ui::RpWidget *Keys::hintRoot()", "if (!owner())", "stack->topShownLayer()")
+ordered(keys, "bool Keys::handleWindowHints", "receiver == _preeditInput", "_hints.windowActive()",
+        "event->isAutoRepeat()", "_hints.typeWindow(key, hintRoot(), &current->session())")
+ordered(universal, "bool MessageHints::startWindow", "CollectWindowHintTargets(root)",
+        "appendWindowMessages", "HintLabels(targets.size())", "WindowHintExposed", "PlaceHintBadge")
+ordered(universal, "MessageHints::Input MessageHints::typeWindow", "session != _session.get()",
+        "Qt::Key_Backspace", "_prefix.chop(1)", "auto entry = std::move", "clear()",
+        "entry.current()", "WindowHintExposed", "entry.activate()")
+ordered(universal, "void MessageHints::appendWindowMessages", "purpleHiddenFromView()", "fullId()",
+        "alive->data().message(id)", "CanSendReply(item)", "VisibleBodyLinks", "purpleEnumerateVisible")
+ordered(hint_targets, "class HintDialogRows", "At(list, index)", "At(guard, index) == identity")
+ordered(hint_targets, "class HintMediaRows", "item->fullId()", "live.layout->getItem()->fullId() == id")
+ordered(hint_targets, "void AddButton", "SendButton::Type::Record", "SendButton::Type::Round",
+        "send->state() == *sendState", "clicked(Qt::NoModifier, Qt::LeftButton)")
+
 # Bare J/K select folders only in the list. The other chat-cursor chords
 # remain in Normal, and explicit overlays take precedence over the defaults.
 chat_map = between(defaults, "\n :chats", "\n :music")
@@ -656,7 +674,7 @@ hints = read("purple/purple_message_hints.cpp")
 ordered(hints, "VisibleBodyLinks(", "purpleRichLinkLayout()", "forEachVisibleLinkText(",
         "CollectVisibleBodyLinks", "else if (text")
 ordered(hints, "MessageHints::Input MessageHints::applyBodyLink",
-        "canUseBodyLink", "BodyLinkState", "state.link->url() != link.url",
+        "canUseBodyLink", "BodyLinkState", "MatchesUrl(state.link, link.url)",
         "copyToClipboardText()", "ActivateClickHandler")
 article = read("iv/markdown/iv_markdown_article.cpp")
 ordered(article, "void MarkdownArticle::Impl::forEachVisibleLinkText",

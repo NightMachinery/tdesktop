@@ -30,5 +30,16 @@ int main() {
 	const auto link = QRect(32, 42, 88, 18);
 	check(Purple::MessageHintLeaderEnd(QPoint(15, 64), link) == QPoint(31, 60), "leader stops before near corner");
 	check(Purple::MessageHintLeaderEnd(QPoint(140, 50), link) == QPoint(120, 50), "leader stops before right edge");
-	std::cout << "9 checks, 0 failures\n";
+	auto placed = std::vector<QRect>();
+	for (auto i = 0; i < 30; ++i) {
+		const auto next = Purple::PlaceHintBadge(QRect(88, 40, 24, 16), viewport, placed);
+		check(viewport.contains(next), "dense badge remains in the viewport");
+		for (const auto previous : placed) {
+			check(!previous.intersects(next), "dense badges must not overlap");
+		}
+		placed.push_back(next);
+	}
+	check(Purple::PlaceHintBadge(QRect(0, 0, 201, 20), viewport, {}).isEmpty(),
+		"an oversized badge cannot be drawn");
+	std::cout << "475 checks, 0 failures\n";
 }

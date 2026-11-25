@@ -2,6 +2,7 @@
 
 #include "base/weak_ptr.h"
 #include "data/data_msg_id.h"
+#include "purple/purple_hint_targets.h"
 
 #include <QtCore/QPointer>
 #include <QtCore/QRect>
@@ -52,8 +53,15 @@ public:
 	~MessageHints();
 
 	[[nodiscard]] bool start(Target view, Action action);
+	[[nodiscard]] bool startWindow(
+		Ui::RpWidget *root,
+		Main::Session *session,
+		QWidget *focus);
 	[[nodiscard]] bool active() const;
+	[[nodiscard]] bool windowActive() const;
+	[[nodiscard]] bool affectedBy(QWidget *widget) const;
 	[[nodiscard]] Input type(int key, Target view);
+	[[nodiscard]] Input typeWindow(int key, Ui::RpWidget *root, Main::Session *session);
 	void clear();
 
 private:
@@ -76,6 +84,7 @@ private:
 		std::vector<FullMsgId> group;
 		QString label;
 		std::optional<BodyLink> bodyLink;
+		QRect windowBadge;
 
 		friend bool operator==(const Entry &, const Entry &) = default;
 	};
@@ -94,6 +103,10 @@ private:
 		Target view,
 		not_null<HistoryItem*> item,
 		Action action);
+	static void appendWindowMessages(
+		Target view,
+		Main::Session *session,
+		std::vector<WindowHintTarget> &out);
 	static Input applyBodyLink(
 		Target view,
 		not_null<const HistoryView::Element*> element,
@@ -108,10 +121,12 @@ private:
 
 	QPointer<Ui::RpWidget> _view;
 	QPointer<Overlay> _overlay;
+	QPointer<Ui::RpWidget> _windowRoot;
 	base::weak_ptr<Main::Session> _session;
 	Action _action = Action::Select;
 	bool _scheduled = false;
 	std::vector<Entry> _entries;
+	std::vector<WindowHintTarget> _windowEntries;
 	QString _prefix;
 	QRect _globalClip;
 	rpl::lifetime _watch;

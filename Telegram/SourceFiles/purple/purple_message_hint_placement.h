@@ -3,8 +3,46 @@
 #include <QtCore/QRect>
 
 #include <algorithm>
+#include <vector>
 
 namespace Purple {
+
+[[nodiscard]] inline QRect PlaceHintBadge(
+		QRect anchor,
+		QRect viewport,
+		const std::vector<QRect> &placed) {
+	if (anchor.isEmpty() || anchor.width() > viewport.width()
+		|| anchor.height() > viewport.height()) {
+		return {};
+	}
+	anchor.moveTopLeft(QPoint(
+		std::clamp(anchor.x(), viewport.left(), viewport.right() + 1 - anchor.width()),
+		std::clamp(anchor.y(), viewport.top(), viewport.bottom() + 1 - anchor.height())));
+	const auto free = [&](QRect rect) {
+		return viewport.contains(rect) && std::none_of(begin(placed), end(placed),
+			[&](QRect other) { return rect.intersects(other); });
+	};
+	if (free(anchor)) {
+		return anchor;
+	}
+	const auto across = viewport.width() / anchor.width() + 1;
+	const auto down = viewport.height() / anchor.height() + 1;
+	for (auto distance = 1; distance <= across + down; ++distance) {
+		for (auto x = -std::min(across, distance); x <= std::min(across, distance); ++x) {
+			const auto y = distance - std::abs(x);
+			const auto offset = QPoint(x * anchor.width(), y * anchor.height());
+			if (const auto rect = anchor.translated(offset); free(rect)) {
+				return rect;
+			}
+			if (y) {
+				if (const auto rect = anchor.translated(offset.x(), -offset.y()); free(rect)) {
+					return rect;
+				}
+			}
+		}
+	}
+	return {};
+}
 
 [[nodiscard]] inline QPoint MessageHintLeaderEnd(QPoint from, QRect link) {
 	const auto edge = link.adjusted(-1, -1, 1, 1);
