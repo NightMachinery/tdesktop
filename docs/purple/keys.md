@@ -279,9 +279,10 @@ on the modal status line and cheatsheet footer.
   call panels when the privacy screen activates.
 - `mainwindow.cpp` and `window/main_window.cpp`: attaches the modal status line
   and docked which-key drawer in `finishFirstShow()`, reserves status-bar height
-  beneath `_main` in `updateControlsGeometry()`, lays out and raises the privacy
-  screen above layers and below passcode lock in `fixOrder()`, and sets the
-  window title to `Clock` while the privacy screen is active.
+  beneath `_main` in `updateControlsGeometry()`, gives full-height layers such
+  as the main menu precedence over the status strip, and lays out and raises
+  the privacy screen above layers and below passcode lock in `fixOrder()`.
+  The window title is `Clock` while the privacy screen is active.
 - `mainwidget.cpp`, `window/window_filters_menu.h`, and
   `window/window_session_controller.*`: hides the folder rail, chat list, side
   shadows, and third column while Zen fullscreen chat mode is active.

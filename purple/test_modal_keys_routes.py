@@ -47,6 +47,10 @@ ordered(mainwindow, "void MainWindow::updateControlsGeometry()",
 
 keys = read("purple/purple_keys.cpp")
 keys_ui = read("purple/purple_keys_ui.cpp")
+chrome = between(keys, "void Keys::raiseChrome", "Target Keys::currentTarget")
+ordered(chrome, "topShownLayer()", "geometry().bottom()", "_statusBar->stackUnder(stack)",
+        "_whichKey->stackUnder(stack)", "_statusBar->raise()")
+assert keys.count("_statusBar->raise()") == 1
 keys_mx = read("purple/purple_keys_mx.h")
 resource = ROOT / "Telegram/Resources/purple"
 defaults = (resource / "default-keys.edn").read_text(encoding="utf-8")

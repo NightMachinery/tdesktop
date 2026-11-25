@@ -30,8 +30,8 @@ the numbers.
   panels.
 - `mainwindow.cpp` and `window/main_window.cpp`: attaches Purple's modal status
   line and docked which-key drawer in `finishFirstShow()`, reserves the
-  status-bar height beneath `_main` in `updateControlsGeometry()`, preserves
-  upstream `fixOrder()` when the privacy screen is inactive and raises the
+  status-bar height beneath `_main` in `updateControlsGeometry()`, and gives
+  full-height layers precedence over the modal chrome. It raises the
   privacy overlay last when active and unlocked (covering layers and media
   preview while keeping passcode/setup-email locks and their boxes on top),
   blocks `handleStartFiles()` while active, and replaces the window title with

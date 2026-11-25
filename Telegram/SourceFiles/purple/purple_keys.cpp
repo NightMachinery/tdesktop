@@ -2063,16 +2063,24 @@ void Keys::updateLayout(QRect body) {
 	const auto h = ModalUi::ModalStatusBar::kHeight;
 	_statusBar->setGeometry(body.x(), body.y() + body.height() - h, body.width(), h);
 	_statusBar->setVisible(showBar);
-	if (showBar) {
-		_statusBar->raise();
-	}
 	if (_whichKey->isVisible()) {
 		const auto above = QRect(body.x(), body.y(), body.width(), std::max(0, body.height() - h));
 		_whichKey->updateBounds(above);
 	}
+	raiseChrome();
 }
 
 void Keys::raiseChrome() {
+	for (const auto child : _window->bodyWidget()->children()) {
+		const auto stack = dynamic_cast<Ui::LayerStackWidget*>(child);
+		const auto layer = stack ? stack->topShownLayer() : nullptr;
+		if (layer && layer->geometry().top() <= 0
+			&& layer->geometry().bottom() >= stack->rect().bottom()) {
+			_statusBar->stackUnder(stack);
+			_whichKey->stackUnder(stack);
+			return;
+		}
+	}
 	if (_statusBar && _statusBar->isVisible()) {
 		_statusBar->raise();
 	}
@@ -2634,7 +2642,7 @@ void Keys::refreshStatusBar() {
 			h);
 	}
 	_statusBar->show();
-	_statusBar->raise();
+	raiseChrome();
 	const auto target = activeTarget();
 	auto state = ModalUi::StatusState();
 	state.unreadDm = _unreadSummary.dm;
