@@ -48,6 +48,7 @@
 #include "purple/purple_config.h"
 #include "purple/purple_diagnostics_ui.h"
 #include "purple/purple_exact_search.h"
+#include "purple/purple_folder_strip.h"
 #include "purple/purple_key_repeat.h"
 #include "purple/purple_key_scroll.h"
 #include "purple/purple_keys_mx.h"
@@ -452,10 +453,10 @@ const Command kCommands[] = {
 		[] { return u"New topic or bot message"_q; } },
 	{ Action::TopicParent, "topic-parent", "topics", "Needs a forum group or threaded bot",
 		[] { return u"Show forum topic list"_q; } },
-	{ Action::PreviousFolder, "folder-previous", "chats", "Needs main chat list focus",
-		[] { return tr::lng_purple_keys_folder_previous(tr::now); }, RepeatPolicy::Count },
-	{ Action::NextFolder, "folder-next", "chats", "Needs main chat list focus",
-		[] { return tr::lng_purple_keys_folder_next(tr::now); }, RepeatPolicy::Count },
+	{ Action::PreviousFolder, "folder-previous", "chats", "Folders are available in the main chat list",
+		[] { return tr::lng_purple_keys_folder_previous(tr::now); }, RepeatPolicy::FolderNavigation },
+	{ Action::NextFolder, "folder-next", "chats", "Folders are available in the main chat list",
+		[] { return tr::lng_purple_keys_folder_next(tr::now); }, RepeatPolicy::FolderNavigation },
 	{ Action::SelectMessage, "message-hint-select", "messages", "Needs visible messages",
 		[] { return tr::lng_purple_keys_message_select(tr::now); } },
 	{ Action::CopyMessage, "message-hint-copy-text", "yank", "Needs visible messages",
@@ -616,28 +617,49 @@ enum class MapKind {
 };
 
 constexpr auto kCtrlG = int(kCtrl) | Qt::Key_G;
+constexpr auto kShiftJ = int(Qt::ShiftModifier) | Qt::Key_J;
+constexpr auto kShiftK = int(Qt::ShiftModifier) | Qt::Key_K;
 
 struct Binding {
 	Action action;
 	Chord keys;
 	MapKind map = MapKind::Normal;
+	bool user = false;
 };
+
+bool IsDirectChatListChord(const Chord &keys) {
+	return keys.size() == 1 && (keys.front() == kShiftJ || keys.front() == kShiftK);
+}
+
+bool UsesLocalleader(const Binding &binding) {
+	return binding.map != MapKind::Normal && binding.map != MapKind::Insert
+		&& (binding.map != MapKind::Chats || !IsDirectChatListChord(binding.keys)
+			|| binding.user);
+}
 
 struct KeymapData {
 	std::vector<Binding> bindings;
 	std::vector<Chord> localleaders;
 	std::map<std::pair<MapKind, Chord>, QString> labels;
 	QSet<Action> keyless;
+	QSet<int> normalChatListOverrides;
 	QString userPath;
 	QString error;
 };
 
-QString MapName(MapKind map) {
+bool IsActiveDirectChatListBinding(const Binding &binding, const KeymapData &data) {
+	return binding.map == MapKind::Chats && IsDirectChatListChord(binding.keys)
+		&& (binding.user || !data.normalChatListOverrides.contains(binding.keys.front()));
+}
+
+QString MapName(MapKind map, bool localleader = true) {
 	switch (map) {
 	case MapKind::Normal: return u"everywhere"_q;
 	case MapKind::Insert: return u"in Insert mode"_q;
 	case MapKind::Chat: return u"in a chat (after localleader)"_q;
-	case MapKind::Chats: return u"in the chat list (after localleader)"_q;
+	case MapKind::Chats: return localleader
+		? u"in the chat list (after localleader)"_q
+		: u"in the chat list"_q;
 	case MapKind::Music: return u"in Music (after localleader)"_q;
 	}
 	return u"everywhere"_q;
@@ -1046,6 +1068,9 @@ bool ParseEdnOverlay(
 				errorOut = u"cannot override protected help chord \""_q + *chordStr + u"\""_q;
 				return false;
 			}
+			if (isUserOverlay && *mapKind == MapKind::Normal && IsDirectChatListChord(chord)) {
+				data.normalChatListOverrides.insert(chord.front());
+			}
 			if (edn_type(val) == EDN_TYPE_NIL) {
 				if (current != data.bindings.end()) {
 					data.bindings.erase(current);
@@ -1060,8 +1085,9 @@ bool ParseEdnOverlay(
 			}
 			if (current != data.bindings.end()) {
 				current->action = *action;
+				current->user = isUserOverlay;
 			} else {
-				data.bindings.push_back({ *action, std::move(chord), *mapKind });
+				data.bindings.push_back({ *action, std::move(chord), *mapKind, isUserOverlay });
 			}
 		}
 	}
@@ -1069,7 +1095,8 @@ bool ParseEdnOverlay(
 	// Validate no command/prefix collision within any single map.
 	for (const auto &a : data.bindings) {
 		for (const auto &b : data.bindings) {
-			if (a.map == b.map && a.keys.size() < b.keys.size() && StartsWith(b, a.keys)) {
+			if (a.map == b.map && UsesLocalleader(a) == UsesLocalleader(b)
+				&& a.keys.size() < b.keys.size() && StartsWith(b, a.keys)) {
 				errorOut = u"prefix collision between \""_q + ChordLabel(a.keys)
 					+ u"\" and \""_q + ChordLabel(b.keys) + u"\""_q;
 				return false;
@@ -1079,7 +1106,7 @@ bool ParseEdnOverlay(
 	// Validate localleader chords do not collide with :normal commands or prefixes.
 	for (const auto &ll : data.localleaders) {
 		for (const auto &b : data.bindings) {
-			if (b.map == MapKind::Normal
+			if ((b.map == MapKind::Normal || IsActiveDirectChatListBinding(b, data))
 					&& (StartsWith(b.keys, ll) || StartsWith(ll, b.keys))) {
 				errorOut = u":localleader \""_q + ChordLabel(ll)
 					+ u"\" collides with :normal \""_q + ChordLabel(b.keys) + u"\""_q;
@@ -1721,10 +1748,19 @@ std::vector<EffectiveBinding> EffectiveBindings(
 		}
 		return result;
 	}
+	auto directKeys = QSet<int>();
+	if (contextMap == MapKind::Chats) {
+		for (const auto &b : km.bindings) {
+			if (IsActiveDirectChatListBinding(b, km)) {
+				directKeys.insert(b.keys.front());
+				result.push_back({ b.action, b.keys, b.map, false });
+			}
+		}
+	}
 	if (contextMap) {
 		for (const auto &ll : km.localleaders) {
 			for (const auto &b : km.bindings) {
-				if (b.map != *contextMap) {
+				if (b.map != *contextMap || !UsesLocalleader(b)) {
 					continue;
 				}
 				auto combined = ll;
@@ -1734,11 +1770,22 @@ std::vector<EffectiveBinding> EffectiveBindings(
 		}
 	}
 	for (const auto &b : km.bindings) {
-		if (b.map == MapKind::Normal) {
+		if (b.map == MapKind::Normal && !directKeys.contains(b.keys.front())) {
 			result.push_back({ b.action, b.keys, MapKind::Normal, false });
 		}
 	}
 	return result;
+}
+
+bool HasFolderKeys() {
+	const auto bindings = EffectiveBindings(true, MapKind::Chats);
+	const auto has = [&](int key, Action action) {
+		return ranges::any_of(bindings, [&](const EffectiveBinding &binding) {
+			return binding.action == action && binding.keys.size() == 1
+				&& binding.keys.front() == key;
+		});
+	};
+	return has(kShiftJ, Action::NextFolder) && has(kShiftK, Action::PreviousFolder);
 }
 
 bool IsLocalleaderPrefix(const Chord &prefix) {
@@ -1841,7 +1888,7 @@ private:
 		const QKeyEvent &event,
 		int key,
 		const Target &target) const;
-	void clearPrefix(bool keepChatNavigation = false, bool keepChatCursor = false);
+	void clearPrefix(RepeatPolicy keepMotion = RepeatPolicy::Never, bool keepChatCursor = false);
 	void enterNormal(bool silent = true);
 	void enterInsert(bool silent = true);
 	void showFeedback(QString text, bool isError = false, int durationMs = 0);
@@ -1881,6 +1928,7 @@ private:
 		QPoint pointer;
 	};
 	ChatCursor _chatCursor;
+	bool _steppingFolders = false;
 	int _composerCursorWidth = 0;
 	QTimer _whichKeyTimer;
 	QTimer _feedbackTimer;
@@ -2196,24 +2244,29 @@ Keys::Keys(not_null<MainWindow*> window)
 		}, _sessionLifetime);
 		refreshUnreadSummary();
 
-		const auto contextChanged = [=](bool keepChatNavigation) {
+		const auto contextChanged = [=](RepeatPolicy keepMotion) {
 			++_revision;
 			recordActiveTopic();
 			if (_zenMode && !owner->activeChatCurrent().thread()) {
 				setZenMode(false);
 			}
-			clearPrefix(keepChatNavigation);
+			clearPrefix(keepMotion);
+		};
+		const auto folderMotion = [=] {
+			return _steppingFolders ? RepeatPolicy::FolderNavigation : RepeatPolicy::Never;
 		};
 		owner->activeChatEntryChanges() | rpl::on_next([=](auto) {
-			contextChanged(true);
+			contextChanged(_steppingFolders ? folderMotion() : RepeatPolicy::ChatNavigation);
+		}, _sessionLifetime);
+		owner->activeChatsFilter() | rpl::on_next([=](FilterId) {
+			contextChanged(folderMotion());
 		}, _sessionLifetime);
 		rpl::merge(
-			owner->activeChatsFilter() | rpl::to_empty,
 			owner->openedFolder().changes() | rpl::to_empty,
 			owner->shownForum().changes() | rpl::to_empty,
 			owner->openedCommunity().changes() | rpl::to_empty
 		) | rpl::on_next([=] {
-			contextChanged(false);
+			contextChanged(RepeatPolicy::Never);
 		}, _sessionLifetime);
 	}, _lifetime);
 
@@ -2950,8 +3003,8 @@ void Keys::hideWhichKey() {
 	}
 }
 
-void Keys::clearPrefix(bool keepChatNavigation, bool keepChatCursor) {
-	_motion.cancel(keepChatNavigation);
+void Keys::clearPrefix(RepeatPolicy keepMotion, bool keepChatCursor) {
+	_motion.cancel(keepMotion);
 	_layerMotion.cancel();
 	cancelScroll();
 	if (!keepChatCursor) {
@@ -3171,6 +3224,9 @@ void Keys::refreshStatusBar() {
 
 	if (state.rightCue.isEmpty() && target.focus && liveChatCursor(target.controller)) {
 		state.rightCue = u"RET open"_q;
+	} else if (state.rightCue.isEmpty() && _normal && target.folders
+		&& StepModalChatsFilter(target.controller, 1, false) && HasFolderKeys()) {
+		state.rightCue = u"J/K folders"_q;
 	}
 	state.localleaderHint = u"SPC leader  ·  "_q + FirstLocalleaderLabel() + u" local"_q;
 	_statusBar->setState(std::move(state));
@@ -3661,12 +3717,23 @@ void Keys::showWhichKey() {
 					existing.push_back(keyLbl);
 				}
 			} else {
+				auto label = (b.action == Action::UnreadBuffer)
+					? u"Unread unmuted chats"_q
+					: CommandLabel(b.action, target);
+				if (target.folders && IsExactLocalleader(_prefix)
+					&& (b.action == Action::NextFolder || b.action == Action::PreviousFolder)) {
+					const auto direct = ranges::find_if(effective, [&](const EffectiveBinding &other) {
+						return other.action == b.action && other.sourceMap == MapKind::Chats
+							&& !other.viaLocalleader;
+					});
+					if (direct != end(effective)) {
+						label += u" (%1 from list)"_q.arg(ChordLabel(direct->keys));
+					}
+				}
 				leafIndexByAction.emplace(b.action, leaves.size());
 				leaves.push_back({
 					.keys = { keyLbl },
-					.label = (b.action == Action::UnreadBuffer)
-						? u"Unread unmuted chats"_q
-						: CommandLabel(b.action, target),
+					.label = std::move(label),
 					.isGroup = false,
 				});
 			}
@@ -3780,7 +3847,7 @@ void Keys::stroke(KeyRepeat::Stroke press, const Target &target) {
 		const auto guard = QPointer(this);
 		const auto opensCursor = !inspect && target.chatCursorAvailable
 			&& (action == Action::OpenChat || action == Action::PreviewChat);
-		clearPrefix(false, opensCursor);
+		clearPrefix(RepeatPolicy::Never, opensCursor);
 		if (!guard) {
 			return;
 		} else if (inspect) {
@@ -3946,12 +4013,32 @@ void Keys::dispatch(Action action, const Target &target, int count, ScrollPress 
 		break;
 	}
 	case Action::PreviousFolder:
-	case Action::NextFolder:
-		for (auto i = 0; i < repeat; ++i) {
-			Window::CheckAndJumpToNearChatsFilter(
-				current, action == Action::NextFolder, true);
+	case Action::NextFolder: {
+		const auto guard = QPointer(this);
+		const auto original = base::make_weak(current);
+		const auto delta = (action == Action::NextFolder) ? repeat : -repeat;
+		const auto wasStepping = std::exchange(_steppingFolders, true);
+		const auto switched = StepModalChatsFilter(current, delta, true);
+		if (!guard) {
+			break;
+		}
+		_steppingFolders = wasStepping;
+		if (!switched) {
+			_motion.cancel();
+			showFeedback(u"No other folders"_q);
+		} else if (original && owner() == original.get()) {
+			if (const auto pane = ChatsPane(current);
+				pane && !pane->purpleKeysList(QApplication::focusWidget())) {
+				pane->setInnerFocus(true);
+			}
+			if (const auto list = (guard && original && owner() == original.get())
+					? ChatsInnerList(current) : nullptr;
+				list && !list->purpleKeyboardSelection()) {
+				list->selectSkip(1);
+			}
 		}
 		break;
+	}
 	case Action::Search:
 		if (target.contextMap == MapKind::Music) {
 			if (Enabled()) {
@@ -4293,7 +4380,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 			if (!dup) {
 				candidates.push_back({
 					.caps = std::move(caps),
-					.contextTag = b.viaLocalleader ? mapContextTag(b.sourceMap) : QString(),
+					.contextTag = mapContextTag(b.sourceMap),
 				});
 			}
 		}
@@ -4341,8 +4428,8 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		auto nav = ModalUi::HelpSection{ .title = u"NAVIGATE"_q };
 		pushRow(nav.rows, rowFor(Action::MoveDown, u"Down (chat list or scroll)"_q));
 		pushRow(nav.rows, rowFor(Action::MoveUp, u"Up (chat list or scroll)"_q));
-		pushRow(nav.rows, rowFor(Action::NextChat, u"Next chat from any pane"_q));
-		pushRow(nav.rows, rowFor(Action::OpenChat, u"Open highlighted chat (J/K then RET)"_q));
+		pushRow(nav.rows, rowFor(Action::NextChat, u"Next chat in the list"_q));
+		pushRow(nav.rows, rowFor(Action::OpenChat, u"Open highlighted chat"_q));
 		pushRow(nav.rows, rowFor(Action::HistoryHalfDown, u"Half-page scroll down"_q));
 		pushRow(nav.rows, rowFor(Action::HistoryHalfUp, u"Half-page scroll up"_q));
 		pushRow(nav.rows, rowFor(Action::LatestMessages, u"Jump to newest"_q));
@@ -4402,7 +4489,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		auto local = ModalUi::HelpSection{ .title = std::move(localTitle) };
 		const auto addLocalRow = [&](MapKind map, Action action, QString shortLabel = {}) {
 			for (const auto &b : Keymap().bindings) {
-				if (b.map == map && b.action == action) {
+				if (b.map == map && b.action == action && UsesLocalleader(b)) {
 					auto full = primaryLl;
 					full.insert(full.end(), b.keys.begin(), b.keys.end());
 					const auto ctx = (map == MapKind::Chat) ? u"chat"_q
@@ -4448,6 +4535,8 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		pushRow(panes.rows, rowFor(Action::FocusChats, u"Focus chat list"_q, 1));
 		pushRow(panes.rows, rowFor(Action::FocusConversation, u"Focus conversation"_q, 1));
 		pushRow(panes.rows, rowFor(Action::FocusOtherPane, u"Toggle pane"_q, 1));
+		pushRow(panes.rows, rowFor(Action::NextFolder));
+		pushRow(panes.rows, rowFor(Action::PreviousFolder));
 		pushRow(panes.rows, rowFor(Action::ToggleZenMode, u"Zen fullscreen chat"_q, 1));
 		pushRow(panes.rows, rowFor(Action::TogglePrivacyScreen, u"Privacy screen"_q, 1));
 		pushRow(panes.rows, rowFor(Action::ToggleNightMode, u"Toggle night mode"_q, 1));
@@ -4597,7 +4686,7 @@ namespace {
 		if (b.action != action) {
 			continue;
 		}
-		if (b.map == MapKind::Chat || b.map == MapKind::Chats || b.map == MapKind::Music) {
+		if (UsesLocalleader(b)) {
 			for (const auto &ll : Keymap().localleaders) {
 				auto full = ll;
 				full.insert(full.end(), b.keys.begin(), b.keys.end());
@@ -4606,10 +4695,12 @@ namespace {
 					.where = MapName(b.map),
 				});
 			}
-		} else {
+		}
+		if (b.map == MapKind::Normal || b.map == MapKind::Insert
+			|| IsActiveDirectChatListBinding(b, Keymap())) {
 			out.push_back({
 				.caps = ChordCaps(b.keys),
-				.where = MapName(b.map),
+				.where = MapName(b.map, false),
 			});
 		}
 	}
@@ -4663,7 +4754,8 @@ void Keys::showDescribeKeyResult(const Chord &chord, const Target &target) {
 			}
 			data.elsewhere.push_back({
 				.caps = ChordCaps(b.keys),
-				.where = FindCommand(b.action).label() + u" ("_q + MapName(b.map) + u")"_q,
+				.where = FindCommand(b.action).label() + u" ("_q
+					+ MapName(b.map, !(b.map == MapKind::Chats && IsDirectChatListChord(b.keys))) + u")"_q,
 			});
 		}
 	}

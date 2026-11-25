@@ -11,6 +11,7 @@ enum class Policy {
 	Count,
 	SameTarget,
 	ChatNavigation,
+	FolderNavigation,
 };
 
 struct Stroke {
@@ -33,7 +34,8 @@ struct Context {
 		bool normal,
 		std::size_t chordSize,
 		bool inspecting) {
-	return (policy == Policy::SameTarget || policy == Policy::ChatNavigation)
+	return (policy == Policy::SameTarget || policy == Policy::ChatNavigation
+		|| policy == Policy::FolderNavigation)
 		&& normal && chordSize == 1 && !inspecting;
 }
 
@@ -82,8 +84,8 @@ public:
 		}
 	}
 
-	void cancel(bool keepChatNavigation = false) {
-		if (!keepChatNavigation || (_held && _held->policy != Policy::ChatNavigation)) {
+	void cancel(Policy keep = Policy::Never) {
+		if (_held && _held->policy != keep) {
 			_held.reset();
 		}
 	}

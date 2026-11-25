@@ -195,7 +195,7 @@ assert "return style::RightToLeft();" in keys_ui
 assert "MeasureTextWidth(" in keys_ui
 assert "ElideText(" in keys_ui
 help_fn = between(keys, "void Keys::showHelpLayer", "void Keys::showDescribeKeyResult")
-ordered(help_fn, "b.viaLocalleader ? mapContextTag(b.sourceMap)",
+ordered(help_fn, ".contextTag = mapContextTag(b.sourceMap)",
         "Qt::Key_S, Qt::Key_T", "Available(b.action, target)",
         ".contextTag = ctx", "requireAvailable && !Available(b.action, target)", "onTabChanged")
 
@@ -236,7 +236,7 @@ ordered(routing, "const auto result = _hints.type", "if (!guard)",
 stroke = between(keys, "void Keys::stroke", "void Keys::dispatch")
 ordered(stroke, "_frozenEffective = EffectiveBindings", "IsExactLocalleader(_prefix)",
         "_swallowNext = true", "const auto action = b.action", "const auto inspect = _inspect",
-        "KeyRepeat::CanArm", "clearPrefix(false, opensCursor)", "if (inspect)", "showDescribeKeyResult",
+        "KeyRepeat::CanArm", "clearPrefix(RepeatPolicy::Never, opensCursor)", "if (inspect)", "showDescribeKeyResult",
         "CommandAvailable(action, target)", "_motion.start", "dispatch(action, target, count,")
 repeat_path = between(keys, "void Keys::repeat", "bool Keys::layerKey")
 ordered(repeat_path, "Enabled()", "_normal", "_preeditInput", "_prefix.empty()", "_count",
@@ -259,16 +259,18 @@ for surface in ("ModalHelpLayer", "NoticeLayer"):
 ordered(customize, "if (_reviewBody && object == _reviewBody", "ScrollModalLayer", "singleStep()")
 ordered(keys, "QEvent::InputMethodQuery", "watched == _normalComposer",
         "Enabled() && _normal && owner()", "setValue(Qt::ImEnabled, false)")
-ordered(keys, "void Keys::clearPrefix", "_motion.cancel(keepChatNavigation)", "_layerMotion.cancel()")
-ordered(keys, "owner->activeChatEntryChanges()", "contextChanged(true)", "contextChanged(false)")
+ordered(keys, "void Keys::clearPrefix", "_motion.cancel(keepMotion)", "_layerMotion.cancel()")
+ordered(keys, "owner->activeChatEntryChanges()", "RepeatPolicy::ChatNavigation",
+        "owner->activeChatsFilter()", "contextChanged(folderMotion())", "contextChanged(RepeatPolicy::Never)")
 actions = between(keys, "const Command kCommands[]", "using Chord")
-armed = re.findall(r"\{ Action::(\w+),[^\n]*\n[^\n]*RepeatPolicy::(SameTarget|ChatNavigation)", actions)
+armed = re.findall(r"\{ Action::(\w+),[^\n]*\n[^\n]*RepeatPolicy::(SameTarget|ChatNavigation|FolderNavigation)", actions)
 assert set(armed) == {
     ("MoveUp", "SameTarget"), ("MoveDown", "SameTarget"),
     ("PreviousChat", "ChatNavigation"), ("NextChat", "ChatNavigation"),
     ("HistoryHalfUp", "SameTarget"), ("HistoryHalfDown", "SameTarget"),
     ("OlderMessagesPage", "SameTarget"), ("NewerMessagesPage", "SameTarget"),
     ("SeekBackward", "SameTarget"), ("SeekForward", "SameTarget"),
+    ("PreviousFolder", "FolderNavigation"), ("NextFolder", "FolderNavigation"),
 }
 
 palette = between(keys, "void Keys::showPalette", "} // namespace")
@@ -349,7 +351,7 @@ ordered(keys, "const auto stepChatList", "ChatsInnerList(current)", "processKeyD
 ordered(dispatch, "case Action::OpenChat:", "liveChatCursor(current)", "_chatCursor = {};",
         "list->showChatPreview()", "list->chooseRow()", "activeChatCurrent() == picked", "activate()")
 ordered(stroke, "const auto opensCursor", "target.chatCursorAvailable",
-        "Action::OpenChat || action == Action::PreviewChat", "clearPrefix(false, opensCursor)")
+        "Action::OpenChat || action == Action::PreviewChat", "clearPrefix(RepeatPolicy::Never, opensCursor)")
 ordered(keys, "void Keys::clearPrefix", "if (!keepChatCursor)", "_chatCursor = {};")
 ordered(keys, "bool Keys::eventFilter", "type == QEvent::MouseMove", "globalPosition().toPoint()",
         "type == QEvent::MouseButtonPress", "type == QEvent::Hide", "_chatCursor = {};")
@@ -360,6 +362,37 @@ ordered(read("dialogs/dialogs_inner_widget.cpp"), "InnerWidget::computeChosenRow
         ".key = row->folder", ".key = _selected->key()", "Key InnerWidget::purpleKeyboardSelection",
         "!_mouseSelection", "computeChosenRow().key")
 assert '"J/K to pick a chat first"' in keys
+
+# Bare J/K select folders only in the list. The other chat-cursor chords
+# remain in Normal, and explicit overlays take precedence over the defaults.
+chat_map = between(defaults, "\n :chats", "\n :music")
+normal_map = between(defaults, "\n :normal", "\n :chat")
+for action, chord in (("NextFolder", "J"), ("PreviousFolder", "K"),
+                      ("NextFolder", "f"), ("PreviousFolder", "F")):
+    bound(action, chord, chat_map)
+    assert len(re.findall(rf'"{chord}"\s+:', chat_map)) == 1
+for action, chord in (("NextChat", "J"), ("PreviousChat", "K"),
+                      ("NextChat", "C-j"), ("PreviousChat", "C-k"),
+                      ("NextChat", "] c"), ("PreviousChat", "[ c"),
+                      ("NextFolder", "] f"), ("PreviousFolder", "[ f")):
+    bound(action, chord, normal_map)
+ordered(keys, "bool IsActiveDirectChatListBinding", "IsDirectChatListChord",
+        "binding.user", "normalChatListOverrides")
+ordered(keys, "std::vector<EffectiveBinding> EffectiveBindings", "contextMap == MapKind::Chats",
+        "IsActiveDirectChatListBinding", "directKeys.insert",
+        "b.map == MapKind::Normal && !directKeys.contains")
+ordered(keys, "void Keys::showWhichKey()", "EffectiveBindings(_normal, target.contextMap)",
+        "other.sourceMap == MapKind::Chats", "!other.viaLocalleader", 'u" (%1 from list)"')
+ordered(status_fn, "_normal && target.folders", "StepModalChatsFilter(target.controller, 1, false)",
+        "HasFolderKeys()", 'u"J/K folders"')
+ordered(keys, "Target FindTarget", ".folders = owner->isPrimary()",
+        "!owner->openedFolder().current()", "!owner->shownForum().current()")
+ordered(dispatch, "case Action::PreviousFolder:", "StepModalChatsFilter(current, delta, true)",
+        'u"No other folders"', "setInnerFocus(true)", "purpleKeyboardSelection()", "selectSkip(1)")
+ordered(read("purple/purple_folder_strip.cpp"), "bool StepModalChatsFilter", "ShownList(session)",
+        "dialogFiltersCurrent()", "count < 2", "(start + delta % count + count) % count",
+        "setActiveChatsFilter(list[changed].id())")
+ordered(read("window/window_filters_menu.cpp"), "_session->activeChatsFilter(", "scrollToButton(j->second)")
 
 # Verify Doom-aligned SPC leader + localleader (, / SPC m) bindings and zero 4-stroke chords.
 assert ':localleader ["," "SPC m"]' in defaults

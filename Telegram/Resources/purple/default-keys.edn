@@ -197,7 +197,9 @@
   "h" :topic-parent}
 
  :chats
- {"p" :preview-chat
+ {"J" :folder-next
+  "K" :folder-previous
+  "p" :preview-chat
   "m" :open-chat-menu
   "a" :open-archived-chats
   "f" :folder-next

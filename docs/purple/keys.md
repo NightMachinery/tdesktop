@@ -55,7 +55,8 @@ modal status line (reusing stock `Ui::KeysLegend` keycaps and theme colors).
 The header displays the pending chord, group or localleader title, and
 `DEL back · ESC cancel`. The responsive multi-column grid lists only applicable continuations, placing
 `+group` prefixes in accent color above a hairline divider and merging duplicate
-alias keys (such as `SPC / :` or `, / RET`) into one command row. Pressing `,`
+alias keys (such as `SPC / :` or `, / RET`) into one command row. In the chat
+list, the folder rows also show the bare folder shortcuts when bound. Pressing `,`
 or `SPC m` where no context bindings apply reports `No local keys here` on the
 status line and swallows the next keystroke.
 
@@ -66,17 +67,22 @@ prefix (`g`, `y`, `[`, `]`, `C-w`), or a localleader context map (`,` / `SPC m`)
 with at most four strokes per chord:
 
 - **Navigate:** `j` / `k` move the chat cursor (in the chat list) or scroll the
-  conversation (in a chat), repeatable with counts (`5j`). `J` / `K` (`C-j` /
-  `C-k`, `] c` / `[ c`) step through the visible chat list from another pane.
+  conversation (in a chat), repeatable with counts (`5j`). `C-j` / `C-k` and
+  `] c` / `[ c` step through the visible chat list from either pane.
+  `J` / `K` step the chat cursor from a conversation. In the main chat list,
+  they move to the next or previous folder, keep list focus and wrap past the
+  ends. Use a count (`3J`) or hold the key to advance through visible folders.
+  Work Mode-hidden folders are skipped. Archive and forum topic lists show a
+  status message when you try to switch folders with `J` / `K`.
   `RET` / `o` open the highlighted row from the list or after one of those
   steps. The status line shows `RET open` while the same row stays highlighted.
   Moving the pointer over the list, clicking, or switching folders clears the
-  keyboard selection. `h` / `l` (`SPC w h` / `SPC w l` / `C-w h` / `C-w l`)
+  cursor picked from another pane. `h` / `l` (`SPC w h` / `SPC w l` / `C-w h` / `C-w l`)
   switch between the chat list and conversation, and `SPC w w` (`C-w w`)
   toggles panes. `C-d` /
   `C-u` scroll half a page, `C-f` / `C-b` (`]` / `[` `m`) scroll a full page,
   `G` / `] ]` jump to latest, `] u` / `g u` jump to unread, `] f` / `[ f` step
-  folders.
+  through folders with wrapping when the main chat list is focused.
 - **Leader (`SPC`):**
   - `SPC SPC`, `M-x`, `:`, `SPC :`: command palette (`M-x`).
   - `SPC ,`, `SPC RET`, `SPC b b`: chat switcher palette.
@@ -217,8 +223,11 @@ keymap exists yet, Purple creates a commented starter `keys.edn` beside
 
 Maps are `:normal`, `:insert`, `:chat`, `:chats`, and `:music`. Optional
 top-level keys are `:localleader` (vector of chord strings) and `:keyless`
-(vector of deliberately unbound command keywords). String values inside a map
-label a prefix in which-key and the status line. Uppercase letters (`"G"`)
+(vector of deliberately unbound command keywords). `J` / `K` in `:chats` apply
+directly in the chat list. A user `:chats` binding takes precedence there, and
+a user `:normal` binding or removal takes precedence over the built-in
+`:chats` default. Other `:chats` chords use the localleader. String values
+inside a map label a prefix in which-key and the status line. Uppercase letters (`"G"`)
 normalize to `S-g`. Files up to 32 KiB and 256 entries are validated atomically:
 any invalid entry keeps built-in defaults active and displays the exact reason
 on the modal status line and cheatsheet footer.
