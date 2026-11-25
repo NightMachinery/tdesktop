@@ -16,6 +16,9 @@ class SectionBuilder;
 } // namespace Settings::Builder
 
 namespace Purple {
+namespace PrivacyVisual {
+class Canvas;
+} // namespace PrivacyVisual
 
 // Non-private display backdrop (clock, date, optional weather).
 class PrivacyBackdropWidget final : public Ui::RpWidget {
@@ -24,15 +27,19 @@ public:
 	~PrivacyBackdropWidget() override;
 
 	void setInteractiveHint(const QString &hint);
+	void setControlsTop(int top);
 
 protected:
-	void paintEvent(QPaintEvent *e) override;
+	void resizeEvent(QResizeEvent *event) override;
 	void showEvent(QShowEvent *event) override;
 
 private:
 	void refreshWeatherIfConfigured();
+	void refreshCanvas();
 
+	PrivacyVisual::Canvas *_canvas = nullptr;
 	QString _hint;
+	int _controlsTop = 0;
 	rpl::lifetime _weatherLifetime;
 };
 

@@ -122,6 +122,20 @@ int main() {
 			"hourly":{"time":[1743206400], "temperature_2m":[20,21]}
 		})", {});
 		Check(partial && partial->hours.empty(), "malformed hourly arrays leave current weather usable");
+		const auto sparse = ParseForecastResponse(R"({
+			"timezone":"UTC", "current":{"temperature_2m":18},
+			"hourly":{"time":[1743206400,1743210000], "temperature_2m":[null,20],
+				"weather_code":[61,1], "precipitation_probability":[null,0]},
+			"daily":{"time":[1743206400,1743292800], "temperature_2m_min":[null,25],
+				"temperature_2m_max":[22,17], "weather_code":[2,3]}
+		})", {});
+		Check(sparse && sparse->hours.size() == 2 && !sparse->hours[0].temperatureC
+			&& !sparse->hours[0].precipitation && sparse->hours[0].code == 61
+			&& sparse->hours[1].precipitation == 0,
+			"missing temperatures and chances stay unknown, measured zero stays zero");
+		Check(sparse && sparse->days.size() == 1 && !sparse->days[0].lowC
+			&& sparse->days[0].highC == 22,
+			"partial daily ranges stay visible and inverted ranges are omitted");
 	}
 
 	// 7. Top-level surface classification.

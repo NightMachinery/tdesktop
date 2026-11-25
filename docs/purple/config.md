@@ -26,10 +26,17 @@ settings → Notifications & Last Seen → Privacy screen**.
 world_clocks = [{ zone = "Asia/Tehran", label = "Tehran" }]
 ```
 
-Enter IANA time zone IDs. The optional label appears on the cover. Purple
-displays only one clock per current UTC offset, with the system clock first.
+The world clock list is empty by default. Enter IANA time zone IDs. The
+optional label appears on the cover. Purple displays one clock per current
+UTC offset, with the system clock first. The clocks follow the system's
+12- or 24-hour time format and show day offsets relative to the device date.
+
 The weather source and units are set on this device in **Privacy screen
-weather**. Weather settings do not travel with this TOML file.
+weather**. At full size the cover shows current conditions, the next six
+hours, and the next three days. Narrow covers show three hourly forecasts.
+Short covers reserve space for the controls, local time, first world clock,
+and current conditions. The forecast credits Open-Meteo alongside the last
+update time.
 
 ## Why a separate file
 

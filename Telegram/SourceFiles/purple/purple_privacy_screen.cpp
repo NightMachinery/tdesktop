@@ -9,6 +9,7 @@
 #include "platform/platform_current_geo_location.h"
 #include "mainwindow.h"
 #include "purple/purple_config.h"
+#include "purple/purple_privacy_canvas.h"
 #include "purple/purple_privacy_clocks.h"
 #include "purple/purple_privacy_state.h"
 #include "purple/purple_privacy_weather.h"
@@ -16,8 +17,8 @@
 #include "storage/storage_domain.h"
 #include "tray.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/effects/animations.h"
 #include "ui/layers/generic_box.h"
-#include "ui/painter.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
@@ -35,7 +36,6 @@
 
 #include <QtCore/QDateTime>
 #include <QtCore/QLocale>
-#include <QtGui/QLinearGradient>
 #include <QtCore/QPointer>
 #include <QtCore/QTimer>
 #include <QtGui/QFont>
@@ -164,13 +164,10 @@ QByteArray CellKey(const GeoPoint &cell) {
 		+ ',' + QByteArray::number(cell.longitude, 'f', 1);
 }
 
-QString TemperatureLabel(int celsius) {
+bool Fahrenheit(const QLocale &locale) {
 	const auto units = WeatherPref(kWeatherUnitsPref);
-	const auto imperial = units == "f" || ((units.isEmpty() || units == "system")
-		&& QLocale().measurementSystem() == QLocale::ImperialUSSystem);
-	return imperial
-		? QString::number(int(std::lround(celsius * 1.8 + 32.))) + u"°F"_q
-		: QString::number(celsius) + u"°C"_q;
+	return units == "f" || ((units.isEmpty() || units == "system")
+		&& locale.measurementSystem() == QLocale::ImperialUSSystem);
 }
 
 bool WeatherPermitted() {
@@ -210,7 +207,7 @@ public:
 		if (!snapshot(ms)) {
 			return (_failed || _locationFailed) ? u"Weather unavailable"_q : QString();
 		}
-		const auto updated = QLocale().toString(
+		const auto updated = QLocale::system().toString(
 			QDateTime::fromMSecsSinceEpoch(_updated, now.timeZone()).time(),
 			QLocale::ShortFormat);
 		return (_failed
@@ -589,6 +586,7 @@ private:
 		const auto rw = std::max(120, _returnButton->width());
 		_returnButton->resize(rw, _returnButton->height());
 		const auto y = std::max(16, height() - _returnButton->height() - 48);
+		_backdrop->setControlsTop(y);
 		if (_lockButton->isVisible()) {
 			const auto lw = std::max(168, _lockButton->width());
 			_lockButton->resize(lw, _lockButton->height());
@@ -771,10 +769,11 @@ void RefreshMenusAndTitles() {
 } // namespace
 
 PrivacyBackdropWidget::PrivacyBackdropWidget(not_null<QWidget*> parent)
-: RpWidget(parent) {
+: RpWidget(parent)
+, _canvas(new PrivacyVisual::Canvas(this)) {
 	setFocusPolicy(Qt::NoFocus);
 	setAttribute(Qt::WA_TransparentForMouseEvents);
-	setAttribute(Qt::WA_OpaquePaintEvent);
+	_canvas->setFont(st::normalFont->f);
 
 	auto *tick = new QTimer(this);
 	tick->setInterval(1000);
@@ -782,13 +781,13 @@ PrivacyBackdropWidget::PrivacyBackdropWidget(not_null<QWidget*> parent)
 		const auto minute = QDateTime::currentMSecsSinceEpoch() / 60000;
 		if (isVisible() && last != minute) {
 			last = minute;
-			update();
+			refreshCanvas();
 			refreshWeatherIfConfigured();
 		}
 	});
 	connect(qApp, &QApplication::applicationStateChanged, this, [this] {
 		if (isVisible()) {
-			update();
+			refreshCanvas();
 			refreshWeatherIfConfigured();
 		}
 	});
@@ -796,8 +795,11 @@ PrivacyBackdropWidget::PrivacyBackdropWidget(not_null<QWidget*> parent)
 
 	WeatherChanges.events() | rpl::on_next([this] {
 		if (isVisible()) {
-			update();
+			refreshCanvas();
 		}
+	}, _weatherLifetime);
+	style::PaletteChanged() | rpl::on_next([this] {
+		refreshCanvas();
 	}, _weatherLifetime);
 
 	refreshWeatherIfConfigured();
@@ -807,11 +809,25 @@ PrivacyBackdropWidget::~PrivacyBackdropWidget() = default;
 
 void PrivacyBackdropWidget::setInteractiveHint(const QString &hint) {
 	_hint = hint;
-	update();
+	refreshCanvas();
+}
+
+void PrivacyBackdropWidget::setControlsTop(int top) {
+	if (_controlsTop == top) {
+		return;
+	}
+	_controlsTop = top;
+	refreshCanvas();
+}
+
+void PrivacyBackdropWidget::resizeEvent(QResizeEvent *event) {
+	RpWidget::resizeEvent(event);
+	_canvas->setGeometry(rect());
 }
 
 void PrivacyBackdropWidget::showEvent(QShowEvent *event) {
 	RpWidget::showEvent(event);
+	refreshCanvas();
 	refreshWeatherIfConfigured();
 }
 
@@ -819,180 +835,34 @@ void PrivacyBackdropWidget::refreshWeatherIfConfigured() {
 	WeatherStore::Instance().ensureFresh();
 }
 
-void PrivacyBackdropWidget::paintEvent(QPaintEvent *) {
-	auto p = Painter(this);
-	auto hq = PainterHighQualityEnabler(p);
-	const auto r = rect();
-	const auto unit = st::normalFont->height;
-	const auto locale = QLocale();
+void PrivacyBackdropWidget::refreshCanvas() {
 	const auto utc = QDateTime::currentDateTimeUtc();
 	const auto zone = QTimeZone::systemTimeZone();
-	const auto now = utc.toTimeZone(zone);
+	const auto local = utc.toTimeZone(zone);
+	const auto locale = QLocale::system();
 	const auto ms = utc.toMSecsSinceEpoch();
 	const auto &weather = WeatherStore::Instance();
 	const auto forecast = weather.snapshot(ms);
-	const auto status = weather.status(now);
-	const auto localDay = now.time().hour() >= 7 && now.time().hour() < 19;
-	const auto day = weather.fresh(ms) ? forecast->isDay.value_or(localDay) : localDay;
-	const auto dark = st::windowBg->c.lightness() < 128;
-	const auto ink = dark ? QColor(246, 242, 255) : QColor(30, 38, 63);
-	const auto muted = dark ? QColor(219, 210, 237) : QColor(59, 65, 92);
-	const auto sky = dark ? QColor(23, 25, 49) : QColor(220, 236, 250);
-	const auto horizon = dark ? QColor(54, 43, 71) : QColor(251, 224, 201);
-	const auto panel = dark ? QColor(36, 33, 59) : QColor(249, 246, 247);
-
-	p.fillRect(r, sky);
-	auto fade = QLinearGradient(0, 0, 0, height());
-	fade.setColorAt(0., sky);
-	fade.setColorAt(1., horizon);
-	p.fillRect(r, fade);
-
-	const auto wide = r.width() >= 38 * unit;
-	const auto shortScreen = r.height() < 26 * unit;
-	const auto bodyBottom = std::max(unit, r.bottom() - 6 * unit);
-	const auto horizontalInset = unit;
-	const auto body = r.adjusted(horizontalInset, unit, -horizontalInset, 0);
-	const auto activeWeather = forecast || !status.isEmpty();
-	const auto panelRows = forecast ? (shortScreen ? 3 : wide ? 6 : 8) : 1;
-	const auto panelH = activeWeather ? panelRows * unit : 0;
-	const auto clocksBottom = bodyBottom - panelH - unit;
-	const auto timeSize = std::clamp(
-		std::min(body.width() / 5, clocksBottom / 2),
-		2 * unit,
-		9 * unit);
-	const auto clockBlock = timeSize + 3 * unit;
-	const auto top = std::max(unit, (clocksBottom - clockBlock) / 3);
-
-	const auto text = [&](QRect target, const QString &value, int size,
-			QColor color, QFont::Weight weight = QFont::Normal) {
-		auto font = st::normalFont->f;
-		font.setPixelSize(size);
-		font.setWeight(weight);
-		font.setFeature(QFont::Tag("tnum"), 1);
-		p.setFont(font);
-		p.setPen(color);
-		p.drawText(target, Qt::AlignCenter,
-			p.fontMetrics().elidedText(value, Qt::ElideRight, target.width()));
-	};
-
-	if (wide && !shortScreen) {
-		const auto disc = QRect(r.width() - 8 * unit, 3 * unit, 3 * unit, 3 * unit);
-		p.setPen(Qt::NoPen);
-		p.setBrush(day
-			? (dark ? QColor(233, 175, 123) : QColor(245, 183, 124))
-			: (dark ? QColor(221, 209, 242) : QColor(246, 247, 252)));
-		p.drawEllipse(disc);
-		if (!day) {
-			p.setBrush(sky);
-			p.drawEllipse(disc.translated(unit, -unit / 2));
-		}
-	}
-
-	text(QRect(body.x(), top, body.width(), 2 * unit),
-		locale.toString(now.date(), QLocale::LongFormat), unit, muted);
-	text(QRect(body.x(), top + 2 * unit, body.width(), timeSize + unit),
-		locale.toString(now.time(), QLocale::ShortFormat), timeSize,
-		ink, QFont::Light);
-
-	const auto clockRows = PrivacyClocks::At(utc, zone, ActiveSettings().worldClocks);
-	const auto clocksTop = top + clockBlock;
-	const auto clockColumns = wide ? 3 : 1;
-	const auto clockWidth = body.width() / clockColumns;
-	for (auto i = 0; i < int(clockRows.size()); ++i) {
-		const auto y = clocksTop + (i / clockColumns) * 2 * unit;
-		if (y + 2 * unit > clocksBottom || (shortScreen && i > 0)) {
-			break;
-		}
-		const auto &clock = clockRows[i];
-		const auto difference = clock.dayDifference;
-		const auto relative = (difference == 1)
-			? u" · Tomorrow"_q
-			: (difference == -1)
-			? u" · Yesterday"_q
-			: (difference > 0)
-			? u" · +%1 days"_q.arg(difference)
-			: (difference < 0)
-			? u" · %1 days"_q.arg(difference)
-			: QString();
-		text(QRect(body.x() + (i % clockColumns) * clockWidth, y,
-				clockWidth, 2 * unit),
-			u"%1  %2%3"_q.arg(clock.label,
-				locale.toString(clock.time.time(), QLocale::ShortFormat), relative),
-			unit, muted, QFont::Medium);
-	}
-
-	if (activeWeather) {
-		const auto panelTop = bodyBottom - panelH;
-		p.setBrush(panel);
-		p.setPen(Qt::NoPen);
-		p.drawRoundedRect(QRect(body.x(), panelTop, body.width(), panelH),
-			unit, unit);
-		if (forecast) {
-			text(QRect(body.x(), panelTop, body.width(), 2 * unit),
-				u"Local weather  ·  %1  ·  %2"_q.arg(
-					TemperatureLabel(forecast->temperatureC), forecast->condition),
-				unit, ink, QFont::DemiBold);
-		}
-		if (forecast && !shortScreen) {
-			const auto hourlyColumns = wide ? 6 : 3;
-			const auto span = body.width() / hourlyColumns;
-			auto hour = 0;
-			for (const auto &entry : forecast->hours) {
-				if (entry.time <= utc) {
-					continue;
-				}
-				const auto x = body.x() + hour * span;
-				const auto y = panelTop + 2 * unit;
-				auto hourLabel = locale.toString(entry.time.time(), QLocale::ShortFormat);
-				const auto repeated = std::any_of(forecast->hours.begin(),
-					forecast->hours.end(), [&](const auto &other) {
-						return other.time.date() == entry.time.date()
-							&& other.time.time() == entry.time.time()
-							&& other.time.offsetFromUtc() != entry.time.offsetFromUtc();
-					});
-				if (repeated) {
-					hourLabel += u' ' + entry.time.timeZoneAbbreviation();
-				}
-				text(QRect(x, y, span, unit), hourLabel, unit - unit / 5, muted);
-				text(QRect(x, y + unit, span, unit),
-					(wide ? u"%1 · %2 · %3%"_q.arg(
-						TemperatureLabel(entry.temperatureC), entry.condition).arg(entry.precipitation)
-						: u"%1 · %2%"_q.arg(TemperatureLabel(entry.temperatureC)).arg(entry.precipitation)),
-					unit - unit / 5, ink);
-				if (++hour == hourlyColumns) {
-					break;
-				}
-			}
-
-			const auto today = utc.toTimeZone(forecast->zone).date();
-			auto dayIndex = 0;
-			for (const auto &entry : forecast->days) {
-				if (entry.date <= today) {
-					continue;
-				}
-				const auto span = wide ? body.width() / 3 : body.width();
-				const auto x = body.x() + (wide ? dayIndex * span : 0);
-				const auto y = panelTop + (4 + (wide ? 0 : dayIndex)) * unit;
-				text(QRect(x, y, span, unit),
-					u"%1  ·  %2  ·  %3 / %4"_q.arg(
-						locale.dayName(entry.date.dayOfWeek(), QLocale::ShortFormat),
-						entry.condition,
-						TemperatureLabel(entry.lowC),
-						TemperatureLabel(entry.highC)),
-					unit - unit / 5, ink);
-				if (++dayIndex == 3) {
-					break;
-				}
-			}
-		}
-		text(QRect(body.x(), bodyBottom - unit, body.width(), unit),
-			status, unit - unit / 5, muted);
-	}
-
-	if (!_hint.isEmpty()) {
-		text(QRect(body.x(), r.bottom() - 2 * unit, body.width(), unit),
-			_hint, unit - unit / 5, muted);
-	}
+	const auto fresh = weather.fresh(ms);
+	const auto localDay = local.time().hour() >= 7 && local.time().hour() < 19;
+	auto flat = anim::Disabled();
+#ifdef Q_OS_MAC
+	flat = flat || PrivacyVisual::PrefersFlatColors();
+#endif // Q_OS_MAC
+	_canvas->setFrame({
+		.local = local,
+		.locale = locale,
+		.clocks = PrivacyClocks::At(utc, zone, ActiveSettings().worldClocks),
+		.weather = forecast ? std::make_optional(*forecast) : std::nullopt,
+		.update = weather.status(local),
+		.hint = _hint,
+		.controlsTop = _controlsTop,
+		.motifCode = fresh ? forecast->code : 0,
+		.dark = st::windowBg->c.lightness() < 128,
+		.day = fresh ? forecast->isDay.value_or(localDay) : localDay,
+		.flat = flat,
+		.fahrenheit = Fahrenheit(locale),
+	});
 }
 
 bool PrivacyScreenActiveAny() {

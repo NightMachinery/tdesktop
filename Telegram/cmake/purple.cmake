@@ -211,6 +211,8 @@ PRIVATE
     purple/purple_notices.h
     purple/purple_privacy_screen.cpp
     purple/purple_privacy_screen.h
+    purple/purple_privacy_canvas.cpp
+    purple/purple_privacy_canvas.h
     purple/purple_privacy_state.h
     purple/purple_privacy_weather.h
     purple/purple_privacy_clocks.h
@@ -480,6 +482,7 @@ nice_target_sources(Telegram ${res_loc} PRIVATE purple/keymaps.qrc)
 nice_target_sources(lib_ffmpeg ${src_loc} PRIVATE purple/purple_build_checks.cpp)
 
 if (APPLE)
+    nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_privacy_accessibility_mac.mm)
     nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_system_unlock_mac.mm)
     target_link_frameworks(Telegram PRIVATE LocalAuthenticationEmbeddedUI)
     nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_webp_paste_mac.mm)

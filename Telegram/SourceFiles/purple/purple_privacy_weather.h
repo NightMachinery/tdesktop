@@ -31,16 +31,18 @@ struct GeoPoint {
 
 struct HourlyWeather {
 	QDateTime time;
-	int temperatureC = 0;
-	int precipitation = 0;
+	std::optional<int> temperatureC;
+	std::optional<int> precipitation;
 	QString condition;
+	int code = -1;
 };
 
 struct DailyWeather {
 	QDate date;
-	int lowC = 0;
-	int highC = 0;
+	std::optional<int> lowC;
+	std::optional<int> highC;
 	QString condition;
+	int code = -1;
 };
 
 struct WeatherSnapshot {
@@ -52,6 +54,7 @@ struct WeatherSnapshot {
 	QTimeZone zone;
 	std::vector<HourlyWeather> hours;
 	std::vector<DailyWeather> days;
+	int code = -1;
 };
 
 [[nodiscard]] inline QString SanitizeLocation(const QString &raw) {
@@ -204,15 +207,17 @@ struct WeatherSnapshot {
 		return std::nullopt;
 	}
 	const auto day = current.value(QStringLiteral("is_day")).toInt(-1);
+	const auto code = current.value(QStringLiteral("weather_code")).toInt(-1);
 	auto result = WeatherSnapshot{
 		.location = SanitizeLocation(locationName),
 		.temperatureC = *temp,
-		.condition = DescribeWmoCode(current.value(QStringLiteral("weather_code")).toInt(-1)),
+		.condition = DescribeWmoCode(code),
 		.valid = true,
 		.isDay = (day >= 0) ? std::optional<bool>(day != 0) : std::nullopt,
 		.zone = QTimeZone(root.value(QStringLiteral("timezone")).toString().toUtf8()),
 		.hours = {},
 		.days = {},
+		.code = code,
 	};
 	if (!result.zone.isValid()) {
 		return result;
@@ -229,12 +234,14 @@ struct WeatherSnapshot {
 			const auto seconds = hourTimes[i].toInteger();
 			const auto temperature = Temperature(hourTemps[i]);
 			const auto rain = hourRain[i].toInt(-1);
-			if (seconds > 0 && temperature && rain >= 0 && rain <= 100) {
+			const auto code = hourCodes[i].toInt(-1);
+			if (seconds > 0) {
 				result.hours.push_back({
 					QDateTime::fromSecsSinceEpoch(seconds, result.zone),
-					*temperature,
-					rain,
-					DescribeWmoCode(hourCodes[i].toInt(-1)),
+					temperature,
+					(rain >= 0 && rain <= 100) ? std::make_optional(rain) : std::nullopt,
+					DescribeWmoCode(code),
+					code,
 				});
 			}
 		}
@@ -255,12 +262,14 @@ struct WeatherSnapshot {
 			const auto seconds = dayTimes[i].toInteger();
 			const auto low = Temperature(lows[i]);
 			const auto high = Temperature(highs[i]);
-			if (seconds > 0 && low && high && *low <= *high) {
+			const auto code = dayCodes[i].toInt(-1);
+			if (seconds > 0 && (!low || !high || *low <= *high)) {
 				result.days.push_back({
 					QDateTime::fromSecsSinceEpoch(seconds, dailyZone).date(),
-					*low,
-					*high,
-					DescribeWmoCode(dayCodes[i].toInt(-1)),
+					low,
+					high,
+					DescribeWmoCode(code),
+					code,
 				});
 			}
 		}
