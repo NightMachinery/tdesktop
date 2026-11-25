@@ -311,6 +311,35 @@ docs/purple/upstream_hooks.md.
 "lng_purple_archive_attachment_pause" = "Pause / Resume";
 "lng_purple_archive_attachment_restart" = "Play from start";
 
+"lng_purple_archive_v2_storage" = "Archive storage";
+"lng_purple_archive_v2_active" = "Active archive · {size}";
+"lng_purple_archive_v2_ordinary" = "Ordinary · {size} of {total} · {limit} per file";
+"lng_purple_archive_v2_timed" = "Timed · {size} of {total}";
+"lng_purple_archive_v2_pending" = "Pending deletion · {size}";
+"lng_purple_archive_v2_overhead" = "Storage overhead · {size} of up to {total}";
+"lng_purple_archive_v2_unknown_size" = "Size unavailable";
+"lng_purple_archive_v2_over_limit" = "Over limit";
+"lng_purple_archive_v2_edit_clear" = "Clear edit history…";
+"lng_purple_archive_v2_deleted_clear" = "Empty deleted messages…";
+"lng_purple_archive_v2_previous" = "Previous archive · {size}";
+"lng_purple_archive_v2_previous_review" = "Delete previous archive…";
+"lng_purple_archive_v2_previous_title" = "Delete previous archive?";
+"lng_purple_archive_v2_previous_button" = "Delete previous archive";
+"lng_purple_archive_v2_previous_detail" = "This permanently removes this account’s previous local archive.";
+"lng_purple_archive_v2_previous_account" = "{account} · {size}";
+"lng_purple_archive_v2_confirm_keys" = "Y to delete · N or Esc to cancel";
+"lng_purple_archive_v2_consumed" = "Consumed";
+"lng_purple_archive_v2_expired" = "Expired";
+"lng_purple_archive_v2_allowance" = "Storage allowance";
+"lng_purple_archive_v2_file_limit" = "File size limit";
+"lng_purple_archive_v2_incomplete" = "Incomplete file";
+"lng_purple_archive_v2_disk_full" = "Disk full";
+"lng_purple_archive_v2_busy" = "Archive busy";
+"lng_purple_archive_v2_description" = "Description only";
+"lng_purple_archive_v2_saved" = "Saved · {size}";
+"lng_purple_archive_v2_saving" = "Saving…";
+"lng_purple_archive_v2_not_saved" = "Not saved · {reason}";
+
 "lng_purple_archive_discard" = "Discard this account's archive and start fresh";
 "lng_purple_archive_discard_confirm" = "Permanently delete all retained messages, edit history and owned media for this account, and start a new empty archive? This cannot be undone. Other accounts are not affected.";
 "lng_purple_archive_discard_failed" = "Archive discard could not safely finish. The archive remains held. Try Discard this account's archive and start fresh again in Purple settings.";

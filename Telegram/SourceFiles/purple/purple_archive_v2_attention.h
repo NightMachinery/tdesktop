@@ -31,7 +31,7 @@ public:
 			}
 		}
 		for (const auto fault : { u"disk_full", u"key_unavailable", u"store_busy", u"store_unreadable",
-				u"schema_unknown", u"quota_unreclaimable", u"cleanup_pending", u"cleanup_blocked" }) {
+				u"schema_unknown", u"pointer_authentication_failed", u"quota_unreclaimable", u"cleanup_pending", u"cleanup_blocked" }) {
 			if (reason == fault) {
 				const auto stopsCapture = stage == IncidentStage::Startup
 					|| ((stage == IncidentStage::Capture || stage == IncidentStage::Maintenance)
@@ -42,7 +42,7 @@ public:
 		}
 		for (const auto detail : { u"policy_description_only", u"policy_invalid", u"over_file_limit", u"over_allowance",
 				u"no_source", u"expired", u"transfer_failed", u"copy_incomplete", u"scope_retired",
-				u"delete_unresolved" }) {
+				u"delete_unresolved", u"media_queue_full", u"pointer_changed", u"reset_review_stale" }) {
 			if (reason == detail) return { detail };
 		}
 		return { u"archive_operation_failed" };

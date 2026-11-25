@@ -3,6 +3,7 @@
 #include "lang/lang_keys.h"
 #include "logs.h"
 #include "purple/purple_copy.h"
+#include "purple/purple_keys.h"
 #include "styles/style_layers.h"
 #include "ui/layers/generic_box.h"
 #include "ui/text/text_utilities.h"
@@ -12,6 +13,7 @@
 
 #include <QtCore/QDateTime>
 #include <QtCore/QLocale>
+#include <QtGui/QKeyEvent>
 #include <bit>
 
 namespace Purple::ArchiveV2 {
@@ -37,8 +39,8 @@ QString Stamp(int64 seconds) {
 QString Status(MessageStatus status) {
 	switch (status) {
 	case MessageStatus::Deleted: return tr::lng_purple_archive_deleted_badge(tr::now);
-	case MessageStatus::Consumed: return u"Consumed"_q;
-	case MessageStatus::Expired: return u"Expired"_q;
+	case MessageStatus::Consumed: return tr::lng_purple_archive_v2_consumed(tr::now);
+	case MessageStatus::Expired: return tr::lng_purple_archive_v2_expired(tr::now);
 	case MessageStatus::Live: return {};
 	}
 	return {};
@@ -54,20 +56,20 @@ void Body(not_null<Ui::GenericBox*> box, const StoredBody &value, const DecodeBo
 	text->setContextMenuHook([text, current, markdown](Ui::FlatLabel::ContextMenuRequest request) {
 		if (!current()) return;
 		text->fillContextMenu(request);
-		if (!markdown.isEmpty()) request.menu->addAction(u"Copy as Markdown"_q, [current, markdown] {
+		if (!markdown.isEmpty()) request.menu->addAction(tr::lng_purple_copy_as_markdown(tr::now), [current, markdown] {
 			if (current()) TextUtilities::SetClipboardText(TextForMimeData::Simple(markdown));
 		});
 	});
 }
 
 QString MediaReasonText(QStringView reason) {
-	if (reason == u"over_allowance" || reason == u"quota_unreclaimable") return u"Storage allowance"_q;
-	if (reason == u"expired") return u"Expired"_q;
-	if (reason == u"over_file_limit") return u"File size limit"_q;
-	if (reason == u"copy_incomplete") return u"Incomplete file"_q;
-	if (reason == u"disk_full") return u"Disk full"_q;
-	if (reason == u"store_busy") return u"Archive busy"_q;
-	return u"Description only"_q;
+	if (reason == u"over_allowance" || reason == u"quota_unreclaimable") return tr::lng_purple_archive_v2_allowance(tr::now);
+	if (reason == u"expired") return tr::lng_purple_archive_v2_expired(tr::now);
+	if (reason == u"over_file_limit") return tr::lng_purple_archive_v2_file_limit(tr::now);
+	if (reason == u"copy_incomplete") return tr::lng_purple_archive_v2_incomplete(tr::now);
+	if (reason == u"disk_full") return tr::lng_purple_archive_v2_disk_full(tr::now);
+	if (reason == u"store_busy") return tr::lng_purple_archive_v2_busy(tr::now);
+	return tr::lng_purple_archive_v2_description(tr::now);
 }
 
 QString MiB(int64 bytes) {
@@ -96,7 +98,7 @@ void FillHistoryBox(not_null<Ui::GenericBox*> box, const HistoryPage &page,
 		Body(box, row.value, decode, current);
 		for (const auto &entry : row.media) {
 			if (entry.savedBytes > 0) {
-				const auto label = u"Saved · "_q + MiB(entry.savedBytes);
+				const auto label = tr::lng_purple_archive_v2_saved(tr::now, lt_size, MiB(entry.savedBytes));
 				if (media.openSaved) {
 					Action(box, label, current, [open = media.openSaved, seq = row.sequence, file = entry.ordinal] {
 						open(seq, file);
@@ -106,8 +108,8 @@ void FillHistoryBox(not_null<Ui::GenericBox*> box, const HistoryPage &page,
 				}
 			} else {
 				const auto saving = media.saving == std::pair(row.sequence, entry.ordinal);
-				Label(box, saving ? u"Saving…"_q : u"Not saved · "_q
-					+ MediaReasonText(entry.reason));
+				Label(box, saving ? tr::lng_purple_archive_v2_saving(tr::now)
+					: tr::lng_purple_archive_v2_not_saved(tr::now, lt_reason, MediaReasonText(entry.reason)));
 			}
 		}
 	}
@@ -140,43 +142,57 @@ void FillTimelineBox(not_null<Ui::GenericBox*> box, const TimelinePage &page, bo
 void FillStorageBox(not_null<Ui::GenericBox*> box, const StorageSummary &summary,
 		std::optional<int64> previousBytes, ViewCurrent current,
 		Fn<void(CleanupKind)> reviewCleanup, Fn<void()> reviewPrevious) {
-	box->setTitle(rpl::single(u"Archive storage"_q));
+	box->setTitle(tr::lng_purple_archive_v2_storage());
 	if (!Ready(box, current)) return;
-	for (const auto &[name, bytes] : std::array<std::pair<QString, int64>, 6>{
-		{ { u"Active archive"_q, summary.active.physical() }, { u"Database"_q, summary.active.database },
-			{ u"WAL"_q, summary.active.wal }, { u"Shared memory"_q, summary.active.sharedMemory },
-			{ u"Support files"_q, summary.active.support }, { u"Reclaimed this session"_q, summary.active.reclaimed } },
-	}) {
-		Label(box, name + u" · "_q + MiB(bytes));
-	}
-	Label(box, u"Ordinary · %1 of %2 · %3 per file"_q.arg(
-		MiB(summary.active.ordinary), MiB(summary.ordinaryCap), MiB(summary.ordinaryFileCap)));
-	Label(box, u"Timed · %1 of %2"_q.arg(MiB(summary.active.timed), MiB(summary.timedCap)));
-	Label(box, u"Pending deletion · "_q + (summary.pending ? MiB(*summary.pending) : u"Size unavailable"_q));
-	if (summary.overLimit) Label(box, u"Over limit"_q);
-	if (summary.lastTrimDay >= 0) Label(box, u"Last trim · "_q + Stamp(summary.lastTrimDay * 86400));
+	const auto &active = summary.active;
+	const auto overhead = std::max<int64>(0, active.physical() - active.ordinary - active.timed);
+	Label(box, tr::lng_purple_archive_v2_active(tr::now, lt_size, MiB(active.physical())));
+	Label(box, tr::lng_purple_archive_v2_ordinary(tr::now, lt_size, MiB(active.ordinary),
+		lt_total, MiB(summary.ordinaryCap), lt_limit, MiB(summary.ordinaryFileCap)));
+	Label(box, tr::lng_purple_archive_v2_timed(tr::now, lt_size, MiB(active.timed), lt_total, MiB(summary.timedCap)));
+	Label(box, tr::lng_purple_archive_v2_pending(tr::now, lt_size,
+		summary.pending ? MiB(*summary.pending) : tr::lng_purple_archive_v2_unknown_size(tr::now)));
+	Label(box, tr::lng_purple_archive_v2_overhead(tr::now, lt_size, MiB(overhead), lt_total, MiB(summary.overheadCap)));
+	if (summary.overLimit) Label(box, tr::lng_purple_archive_v2_over_limit(tr::now));
+	LOG(("Purple Archive: event=storage db_bytes=%1 wal_bytes=%2 shm_bytes=%3 support_bytes=%4.")
+		.arg(active.database).arg(active.wal).arg(active.sharedMemory).arg(active.support));
 	if (reviewCleanup) {
-		Action(box, u"Clear edit history…"_q, current, [reviewCleanup] { reviewCleanup(CleanupKind::EditHistory); });
-		Action(box, u"Empty deleted messages…"_q, current, [reviewCleanup] { reviewCleanup(CleanupKind::DeletedMessages); });
+		Action(box, tr::lng_purple_archive_v2_edit_clear(tr::now), current, [reviewCleanup] { reviewCleanup(CleanupKind::EditHistory); });
+		Action(box, tr::lng_purple_archive_v2_deleted_clear(tr::now), current, [reviewCleanup] { reviewCleanup(CleanupKind::DeletedMessages); });
 	}
 	if (previousBytes) {
-		Label(box, u"Previous archive · "_q + MiB(*previousBytes));
-		Action(box, u"Delete previous archive…"_q, current, std::move(reviewPrevious));
+		Label(box, tr::lng_purple_archive_v2_previous(tr::now, lt_size, MiB(*previousBytes)));
+		Action(box, tr::lng_purple_archive_v2_previous_review(tr::now), current, std::move(reviewPrevious));
 	}
 }
 
 void FillPreviousArchiveConfirm(not_null<Ui::GenericBox*> box, QString account, int64 reviewedBytes,
 		ViewCurrent current, Fn<void()> confirm) {
-	box->setTitle(rpl::single(u"Delete previous archive?"_q));
-	if (!Ready(box, current)) return;
-	Label(box, account + u" · "_q + MiB(reviewedBytes));
-	Label(box, u"This permanently removes this account’s previous local archive."_q);
-	auto confirmed = std::make_shared<bool>(false);
-	box->addButton(rpl::single(u"Delete previous archive"_q), [box, current, confirm = std::move(confirm), confirmed] {
-		if (!current() || !confirm || std::exchange(*confirmed, true)) return;
+	box->setTitle(tr::lng_purple_archive_v2_previous_title());
+	if (!current || !current()) return;
+	box->setWidth(st::boxWideWidth);
+	Label(box, tr::lng_purple_archive_v2_previous_account(tr::now, lt_account, account, lt_size, MiB(reviewedBytes)));
+	Label(box, tr::lng_purple_archive_v2_previous_detail(tr::now));
+	if (ModalKeysEnabled()) Label(box, tr::lng_purple_archive_v2_confirm_keys(tr::now));
+	const auto submit = [box, current, confirm = std::move(confirm), used = std::make_shared<bool>(false)] {
+		if (!current() || !confirm || std::exchange(*used, true)) return;
 		box->closeBox();
 		confirm();
-	});
+	};
+	box->addButton(tr::lng_purple_archive_v2_previous_button(), submit, st::attentionBoxButton);
+	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	box->events() | rpl::on_next([=](not_null<QEvent*> event) {
+		if (event->type() != QEvent::KeyPress || !ModalKeysEnabled()) return;
+		const auto key = static_cast<QKeyEvent*>(event.get());
+		if (key->modifiers() || key->isAutoRepeat()) return;
+		if (key->key() == Qt::Key_Y) {
+			event->accept();
+			submit();
+		} else if (key->key() == Qt::Key_N || key->key() == Qt::Key_Escape) {
+			event->accept();
+			box->closeBox();
+		}
+	}, box->lifetime());
 }
 
 ArchiveWarning LogIncident(Attention &attention, IncidentStage stage, QStringView reason,
