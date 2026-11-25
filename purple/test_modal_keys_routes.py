@@ -493,10 +493,13 @@ ordered(config_cpp, "PurpleNoticeWindow(session)", "hasConfigPeerIds", "ShowPurp
         "config:reload:")
 archive_cpp = read("purple/purple_archive_service.cpp")
 ordered(archive_cpp, "void ShowArchiveRemovalPending()", ".appScoped = true",
-        "kArchiveRemovalNoticeKey", "ShowArchiveRemovalPending();", "archive:gap:",
-        "void RemoveArchiveAtLogout", "ShowArchiveRemovalPending();", "archive:discard_failed:")
-ordered(archive_cpp, 'failure = u"discard-held"_q', "Could not discard the account's archive; reason=%1",
-        ".arg(i->second.failure)", "ShowPurpleNotice")
+        "kArchiveRemovalNoticeKey")
+ordered(archive_cpp, "void ShowArchiveDiscardFailure", "event=discard_failed reason=%1 count=1",
+        ".arg(reason)", "ShowPurpleNotice", "archive:discard_failed:")
+ordered(archive_cpp, "void ReportArchiveCaptureLoss", "AccumulateArchiveCaptureIncidents",
+        "event=%1 reason=%2 count=%3", "if (warn)", "ShowPurpleNotice", "archive:gap:")
+ordered(archive_cpp, "void RemoveArchiveAtLogout", "ShowArchiveRemovalPending();",
+        "Fn<void()> ArchiveDiscardAction", "ShowArchiveDiscardFailure")
 topic_edit = read("boxes/peers/edit_forum_topic_box.cpp")
 ordered(topic_edit, "const auto refreshBotTopic", "bot ? peer->forum() : nullptr",
         "liveForum->requestTopic(rootId)", "MTPmessages_EditForumTopic",
