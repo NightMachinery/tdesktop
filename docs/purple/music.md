@@ -74,3 +74,7 @@ press Enter or Space to activate the focused action. Removing a folder places
 its playlists back at the top level.
 Hyper holds automatically created playlists. Folder names and placement are
 saved for each account on this Desktop installation.
+
+Stock shared-media search cancels a delayed query when a cached query takes
+over. Clearing the filter restores the unfiltered list even if a search was
+still queued.
