@@ -29,6 +29,7 @@ void NavigateMusic(
 	TrackListAction action,
 	int repeat);
 [[nodiscard]] bool MusicHidesChats(const Window::SectionWidget *section);
+[[nodiscard]] bool MusicHidesInfo(const Window::SectionWidget *section);
 void UpdateMusicSidebar(QWidget *widget, bool suppress, bool restore);
 [[nodiscard]] bool MusicHideChatsCurrent();
 [[nodiscard]] rpl::producer<bool> MusicHideChatsValue();

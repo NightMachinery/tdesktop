@@ -14,7 +14,9 @@ and returns focus to the track cursor. In Normal, `j` and `k` move by one row,
 of the loaded rows. Press `m` to mark a track and Return to play. Escape
 clears marks or returns to the prior view.
 The chat list is hidden in Music by default. **Settings → Purple → Hide chat
-list in Music** restores the split view. The toolbar opens Playlists directly.
+list in Music** restores the split view. Music temporarily hides the right
+sidebar. When you leave Music, the previous sidebar returns if the window
+still has room for it. The toolbar opens Playlists directly.
 The overflow menu contains the source picker and refresh.
 `tdesktop-cli music` opens the same screen through Local automation.
 Opening Music again keeps your place in the results for the same source.

@@ -1547,8 +1547,11 @@ void UpdateMusicSidebar(QWidget *widget, bool suppress, bool restore) {
 }
 
 bool MusicHidesChats(const Window::SectionWidget *section) {
-	return dynamic_cast<const MusicSection*>(section)
-		&& MusicHideChatsCurrent();
+	return MusicHidesInfo(section) && MusicHideChatsCurrent();
+}
+
+bool MusicHidesInfo(const Window::SectionWidget *section) {
+	return dynamic_cast<const MusicSection*>(section) != nullptr;
 }
 
 bool MusicHideChatsCurrent() {
