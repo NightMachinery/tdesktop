@@ -13,6 +13,8 @@ namespace Main { class Session; }
 
 namespace Purple {
 
+struct MusicShortcutHints;
+
 enum class TrackListAction {
 	Up,
 	Down,
@@ -69,7 +71,8 @@ struct MusicSelectionActions {
 [[nodiscard]] object_ptr<Ui::RpWidget> MakeMusicSelectionBar(
 	QWidget *parent,
 	rpl::producer<QString> summary,
-	MusicSelectionActions actions);
+	MusicSelectionActions actions,
+	const MusicShortcutHints &shortcuts);
 
 class PlaylistSongList final : public Ui::RpWidget {
 public:

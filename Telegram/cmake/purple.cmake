@@ -267,6 +267,8 @@ PRIVATE
     purple/purple_music_index_service.h
     purple/purple_music_now_playing.cpp
     purple/purple_music_now_playing.h
+    purple/purple_music_widgets.cpp
+    purple/purple_music_widgets.h
     purple/purple_music_section.cpp
     purple/purple_music_section.h
     purple/purple_chat_music.cpp

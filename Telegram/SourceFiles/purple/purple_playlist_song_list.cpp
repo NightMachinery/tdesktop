@@ -1,4 +1,5 @@
 #include "purple/purple_playlist_song_list.h"
+#include "purple/purple_music_widgets.h"
 
 #include "base/timer.h"
 #include "core/application.h"
@@ -10,6 +11,7 @@
 #include "data/data_session.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "ui/effects/animation_value.h"
 #include "ui/image/image.h"
 #include "ui/painter.h"
 #include "ui/widgets/buttons.h"
@@ -42,6 +44,7 @@ namespace Purple {
 namespace {
 
 constexpr auto kMusicTilesPref = "purple.music.tiles";
+constexpr auto kMusicBadgeFrame = crl::time(150);
 rpl::event_stream<bool> MusicTilesChanges;
 
 double RelativeLuminance(QColor color) {
@@ -79,8 +82,8 @@ QString FirstGrapheme(const QString &text) {
 QString PlaybackLabel(MusicRowPlayback state) {
 	switch (state) {
 	case MusicRowPlayback::Loading: return tr::lng_contacts_loading(tr::now);
-	case MusicRowPlayback::Playing: return u"Playing"_q;
-	case MusicRowPlayback::Paused: return u"Paused"_q;
+	case MusicRowPlayback::Playing: return tr::lng_purple_music_playing(tr::now);
+	case MusicRowPlayback::Paused: return tr::lng_purple_music_paused(tr::now);
 	case MusicRowPlayback::Idle: return {};
 	}
 	Unexpected("Music row playback state.");
@@ -88,34 +91,43 @@ QString PlaybackLabel(MusicRowPlayback state) {
 
 class MusicSelectionBar final : public Ui::RpWidget {
 public:
-	MusicSelectionBar(QWidget *parent, MusicSelectionActions actions);
+	MusicSelectionBar(
+		QWidget *parent,
+		MusicSelectionActions actions,
+		const MusicShortcutHints &shortcuts);
 	void setSummary(const QString &text);
 
 protected:
 	int resizeGetHeight(int width) override;
+	void paintEvent(QPaintEvent *) override;
 
 private:
 	const not_null<Ui::FlatLabel*> _summary;
-	std::vector<not_null<Ui::RoundButton*>> _actions;
+	std::vector<not_null<Ui::RpWidget*>> _actions;
 
 };
 
-MusicSelectionBar::MusicSelectionBar(QWidget *parent, MusicSelectionActions actions)
+MusicSelectionBar::MusicSelectionBar(
+		QWidget *parent,
+		MusicSelectionActions actions,
+		const MusicShortcutHints &shortcuts)
 : Ui::RpWidget(parent)
 , _summary(Ui::CreateChild<Ui::FlatLabel>(this, QString(), st::boxLabel)) {
-	const auto add = [=](rpl::producer<QString> text, Fn<void()> callback) {
-		const auto button = Ui::CreateChild<Ui::RoundButton>(
-			this, std::move(text), st::defaultLightButton);
-		button->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-		button->setClickedCallback(std::move(callback));
-		_actions.push_back(button);
+	const auto add = [&](rpl::producer<QString> text, const QStringList &keys,
+			Fn<void()> callback) {
+		const auto action = MakeMusicActionButton(
+			this, std::move(text), keys, std::move(callback)).release();
+		_actions.push_back(action);
+		action->widthValue() | rpl::skip(1) | rpl::on_next([=] {
+			resizeToWidth(width());
+		}, action->lifetime());
 	};
-	add(tr::lng_purple_playlists_play(), std::move(actions.play));
-	add(rpl::single(u"Queue"_q), std::move(actions.queue));
-	add(tr::lng_purple_playlists_add(), std::move(actions.add));
-	add(tr::lng_context_forward_msg(), std::move(actions.forward));
-	add(rpl::single(u"More"_q), std::move(actions.more));
-	add(rpl::single(u"Clear"_q), std::move(actions.clear));
+	add(tr::lng_purple_playlists_play(), shortcuts.play, std::move(actions.play));
+	add(rpl::single(u"Queue"_q), shortcuts.queue, std::move(actions.queue));
+	add(tr::lng_purple_playlists_add(), shortcuts.add, std::move(actions.add));
+	add(tr::lng_context_forward_msg(), shortcuts.forward, std::move(actions.forward));
+	add(rpl::single(u"More"_q), shortcuts.more, std::move(actions.more));
+	add(rpl::single(u"Clear"_q), shortcuts.clear, std::move(actions.clear));
 }
 
 void MusicSelectionBar::setSummary(const QString &text) {
@@ -124,9 +136,12 @@ void MusicSelectionBar::setSummary(const QString &text) {
 }
 
 int MusicSelectionBar::resizeGetHeight(int width) {
-	const auto gap = st::purpleMusicToolbarGap;
+	const auto gap = st::purpleMusicActionGap;
+	const auto padding = st::purpleMusicBarPadding;
 	const auto buttonHeight = _actions.front()->height();
-	const auto wide = width >= st::purpleChatMusicWidth - 2 * st::purpleMusicMargin;
+	auto total = 2 * padding + st::purpleMusicTileMin;
+	for (const auto button : _actions) total += button->width() + gap;
+	const auto wide = width >= total;
 	auto buttonsWidth = 0;
 	for (auto index = 0; index < int(_actions.size()); ++index) {
 		const auto button = _actions[index];
@@ -134,17 +149,29 @@ int MusicSelectionBar::resizeGetHeight(int width) {
 		button->setVisible(visible);
 		if (visible) buttonsWidth += button->width() + gap;
 	}
-	_summary->resizeToWidth(std::max(1, wide ? (width - buttonsWidth) : width));
-	_summary->moveToLeft(0, wide ? (buttonHeight - _summary->height()) / 2 : 0, width);
-	auto right = 0;
+	const auto sideBySide = width >= buttonsWidth + st::purpleMusicNowCover;
+	_summary->resizeToWidth(std::max(1,
+		(sideBySide ? width - buttonsWidth : width) - 2 * padding));
+	const auto rowHeight = std::max(buttonHeight, _summary->height());
+	_summary->moveToLeft(padding,
+		padding + (sideBySide ? (rowHeight - _summary->height()) / 2 : 0), width);
+	auto right = padding;
 	for (auto i = int(_actions.size()); i > 0;) {
 		const auto button = _actions[--i];
 		if (button->isHidden()) continue;
-		button->moveToRight(right, wide ? 0 : _summary->height(), width);
+		button->moveToRight(right, padding + (sideBySide
+			? (rowHeight - button->height()) / 2 : _summary->height()), width);
 		right += button->width() + gap;
 	}
-	return wide ? std::max(buttonHeight, _summary->height())
-		: buttonHeight + _summary->height();
+	return 2 * padding + (sideBySide ? rowHeight : buttonHeight + _summary->height());
+}
+
+void MusicSelectionBar::paintEvent(QPaintEvent *) {
+	auto p = QPainter(this);
+	auto quality = PainterHighQualityEnabler(p);
+	p.setPen(Qt::NoPen);
+	p.setBrush(st::windowBgOver);
+	p.drawRoundedRect(rect(), st::purpleMusicCoverRadius, st::purpleMusicCoverRadius);
 }
 
 } // namespace
@@ -167,9 +194,10 @@ void ToggleMusicTiles() {
 object_ptr<Ui::RpWidget> MakeMusicSelectionBar(
 		QWidget *parent,
 		rpl::producer<QString> summary,
-		MusicSelectionActions actions) {
+		MusicSelectionActions actions,
+		const MusicShortcutHints &shortcuts) {
 	auto result = object_ptr<Ui::SlideWrap<MusicSelectionBar>>(
-		parent, object_ptr<MusicSelectionBar>(parent, std::move(actions)));
+		parent, object_ptr<MusicSelectionBar>(parent, std::move(actions), shortcuts));
 	const auto wrap = result.data();
 	std::move(summary) | rpl::on_next([=](const QString &text) {
 		wrap->entity()->setSummary(text);
@@ -261,6 +289,7 @@ private:
 	void select(int index, bool scroll = true);
 	void markRange(int first, int last);
 	void refreshArtwork();
+	void updatePlaybackBadge();
 	void paintMusicItem(Painter &p, int index) const;
 	void paintCover(Painter &p, QRect rect, const PlaylistSongListRow &row) const;
 	void updateDrag();
@@ -285,6 +314,7 @@ private:
 	Mode _mode = Mode::Playlist;
 	base::Timer _autoscroll;
 	base::Timer _artworkUpdate;
+	base::Timer _playbackBadge;
 	QString _checkedState;
 	std::set<uint64_t> _verifiedDownloads;
 	uint64_t _current = 0;
@@ -321,7 +351,8 @@ PlaylistSongList::Rows::Rows(
 , _reorder(std::move(reorder))
 , _mode(mode)
 , _autoscroll([=] { autoscroll(); })
-, _artworkUpdate([=] { refreshArtwork(); }) {
+, _artworkUpdate([=] { refreshArtwork(); })
+, _playbackBadge([=] { updatePlaybackBadge(); }) {
 	setFocusPolicy(Qt::StrongFocus);
 	setMouseTracking(true);
 	setAccessibleName(_mode == Mode::Library
@@ -361,7 +392,9 @@ int PlaylistSongList::Rows::columns(int width) const {
 
 int PlaylistSongList::Rows::sleeve(int width) const {
 	const auto count = columns(width);
-	return std::max(1, std::min(st::purpleMusicTileMax,
+	const auto maximum = width <= st::purpleMusicTileNarrowWidth
+		? st::purpleMusicTileNarrowMax : st::purpleMusicTileMax;
+	return std::max(1, std::min(maximum,
 		(width - (count - 1) * st::purpleMusicTileGap) / count));
 }
 
@@ -381,9 +414,10 @@ QRect PlaylistSongList::Rows::itemRect(int index) const {
 	const auto count = columns(width());
 	const auto side = sleeve(width());
 	const auto gap = st::purpleMusicTileGap;
-	const auto leading = (width() - (count * side + (count - 1) * gap)) / 2;
+	const auto leading = count > 1
+		? (index % count) * (width() - side) / (count - 1) : 0;
 	return style::rtlrect(
-		leading + (index % count) * (side + gap),
+		leading,
 		(index / count) * height,
 		side,
 		height - gap,
@@ -392,9 +426,7 @@ QRect PlaylistSongList::Rows::itemRect(int index) const {
 
 QRect PlaylistSongList::Rows::coverRect(QRect item) const {
 	if (_tiles) {
-		const auto inset = std::min(st::purpleMusicTrackInset, item.width() / 4);
-		return QRect(item.x() + inset, item.y() + inset,
-			item.width() - 2 * inset, item.width() - 2 * inset);
+		return QRect(item.topLeft(), QSize(item.width(), item.width()));
 	}
 	const auto side = st::purpleMusicCoverSize;
 	return style::rtlrect(st::purpleMusicTrackInset,
@@ -542,6 +574,20 @@ void PlaylistSongList::Rows::paintCover(
 		found == _cover.end() ? QImage() : found->second.scaled);
 }
 
+void PlaylistSongList::Rows::updatePlaybackBadge() {
+	if (!isVisible() || anim::Disabled()) return;
+	const auto cols = columns(width());
+	const auto height = rowHeight();
+	const auto top = _scroll->scrollTop();
+	const auto bottom = top + _scroll->viewport()->height();
+	const auto last = std::min(int(_data.size()), (bottom / height + 1) * cols);
+	for (auto i = (top / height) * cols; i < last; ++i) {
+		if (musicPlayback(_data[i].documentId) == MusicRowPlayback::Playing) {
+			update(coverRect(itemRect(i)));
+		}
+	}
+}
+
 void PlaylistSongList::Rows::paintMusicItem(Painter &p, int index) const {
 	const auto &row = _data[index];
 	const auto item = itemRect(index);
@@ -562,17 +608,25 @@ void PlaylistSongList::Rows::paintMusicItem(Painter &p, int index) const {
 	paintCover(p, art, row);
 	if (playback != MusicRowPlayback::Idle) {
 		const auto side = std::min(st::purpleMusicBadgeSize, art.width());
-		const auto badge = QRect(rtl() ? art.right() - side + 1 : art.left(),
-			art.bottom() - side + 1, side, side);
-		p.setBrush(QColor(20, 20, 26, 232));
-		p.drawRoundedRect(badge, radius, radius);
+		const auto inset = _tiles ? st::purpleMusicShortcutGap : st::lineWidth;
+		const auto badge = QRect(rtl() ? art.left() + inset : art.right() - side + 1 - inset,
+			art.bottom() - side + 1 - inset, side, side);
+		p.setBrush(QColor(20, 20, 26, 204));
+		p.drawEllipse(badge);
 		p.setBrush(Qt::white);
 		const auto stroke = std::max(st::lineWidth, side / 9);
-		const auto bars = (playback == MusicRowPlayback::Playing) ? 3 : 2;
+		const auto bars = (playback == MusicRowPlayback::Paused) ? 2 : 3;
+		const auto playing = (playback == MusicRowPlayback::Playing);
+		const auto phase = playing && !anim::Disabled()
+			? int((crl::now() / kMusicBadgeFrame + 1) % 3) : 1;
 		for (auto i = 0; i != bars; ++i) {
-			const auto bar = (bars == 3 && i == 1) ? side / 2 : side / 3;
-			p.drawRect(badge.center().x() + (i * 2 - bars + 1) * stroke - stroke / 2,
-				badge.bottom() - side / 4 - bar, stroke, bar);
+			const auto x = badge.center().x() + (i * 2 - bars + 1) * stroke - stroke / 2;
+			if (playback == MusicRowPlayback::Loading) {
+				p.drawEllipse(x, badge.center().y() - stroke / 2, stroke, stroke);
+			} else {
+				const auto bar = (playing && i == phase) ? side / 2 : side / 3;
+				p.drawRect(x, badge.bottom() - side / 4 - bar, stroke, bar);
+			}
 		}
 	}
 	if (chosen || index == _hovered || (hasFocus() && index == _selected)) {
@@ -605,19 +659,10 @@ void PlaylistSongList::Rows::paintMusicItem(Painter &p, int index) const {
 	p.setFont(st::semiboldFont);
 	p.setPen(MusicReadableColor(playback == MusicRowPlayback::Idle
 		? st::windowFg->c : accent, bg, 4.5));
-	if (_tiles) {
-		p.save();
-		p.setClipRect(title, Qt::IntersectClip);
-		p.drawText(title, leading | Qt::AlignTop | Qt::TextWordWrap, row.title);
-		p.restore();
-	} else {
-		p.drawText(title, leading | Qt::AlignTop, st::semiboldFont->elided(row.title, title.width()));
-	}
+	PaintMusicText(p, title, row.title, _tiles ? 2 : 1);
 	p.setFont(st::normalFont);
 	p.setPen(MusicReadableColor(st::windowSubTextFg->c, bg, 4.5));
-	const auto state = PlaybackLabel(playback);
-	const auto details = state.isEmpty() ? row.performer : state + u" · "_q + row.performer;
-	p.drawText(sub, leading | Qt::AlignTop, st::normalFont->elided(details, sub.width()));
+	PaintMusicText(p, sub, row.performer);
 	if (!_tiles) {
 		const auto duration = style::rtlrect(width() - durationWidth, item.top(),
 			durationWidth - st::purpleMusicTrackInset, item.height(), width());
@@ -1155,6 +1200,11 @@ void PlaylistSongList::Rows::setMusicPlayback(
 	const auto oldCurrent = std::exchange(_current, current);
 	const auto oldLoading = std::exchange(_loading, loading);
 	_musicState = state;
+	if (current && state == MusicRowPlayback::Playing) {
+		_playbackBadge.callEach(kMusicBadgeFrame);
+	} else {
+		_playbackBadge.cancel();
+	}
 	for (auto i = 0; i != int(_data.size()); ++i) {
 		const auto id = _data[i].documentId;
 		if (id == current || id == oldCurrent || id == loading || id == oldLoading) {

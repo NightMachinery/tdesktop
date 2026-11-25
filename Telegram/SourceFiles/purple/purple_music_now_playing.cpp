@@ -8,6 +8,7 @@
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_button.h"
 #include "media/player/media_player_instance.h"
+#include "purple/purple_music_widgets.h"
 #include "purple/purple_playlist_song_list.h"
 #include "ui/image/image.h"
 #include "ui/painter.h"
@@ -16,10 +17,11 @@
 #include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
 
-#include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 #include "styles/style_media_player.h"
 #include "styles/style_purple_music.h"
+
+#include <QtGui/QFontMetrics>
 
 namespace Purple {
 namespace {
@@ -28,154 +30,164 @@ using Type = AudioMsgId::Type;
 
 class NowPlaying final : public Ui::RpWidget {
 public:
-	NowPlaying(QWidget *parent, not_null<Main::Session*> session, bool transport);
-	void setVisibility(Fn<void(bool)> show);
+	NowPlaying(
+		QWidget *parent,
+		MusicTransportActions actions,
+		const MusicShortcutHints &keys);
+	void setState(MusicNowPlayingState state);
 
 protected:
 	int resizeGetHeight(int width) override;
-	void paintEvent(QPaintEvent *event) override;
+	void paintEvent(QPaintEvent *) override;
 
 private:
-	void sync();
-	void refreshCover(not_null<DocumentData*> document);
 	[[nodiscard]] bool compact(int width) const;
 	[[nodiscard]] int coverSide(int width) const;
+	[[nodiscard]] int transportWidth() const;
+	[[nodiscard]] int transportHeight() const;
+	void placeTransport(int left, int top, int width);
 
-	const not_null<Main::Session*> _session;
 	const not_null<Ui::MediaSliderWheelless*> _progress;
 	const not_null<Ui::FlatLabel*> _time;
 	Ui::IconButton *_previous = nullptr;
 	Ui::IconButton *_next = nullptr;
 	Media::Player::PlayButton *_play = nullptr;
-	Fn<void(bool)> _show;
-	AudioMsgId _current;
-	QString _title;
-	QString _artist;
+	std::array<Ui::RpWidget*, 3> _hints = {};
+	MusicNowPlayingState _state;
 	QString _timeText;
-	QImage _cover;
 	QColor _tint;
-	qint64 _artRevision = 0;
-	int _artPixels = 0;
-	bool _active = false;
 
 };
 
 NowPlaying::NowPlaying(
 		QWidget *parent,
-		not_null<Main::Session*> session,
-		bool transport)
+		MusicTransportActions actions,
+		const MusicShortcutHints &keys)
 : Ui::RpWidget(parent)
-, _session(session)
 , _progress(Ui::CreateChild<Ui::MediaSliderWheelless>(
-	this, st::mediaPlayerPanelPlayback))
+	this, st::purpleMusicProgress))
 , _time(Ui::CreateChild<Ui::FlatLabel>(this, QString(), st::boxLabel)) {
-	_progress->setAccessibleName(u"Playback position"_q);
-	const auto player = Media::Player::instance();
-	_progress->setChangeProgressCallback([=](float64) {
-		if (_active && !player->isSeeking(Type::Song)) player->startSeeking(Type::Song);
+	_progress->setAccessibleName(tr::lng_purple_music_playback_position(tr::now));
+	_progress->setChangeProgressCallback([=, seek = std::move(actions.startSeeking)](double) {
+		if (seek && _state.active && !_state.seeking) seek();
 	});
-	_progress->setChangeFinishedCallback([=](float64 progress) {
-		if (_active) player->finishSeeking(Type::Song, progress);
+	_progress->setChangeFinishedCallback([=, seek = std::move(actions.finishSeeking)](double progress) {
+		if (seek && _state.active) seek(progress);
 	});
-	if (transport) {
+	if (actions.toggle) {
 		_previous = Ui::CreateChild<Ui::IconButton>(this, st::mediaPlayerPreviousButton);
-		_play = Ui::CreateChild<Media::Player::PlayButton>(this, st::mediaPlayerPlayButton);
+		_play = Ui::CreateChild<Media::Player::PlayButton>(this, st::purpleMusicPlayButton);
 		_next = Ui::CreateChild<Ui::IconButton>(this, st::mediaPlayerNextButton);
 		_previous->setAccessibleName(tr::lng_shortcuts_media_previous(tr::now));
 		_play->setAccessibleName(tr::lng_keys_legend_media_play(tr::now));
 		_next->setAccessibleName(tr::lng_shortcuts_media_next(tr::now));
-		_previous->setClickedCallback([=] { player->previous(Type::Song); });
-		_play->setClickedCallback([=] { player->playPauseCancelClicked(Type::Song); });
-		_next->setClickedCallback([=] { player->next(Type::Song); });
+		_previous->setAccessibleDescription(keys.previous.join(u' '));
+		_play->setAccessibleDescription(keys.togglePlayback.join(u' '));
+		_next->setAccessibleDescription(keys.next.join(u' '));
+		_previous->setClickedCallback(std::move(actions.previous));
+		_play->setClickedCallback(std::move(actions.toggle));
+		_next->setClickedCallback(std::move(actions.next));
+		_hints = {
+			MakeMusicKeyHint(this, keys.previous).release(),
+			MakeMusicKeyHint(this, keys.togglePlayback).release(),
+			MakeMusicKeyHint(this, keys.next).release(),
+		};
 	}
-	player->updatedNotifier() | rpl::on_next([=](const Media::Player::TrackState &state) {
-		if (state.id.type() == Type::Song) sync();
-	}, lifetime());
-	rpl::merge(player->stops(Type::Song), player->playlistChanges(Type::Song),
-		session->downloaderTaskFinished(),
-		Core::App().passcodeLockChanges() | rpl::to_empty
-	) | rpl::on_next([=] { sync(); }, lifetime());
-}
-
-void NowPlaying::setVisibility(Fn<void(bool)> show) {
-	_show = std::move(show);
-	sync();
-	_show(_active);
 }
 
 bool NowPlaying::compact(int width) const {
-	return width < st::purpleChatMusicWidth / 2;
+	return width < st::purpleMusicNowCompactWidth;
 }
 
 int NowPlaying::coverSide(int width) const {
-	return compact(width) ? st::purpleMusicNowCoverCompact : st::purpleMusicNowCover;
+	return (width < 2 * st::purpleMusicNowCover + 4 * st::purpleMusicNowPadding)
+		? st::purpleMusicNowCoverCompact : st::purpleMusicNowCover;
+}
+
+int NowPlaying::transportWidth() const {
+	if (!_play) return 0;
+	return std::max(_previous->width(), _hints[0]->width())
+		+ std::max(_play->width(), _hints[1]->width())
+		+ std::max(_next->width(), _hints[2]->width())
+		+ 2 * st::purpleMusicActionGap;
+}
+
+int NowPlaying::transportHeight() const {
+	if (!_play) return 0;
+	auto hintHeight = 0;
+	for (const auto hint : _hints) {
+		if (hint->width()) hintHeight = std::max(hintHeight, hint->height());
+	}
+	return std::max({ _previous->height(), _play->height(), _next->height() })
+		+ (hintHeight ? st::purpleMusicShortcutGap + hintHeight : 0);
+}
+
+void NowPlaying::placeTransport(int left, int top, int width) {
+	const auto controls = std::array<Ui::RpWidget*, 3>{ _previous, _play, _next };
+	const auto height = std::max({ _previous->height(), _play->height(), _next->height() });
+	for (auto i = 0; i != int(controls.size()); ++i) {
+		const auto button = controls[i];
+		const auto hint = _hints[i];
+		const auto cell = std::max(button->width(), hint->width());
+		button->moveToLeft(left + (cell - button->width()) / 2,
+			top + (height - button->height()) / 2, width);
+		hint->moveToLeft(left + (cell - hint->width()) / 2,
+			top + height + st::purpleMusicShortcutGap, width);
+		left += cell + st::purpleMusicActionGap;
+	}
 }
 
 int NowPlaying::resizeGetHeight(int width) {
 	const auto padding = st::purpleMusicNowPadding;
 	const auto side = coverSide(width);
 	const auto left = 2 * padding + side;
-	const auto progressTop = (compact(width) ? padding + side + padding : side);
-	const auto progressHeight = _time->height() + padding;
+	const auto compactMode = compact(width);
+	const auto metadataHeight = st::purpleMusicNowEyebrow->height
+		+ st::purpleMusicNowTitle->height + st::normalFont->height;
+	const auto progressTop = compactMode
+		? 2 * padding + std::max(side, metadataHeight + transportHeight())
+		: padding + side - st::normalFont->height;
+	const auto progressHeight = std::max(_time->height(), st::normalFont->height);
 	_time->moveToRight(padding, progressTop, width);
-	_progress->setGeometryToLeft(compact(width) ? padding : left, progressTop,
-		std::max(1, width - (compact(width) ? padding : left) - _time->width() - 2 * padding),
+	_progress->setGeometryToLeft(compactMode ? padding : left, progressTop,
+		std::max(1, width - (compactMode ? padding : left) - _time->width() - 2 * padding),
 		progressHeight);
 	if (_play) {
-		const auto y = compact(width) ? padding + st::purpleMusicNowTitle->height
-			+ st::normalFont->height : padding;
-		_next->moveToRight(padding, y, width);
-		_play->moveToRight(padding + _next->width(), y, width);
-		_previous->moveToRight(padding + _next->width() + _play->width(), y, width);
+		placeTransport(compactMode ? left : width - padding - transportWidth(),
+			compactMode ? padding + metadataHeight : padding + st::purpleMusicActionGap, width);
 	}
 	return std::max(side + 2 * padding, progressTop + progressHeight + padding);
 }
 
-void NowPlaying::sync() {
-	const auto player = Media::Player::instance();
-	const auto state = player->getState(Type::Song);
-	const auto document = state.id.audio();
-	const auto active = document && &document->session() == _session.get()
-		&& !Core::App().passcodeLocked() && !Media::Player::IsStoppedOrStopping(state.state);
-	if (_active != active) {
-		_active = active;
-		if (_show) _show(active);
+void NowPlaying::setState(MusicNowPlayingState state) {
+	const auto changed = _state.title != state.title
+		|| _state.artist != state.artist || _state.album != state.album
+		|| _state.cover.cacheKey() != state.cover.cacheKey();
+	if (_state.cover.cacheKey() != state.cover.cacheKey()) {
+		_tint = {};
+		if (!state.cover.isNull()) {
+			const auto sample = state.cover.scaled(
+				1, 1, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).pixelColor(0, 0);
+			_tint = QColor(sample.red() & 0xe0, sample.green() & 0xe0, sample.blue() & 0xe0, 26);
+		}
 	}
-	if (!active) {
-		_current = {};
-		_cover = QImage();
-		_tint = QColor();
-		_artRevision = 0;
-		return;
-	}
-	if (_current != state.id) {
-		_current = state.id;
-		const auto song = document->song();
-		_title = song && !song->title.trimmed().isEmpty()
-			? song->title : document->filename();
-		_artist = song ? song->performer : QString();
-		_cover = QImage();
-		_tint = QColor();
-		_artRevision = 0;
-		setAccessibleName(_title);
+	_state = std::move(state);
+	if (changed) {
+		setAccessibleName(_state.title);
 		update();
 	}
-	refreshCover(document);
 	if (_play) {
 		using Button = Media::Player::PlayButton;
-		_play->setState(state.waitingForData ? Button::State::Cancel
-			: Media::Player::ShowPauseIcon(state.state) ? Button::State::Pause
-			: Button::State::Play);
-		_previous->setDisabled(!player->previousAvailable(Type::Song));
-		_next->setDisabled(!player->nextAvailable(Type::Song));
+		_play->setState(_state.loading ? Button::State::Cancel
+			: _state.playing ? Button::State::Pause : Button::State::Play);
+		_previous->setDisabled(!_state.previousAvailable);
+		_next->setDisabled(!_state.nextAvailable);
 	}
-	_progress->setDisabled(state.length <= 0 || state.waitingForData);
-	if (player->isSeeking(Type::Song)) return;
-	_progress->setValue(state.length > 0
-		? std::clamp(double(state.position) / state.length, 0., 1.) : 0.);
-	const auto frequency = std::max(state.frequency, 1);
-	const auto time = Ui::FormatDurationText(state.position / frequency)
-		+ u" / "_q + Ui::FormatDurationText(state.length / frequency);
+	_progress->setDisabled(_state.durationSeconds <= 0 || _state.loading);
+	if (_state.seeking) return;
+	_progress->setValue(_state.progress);
+	const auto time = Ui::FormatDurationText(_state.elapsedSeconds)
+		+ u" / "_q + Ui::FormatDurationText(_state.durationSeconds);
 	if (_timeText != time) {
 		_timeText = time;
 		_time->setText(time);
@@ -184,27 +196,16 @@ void NowPlaying::sync() {
 	}
 }
 
-void NowPlaying::refreshCover(not_null<DocumentData*> document) {
-	const auto media = document->activeMediaView();
-	const auto image = media ? (media->goodThumbnail()
-		? media->goodThumbnail() : media->thumbnail()) : nullptr;
-	if (!image) return;
-	const auto original = image->original();
-	const auto pixels = int(st::purpleMusicNowCover * devicePixelRatioF());
-	if (original.isNull() || (original.cacheKey() == _artRevision && _artPixels == pixels)) return;
-	_artRevision = original.cacheKey();
-	_artPixels = pixels;
-	const auto size = std::min(original.width(), original.height());
-	_cover = original.copy((original.width() - size) / 2,
-		(original.height() - size) / 2, size, size).scaled(
-			pixels,
-			pixels,
-			Qt::IgnoreAspectRatio,
-			Qt::SmoothTransformation);
-	const auto sample = _cover.scaled(
-		1, 1, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).pixelColor(0, 0);
-	_tint = QColor(sample.red() & 0xe0, sample.green() & 0xe0, sample.blue() & 0xe0, 26);
-	update();
+QString ArtistAndAlbum(const MusicNowPlayingState &state, const QFontMetrics &metrics, int width) {
+	if (state.artist.isEmpty()) return state.album;
+	if (state.album.isEmpty()) return state.artist;
+	const auto separator = u" · "_q;
+	const auto remaining = width - metrics.horizontalAdvance(state.artist + separator);
+	if (remaining <= metrics.horizontalAdvance(u"…"_q)) return state.artist;
+	const auto direction = state.album.isRightToLeft()
+		? Qt::TextForceRightToLeft : Qt::TextForceLeftToRight;
+	const auto album = metrics.elidedText(state.album, Qt::ElideRight, remaining, direction);
+	return state.artist + separator + u'\u2068' + album + u'\u2069';
 }
 
 void NowPlaying::paintEvent(QPaintEvent *) {
@@ -221,37 +222,127 @@ void NowPlaying::paintEvent(QPaintEvent *) {
 		p.setBrush(tint);
 		p.drawRoundedRect(rect(), radius, radius);
 	}
+	if (_play) {
+		p.setBrush(st::activeButtonBg);
+		p.drawEllipse(_play->geometry());
+	}
 	const auto padding = st::purpleMusicNowPadding;
 	const auto side = coverSide(width());
 	PaintMusicSleeve(p, style::rtlrect(padding, padding, side, side, width()),
-		_title, _artist, _cover);
+		_state.title, _state.artist, _state.cover);
 	const auto left = 2 * padding + side;
-	const auto controls = _play && !compact(width())
-		? _previous->width() + _play->width() + _next->width() + padding
-		: 0;
+	const auto controls = compact(width()) ? 0 : transportWidth() + padding;
 	const auto available = std::max(0, width() - left - padding - controls);
+	auto y = padding;
 	p.setPen(st::windowFg);
+	p.setFont(st::purpleMusicNowEyebrow);
+	PaintMusicText(p, style::rtlrect(left, y, available, st::purpleMusicNowEyebrow->height, width()),
+		tr::lng_purple_music_now_playing(tr::now));
+	y += st::purpleMusicNowEyebrow->height;
 	p.setFont(st::purpleMusicNowTitle);
-	p.drawTextLeft(left, padding, width(), st::purpleMusicNowTitle->elided(_title, available));
+	PaintMusicText(p, style::rtlrect(left, y, available, st::purpleMusicNowTitle->height, width()),
+		_state.title);
+	y += st::purpleMusicNowTitle->height;
 	p.setFont(st::normalFont);
-	p.drawTextLeft(left, padding + st::purpleMusicNowTitle->height,
-		width(), st::normalFont->elided(_artist, available));
+	PaintMusicText(p, style::rtlrect(left, y, available, st::normalFont->height, width()),
+		ArtistAndAlbum(_state, QFontMetrics(p.font()), available));
+}
+
+struct PlaybackPresentation {
+	qint64 artRevision = 0;
+	QImage cover;
+};
+
+MusicNowPlayingState PlaybackState(
+		not_null<Main::Session*> session,
+		PlaybackPresentation &cache) {
+	const auto player = Media::Player::instance();
+	const auto track = player->getState(Type::Song);
+	const auto document = track.id.audio();
+	const auto active = document && &document->session() == session.get()
+		&& !Core::App().passcodeLocked() && !Media::Player::IsStoppedOrStopping(track.state);
+	if (!active) {
+		cache = {};
+		return {};
+	}
+	const auto media = document->activeMediaView();
+	const auto image = media ? (media->goodThumbnail()
+		? media->goodThumbnail() : media->thumbnail()) : nullptr;
+	const auto raw = image ? image->original() : QImage();
+	if (cache.artRevision != raw.cacheKey()) {
+		cache.artRevision = raw.cacheKey();
+		const auto side = std::min(raw.width(), raw.height());
+		cache.cover = raw.isNull() ? QImage() : raw.copy(
+			(raw.width() - side) / 2, (raw.height() - side) / 2, side, side);
+	}
+	const auto song = document->song();
+	const auto frequency = std::max(track.frequency, 1);
+	return {
+		.title = song && !song->title.trimmed().isEmpty() ? song->title : document->filename(),
+		.artist = song ? song->performer : QString(),
+		.cover = cache.cover,
+		.elapsedSeconds = track.position / frequency,
+		.durationSeconds = track.length / frequency,
+		.progress = track.length > 0 ? std::clamp(double(track.position) / track.length, 0., 1.) : 0.,
+		.active = true,
+		.playing = Media::Player::ShowPauseIcon(track.state),
+		.loading = track.waitingForData,
+		.seeking = player->isSeeking(Type::Song),
+		.previousAvailable = player->previousAvailable(Type::Song),
+		.nextAvailable = player->nextAvailable(Type::Song),
+	};
 }
 
 } // namespace
 
 object_ptr<Ui::RpWidget> MakeMusicNowPlaying(
 		QWidget *parent,
-		not_null<Main::Session*> session,
-		bool transport) {
+		rpl::producer<MusicNowPlayingState> state,
+		MusicTransportActions actions,
+		const MusicShortcutHints &keys) {
 	auto result = object_ptr<Ui::SlideWrap<NowPlaying>>(
-		parent, object_ptr<NowPlaying>(parent, session, transport));
+		parent, object_ptr<NowPlaying>(parent, std::move(actions), keys));
 	const auto wrap = result.data();
 	wrap->hide(anim::type::instant);
-	wrap->entity()->setVisibility([=](bool show) {
-		wrap->toggle(show, anim::type::instant);
-	});
+	std::move(state) | rpl::on_next([=](MusicNowPlayingState state) {
+		const auto active = state.active;
+		wrap->entity()->setState(std::move(state));
+		wrap->toggle(active, anim::type::instant);
+	}, wrap->lifetime());
 	return result;
+}
+
+object_ptr<Ui::RpWidget> MakeMusicNowPlaying(
+		QWidget *parent,
+		not_null<Main::Session*> session,
+		bool transport,
+		const MusicShortcutHints &keys) {
+	const auto player = Media::Player::instance();
+	auto state = rpl::make_producer<MusicNowPlayingState>([=](const auto &consumer) {
+		auto lifetime = rpl::lifetime();
+		const auto cache = lifetime.make_state<PlaybackPresentation>();
+		const auto update = [=] { consumer.put_next(PlaybackState(session, *cache)); };
+		rpl::merge(
+			rpl::single(rpl::empty),
+			player->updatedNotifier() | rpl::filter([](const Media::Player::TrackState &state) {
+				return state.id.type() == Type::Song;
+			}) | rpl::to_empty,
+			player->stops(Type::Song),
+			player->playlistChanges(Type::Song),
+			session->downloaderTaskFinished(),
+			Core::App().passcodeLockChanges() | rpl::to_empty
+		) | rpl::on_next(update, lifetime);
+		return lifetime;
+	});
+	auto actions = MusicTransportActions();
+	actions.startSeeking = [=] { player->startSeeking(Type::Song); };
+	actions.finishSeeking = [=](double progress) { player->finishSeeking(Type::Song, progress); };
+	if (transport) {
+		actions.previous = [=] { player->previous(Type::Song); };
+		actions.toggle = [=] { player->playPauseCancelClicked(Type::Song); };
+		actions.next = [=] { player->next(Type::Song); };
+	}
+	return MakeMusicNowPlaying(parent, std::move(state), std::move(actions), keys);
 }
 
 } // namespace Purple

@@ -34,6 +34,7 @@
 #include "purple/purple_music_diagnostics.h"
 #include "purple/purple_music_index_service.h"
 #include "purple/purple_music_now_playing.h"
+#include "purple/purple_music_widgets.h"
 #include "purple/purple_music_source_roster.h"
 #include "purple/purple_playlist_player.h"
 #include "purple/purple_playlist_song_list.h"
@@ -299,11 +300,8 @@ MusicSection::MusicSection(
 	not_null<Window::SessionController*> controller)
 : Window::SectionWidget(parent, controller)
 , _content(Ui::CreateChild<Ui::VerticalLayout>(this))
-, _search(_content->add(object_ptr<Ui::InputField>(
-	_content,
-	st::purpleMusicSearch,
-	Ui::InputField::Mode::SingleLine,
-	tr::lng_purple_music_search()), st::purpleMusicSearchMargin))
+, _search(_content->add(MakeMusicFilter(_content, MusicEffectiveShortcuts(false).filter),
+	st::purpleMusicSearchMargin))
 , _status(_content->add(object_ptr<Ui::SlideWrap<Ui::FlatLabel>>(
 	_content,
 	object_ptr<Ui::FlatLabel>(_content, QString(), st::boxLabel),
@@ -318,54 +316,19 @@ MusicSection::MusicSection(
 , _connectionTimer([=] { pollConnection(); })
 , _scanTimer([=] { scan(); }) {
 	setFocusPolicy(Qt::StrongFocus);
-	_search->customUpDown(true);
-	const auto searchIcon = Ui::CreateChild<Ui::RpWidget>(_search);
-	searchIcon->setAttribute(Qt::WA_TransparentForMouseEvents);
-	searchIcon->paintRequest() | rpl::on_next([=] {
-		auto painter = QPainter(searchIcon);
-		st::purpleMusicSearchIcon.paintInCenter(painter, searchIcon->rect());
-	}, searchIcon->lifetime());
-	_search->sizeValue() | rpl::on_next([=](QSize size) {
-		searchIcon->resize(st::purpleMusicSearchIconWidth, size.height());
-		searchIcon->moveToLeft(0, 0, size.width());
-	}, searchIcon->lifetime());
-	searchIcon->raise();
-	const auto header = _content->insert(0, object_ptr<Ui::RpWidget>(_content));
-	_content->insert(1, MakeMusicNowPlaying(_content, &session(), false), st::purpleMusicNowMargin);
-	header->setFixedHeight(st::purpleMusicHeaderHeight);
-	const auto back = Ui::CreateChild<Ui::IconButton>(
-		header, st::purpleMusicBack);
-	back->setAccessibleName(tr::lng_purple_music_back(tr::now));
-	back->setClickedCallback([=] { controller->showBackFromStack(); });
-	const auto title = Ui::CreateChild<Ui::FlatLabel>(
-		header, tr::lng_purple_music_title(), st::purpleMusicTitle);
-	const auto playlists = Ui::CreateChild<Ui::RoundButton>(
-		header, tr::lng_purple_playlists_title(), st::defaultLightButton);
-	playlists->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-	playlists->setClickedCallback([=] {
-		if (current()) ShowPlaylistsBox(controller);
-	});
-	const auto menu = Ui::CreateChild<Ui::IconButton>(header, st::purpleMusicMore);
-	menu->setAccessibleName(tr::lng_purple_music_options(tr::now));
-	menu->setClickedCallback([=] { showMenu(menu); });
-	const auto placeHeader = [=] {
-		const auto center = st::purpleMusicHeaderHeight / 2;
-		const auto margin = st::purpleMusicMargin;
-		back->moveToLeft(margin - st::purpleMusicToolbarGap,
-			center - back->height() / 2, header->width());
-		menu->moveToRight(margin - st::purpleMusicToolbarGap,
-			center - menu->height() / 2, header->width());
-		const auto actionsWidth = margin + menu->width();
-		playlists->moveToRight(actionsWidth,
-			center - playlists->height() / 2, header->width());
-		const auto titleLeft = margin + back->width();
-		title->resizeToWidth(std::max(1,
-			header->width() - titleLeft - actionsWidth - playlists->width()));
-		title->moveToLeft(titleLeft, center - title->height() / 2,
-			header->width());
-	};
-	playlists->setWidthChangedCallback(placeHeader);
-	header->widthValue() | rpl::on_next(placeHeader, lifetime());
+	const auto keys = MusicEffectiveShortcuts(false);
+	_content->insert(0, MakeMusicHeader(
+		_content,
+		keys.playlists,
+		[=] { controller->showBackFromStack(); },
+		[=] { if (current()) ShowPlaylistsBox(controller); },
+		[=](not_null<Ui::IconButton*> button) { showMenu(button); }
+	), st::purpleMusicListMargin);
+	_content->insert(1, MakeMusicNowPlaying(_content, &session(), true, keys), st::purpleMusicNowMargin);
+	_content->insert(2, MakeMusicViewControl(_content, MusicTilesValue(), [](bool tiles) {
+		if (tiles != MusicTiles()) ToggleMusicTiles();
+	}, keys.view), st::purpleMusicActionMargin);
+
 	const auto addAction = [=](
 			rpl::producer<QString> text,
 			const style::RoundButton &buttonStyle,
@@ -397,9 +360,6 @@ MusicSection::MusicSection(
 	rpl::merge(session().data().chatsFilters().changed(), std::move(changes))
 		| rpl::on_next(updateFolderButton, lifetime());
 	updateFolderButton();
-	addAction(MusicTilesValue() | rpl::map([](bool tiles) {
-		return tiles ? u"View · Tiles"_q : u"View · List"_q;
-	}), st::defaultLightButton, style::al_right, ToggleMusicTiles);
 	_list = _content->add(object_ptr<PlaylistSongList>(
 		_content, std::vector<PlaylistSongListRow>(), 0, 0,
 		[=](uint64_t id) { play(id); },
@@ -442,7 +402,7 @@ MusicSection::MusicSection(
 		.forward = [=] { if (!_selection.empty()) act(MusicTrackAction::Forward, _selection.front().document); },
 		.more = [=] { _list->showActions(); },
 		.clear = [=] { _selection.clear(); updateSelection(); },
-	}), st::purpleMusicActionMargin);
+	}, keys), st::purpleMusicActionMargin);
 	_more->hide(anim::type::instant);
 	_status->hide(anim::type::instant);
 	widthValue() | rpl::on_next([=](int width) {
@@ -1776,6 +1736,17 @@ bool MusicHidesChats(const Window::SectionWidget *section) {
 
 bool MusicHidesInfo(const Window::SectionWidget *section) {
 	return dynamic_cast<const MusicSection*>(section) != nullptr;
+}
+
+bool MusicOwnsSongTransport(const Window::SectionWidget *section) {
+	if (!MusicHidesInfo(section) || Core::App().passcodeLocked()) return false;
+	const auto player = Media::Player::instance();
+	const auto type = AudioMsgId::Type::Song;
+	if (player->getActiveType() != type) return false;
+	const auto state = player->getState(type);
+	const auto document = state.id.audio();
+	return document && &document->session() == &section->session()
+		&& !Media::Player::IsStoppedOrStopping(state.state);
 }
 
 bool MusicHideChatsCurrent() {

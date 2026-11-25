@@ -23,6 +23,7 @@
 #include "purple/purple_exact_search.h"
 #include "purple/purple_keys.h"
 #include "purple/purple_music_now_playing.h"
+#include "purple/purple_music_widgets.h"
 #include "purple/purple_playlist_player.h"
 #include "purple/purple_playlist_song_list.h"
 #include "purple/purple_playlists_box.h"
@@ -145,9 +146,7 @@ ChatMusicBox::ChatMusicBox(
 , _topic(source.topicRootId)
 , _sublist(source.monoforumPeerId)
 , _migrated(source.migratedPeerId)
-, _search(box->addRow(object_ptr<Ui::InputField>(
-	box, st::defaultInputField, Ui::InputField::Mode::SingleLine,
-	tr::lng_purple_music_search())))
+, _search(box->addRow(MakeMusicFilter(box, MusicEffectiveShortcuts(true).filter)))
 , _status(box->addRow(object_ptr<Ui::FlatLabel>(
 	box, tr::lng_contacts_loading(tr::now), st::boxLabel)))
 , _list(box->addRow(object_ptr<PlaylistSongList>(
@@ -173,15 +172,12 @@ ChatMusicBox::ChatMusicBox(
 	MusicTilesValue() | rpl::on_next([=](bool tiles) {
 		_list->setTiles(tiles);
 	}, box->lifetime());
-	const auto view = box->insertRow(2, object_ptr<Ui::RoundButton>(
-		box,
-		MusicTilesValue() | rpl::map([](bool tiles) {
-			return tiles ? u"View · Tiles"_q : u"View · List"_q;
-		}),
-		st::defaultLightButton), style::al_right);
-	view->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-	view->setClickedCallback(ToggleMusicTiles);
-	box->insertRow(0, MakeMusicNowPlaying(box, _session, true));
+	const auto keys = MusicEffectiveShortcuts(true);
+	box->insertRow(0, MakeMusicViewControl(box, MusicTilesValue(), [](bool tiles) {
+		if (tiles != MusicTiles()) ToggleMusicTiles();
+	}, keys.view));
+	box->insertRow(0, MakeMusicNowPlaying(box, _session, true, keys));
+
 	box->addRow(MakeMusicSelectionBar(box, _markSummary.value(), {
 		.play = [=] { playMarked(); },
 		.queue = [=] { if (!_marked.empty()) queue(*_marked.begin()); },
@@ -189,7 +185,7 @@ ChatMusicBox::ChatMusicBox(
 		.forward = [=] { if (!_marked.empty()) forward(*_marked.begin()); },
 		.more = [=] { _list->showActions(); },
 		.clear = [=] { _marked.clear(); updateMarks(); },
-	}));
+	}, keys));
 	_list->setContextActions([=](not_null<Ui::PopupMenu*> menu, uint64_t key) {
 		fillActions(menu, key);
 	});
@@ -202,9 +198,10 @@ ChatMusicBox::ChatMusicBox(
 		_closed = true;
 		_viewer.destroy();
 	}, box->lifetime());
-	box->setWidth(std::max(st::boxWidth, std::min(
-		st::purpleChatMusicWidth,
-		controller->content()->width() - 2 * st::purpleMusicMargin)));
+	controller->content()->widthValue() | rpl::on_next([=](int width) {
+		box->setWidth(std::max(st::boxWidth, std::min(
+			st::purpleChatMusicWidth, width - 2 * st::purpleChatMusicMargin)));
+	}, box->lifetime());
 	box->setTitle(rpl::single(u"Music shared in this chat"_q));
 	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 	box->addButton(rpl::single(u"Actions"_q), [=] { _list->showActions(); });
@@ -428,12 +425,25 @@ bool ChatMusicBox::keyPress(QKeyEvent *event) {
 	}
 	if (!ModalKeysEnabled()) return false;
 	const auto shift = (mods == Qt::ShiftModifier);
+	const auto player = Media::Player::instance();
+	const auto song = player->current(AudioMsgId::Type::Song).audio();
+	const auto ownSong = song && &song->session() == _session.get() && current();
+	if ((shift || !mods) && key == Qt::Key_N) {
+		if (AllowModalLayerKey(*event, _box) && ownSong) {
+			if (shift) player->previous(AudioMsgId::Type::Song);
+			else player->next(AudioMsgId::Type::Song);
+		}
+		_pendingLocal = false;
+		return true;
+	}
 	if (_pendingLocal) {
 		_pendingLocal = false;
 		if (!AllowModalLayerKey(*event, _box)) return true;
 		const auto current = _list->selectedDocument();
 		if (!mods && key == Qt::Key_T) ToggleMusicTiles();
-		else if (!mods && key == Qt::Key_Period) _list->showActions();
+		else if (!mods && key == Qt::Key_P && ownSong) {
+			player->playPauseCancelClicked(AudioMsgId::Type::Song);
+		} else if (!mods && key == Qt::Key_Period) _list->showActions();
 		else if (!mods && key == Qt::Key_G) goTo(current);
 		else if (!mods && key == Qt::Key_A) addToPlaylist(current);
 		else if (!mods && key == Qt::Key_Q) queue(current);

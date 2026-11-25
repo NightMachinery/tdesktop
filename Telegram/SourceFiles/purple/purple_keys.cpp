@@ -54,6 +54,7 @@
 #include "purple/purple_keys_zen.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
+#include "purple/purple_music_widgets.h"
 #include "purple/purple_chat_music.h"
 #include "purple/purple_playlist_song_list.h"
 #include "purple/purple_notices.h"
@@ -4929,6 +4930,47 @@ void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder) {
 
 bool ModalKeysEnabled() {
 	return Enabled();
+}
+
+MusicShortcutHints MusicEffectiveShortcuts(bool chat) {
+	if (!Enabled()) return {};
+	if (chat) {
+		return {
+			.previous = { u"N"_q },
+			.togglePlayback = { u","_q, u"p"_q },
+			.next = { u"n"_q },
+			.view = { u","_q, u"t"_q },
+			.play = { u"RET"_q },
+			.queue = { u","_q, u"q"_q },
+			.add = { u","_q, u"a"_q },
+			.forward = { u","_q, u"F"_q },
+			.more = { u","_q, u"."_q },
+			.clear = { u"Esc"_q },
+			.filter = { u"/"_q },
+		};
+	}
+	const auto bindings = EffectiveBindings(true, MapKind::Music);
+	const auto shortest = [&](Action action) {
+		const auto chords = ChordsForAction(action, bindings);
+		const auto best = std::ranges::min_element(chords, {}, [](const QStringList &keys) {
+			return keys.size();
+		});
+		return best == chords.end() ? QStringList() : *best;
+	};
+	return {
+		.previous = shortest(Action::PreviousTrack),
+		.togglePlayback = shortest(Action::TogglePlayback),
+		.next = shortest(Action::NextTrack),
+		.view = shortest(Action::MusicToggleTiles),
+		.playlists = shortest(Action::OpenPlaylists),
+		.play = shortest(Action::OpenChat),
+		.queue = shortest(Action::MusicQueueTracks),
+		.add = shortest(Action::MusicAddToPlaylist),
+		.forward = shortest(Action::MusicForwardTracks),
+		.more = shortest(Action::MusicTrackMenu),
+		.clear = { u"Esc"_q },
+		.filter = shortest(Action::Search),
+	};
 }
 
 bool ModalKeysInNormal(not_null<MainWindow*> window) {

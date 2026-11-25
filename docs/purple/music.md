@@ -60,11 +60,16 @@ and loading cues follow the player. The row tint and checkmark show marks,
 and a border shows the keyboard cursor. Hold an arrow to move repeatedly.
 While an input method is composing text, Down stays in search.
 
-The **View** button or `, t` toggles **List** and **Tiles**. The library and
-chat music dialog share the saved view. In Tiles, Left and Right or `h` and
-`l` move horizontally. Both views use document thumbnails when available and
-draw a cover from the track and artist names while art loads. The now-playing
-panel shows the current song and offers a seek slider.
+Choose **List** or **Tiles**, or press `, t` to switch between them. The
+library and chat music dialog share the saved view. In Tiles, Left and Right
+or `h` and `l` move horizontally. Both views use document thumbnails when
+available and draw a cover from the track and artist names while art loads.
+A track can show the cursor border, mark, and playback badge at the same
+time. Track titles and artists align according to their own text direction.
+The now-playing panel shows the current song, with a seek slider and
+previous, play or pause, and next controls. It takes the place of the
+regular song toolbar while the library is open. The library shows the
+effective Normal bindings beside its controls.
 
 Marks reveal a bar with playback, queue, playlist, forwarding, and clear
 actions. Narrow windows put secondary actions in **More**. The bar counts
