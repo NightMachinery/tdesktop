@@ -346,7 +346,17 @@ ordered(keys, "bool Keys::zenNeedsTransientBar", "int Keys::statusBarHeight", "!
 ordered(keys, "void Keys::showUnreadBuffer", "CreateUnreadBufferLayer", "MarkAsReadMenu::MarkAsReadThread")
 ordered(keys, "void Keys::showTopicPicker", "CreateTopicPickerLayer", "onRefresh",
         "onLoadMore", "requestTopics()", "onReload", "reloadTopics()", "pageUpdates",
-        "reserveNewBotTopic", "NewForumTopicBox")
+        "onCreateTopic", "guard->owner() != ctrl", "CreateTopic(ctrl, liveForum)")
+ordered(keys, "case Action::TopicCreate:", "CreateTopic(current, forum)")
+create_topic = between(keys, "void CreateTopic(", "ModalUnread::ChatBucket BucketForPeer")
+ordered(create_topic, "reserveNewBotTopic", "showSection", "HistoryView::ChatMemento",
+        ".repliesRootId = topic->rootId()", "SectionShow::Way::ClearStack", "NewForumTopicBox")
+assert "->showThread(" not in create_topic
+stock_create = read("boxes/peers/edit_forum_topic_box.cpp")
+ordered(stock_create, "const auto create = ", "showSection", "ChatMemento", "reserveCreatingId")
+stock_replies = read("window/window_session_controller.cpp")
+ordered(stock_replies, "void SessionNavigation::showRepliesForMessage", "unreadCountKnown()",
+        "!history->peer->asChannel()", "return;")
 ordered(keys, "avatarSession", "avatarPeerId")
 
 keys_ui = read("purple/purple_keys_ui.cpp")

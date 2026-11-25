@@ -1304,6 +1304,25 @@ bool CanCreateTopicInForum(Data::Forum *forum) {
 	return (forum->bot() != nullptr) || forum->peer()->canCreateTopics();
 }
 
+void CreateTopic(not_null<Window::SessionController*> controller, Data::Forum *forum) {
+	if (!CanCreateTopicInForum(forum)) {
+		return;
+	}
+	if (forum->bot()) {
+		if (const auto topic = forum->reserveNewBotTopic()) {
+			// A local root has no server unread state for showThread() to use.
+			controller->showSection(
+				std::make_shared<HistoryView::ChatMemento>(HistoryView::ChatViewId{
+					.history = forum->history(),
+					.repliesRootId = topic->rootId(),
+				}),
+				Window::SectionShow::Way::ClearStack);
+		}
+	} else {
+		controller->show(Box(NewForumTopicBox, controller, forum->history()));
+	}
+}
+
 ModalUnread::ChatBucket BucketForPeer(not_null<PeerData*> peer) {
 	if (peer->isUser()) {
 		return ModalUnread::ChatBucket::DirectMessage;
@@ -2474,22 +2493,12 @@ void Keys::showTopicPicker(bool unreadOnly, const Target &target) {
 		.onCreateTopic = [guard, weakCtrl, peerId] {
 			QTimer::singleShot(0, guard.data(), [guard, weakCtrl, peerId] {
 				const auto ctrl = weakCtrl.get();
-				if (!guard || !ctrl || !Enabled()
-					|| Purple::PrivacyScreenActive(guard->_window)) {
+				if (!guard || !ctrl || !Enabled() || guard->owner() != ctrl) {
 					return;
 				}
 				const auto peer = ctrl->session().data().peerLoaded(peerId);
 				const auto liveForum = peer ? peer->forum() : nullptr;
-				if (!liveForum) {
-					return;
-				}
-				if (liveForum->bot()) {
-					if (const auto topic = liveForum->reserveNewBotTopic()) {
-						ctrl->showThread(topic);
-					}
-				} else if (peer->canCreateTopics()) {
-					ctrl->show(Box(NewForumTopicBox, ctrl, liveForum->history()));
-				}
+				CreateTopic(ctrl, liveForum);
 			});
 		},
 	});
@@ -3324,13 +3333,7 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 	case Action::TopicCreate:
 		if (const auto forum = ActiveForum(target)) {
 			clearPrefix();
-			if (forum->bot()) {
-				if (const auto topic = forum->reserveNewBotTopic()) {
-					current->showThread(topic);
-				}
-			} else if (forum->peer()->canCreateTopics()) {
-				current->show(Box(NewForumTopicBox, current, forum->history()));
-			}
+			CreateTopic(current, forum);
 		}
 		break;
 	case Action::TopicParent:
