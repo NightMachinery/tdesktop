@@ -72,7 +72,8 @@ with at most four strokes per chord:
   - `SPC b`: active chat (`b i` info, `b m` chat menu, `b p` pinned, `b v`
     preview, `b s` scheduled, `b d` calendar, `b u` attach files, `b w`
     wallpaper toggle, `b t` switch topic, `b T` unread topics, `b n`/`b N`
-    next/previous topic, `b l` last topic, `b c` new topic, `b h` topic list).
+    next/previous topic, `b l` last topic, `b c` new topic or bot message,
+    `b h` topic list).
   - `SPC o`: open views (`o s` Settings, `o S` Saved Messages, `o a` Archive,
     `o c` Contacts, `o p` Calls, `o d` Downloads, `o m` Main Menu, `o u` Music,
     `o l` Playlists).
@@ -97,7 +98,7 @@ with at most four strokes per chord:
     2-stroke shared media (`, v` media, `, u` music, `, f` files, `, l` links,
     `, o` voice/round, `, g` GIFs, `, q` polls), and topic commands (`, t`
     switch topic, `, T` unread topics, `, n`/`N` next/prev topic, `, b` last
-    topic, `, c` new topic, `, h` parent topic list). Also `] T`, `[ T`, `] U`
+    topic, `, c` new topic or bot message, `, h` parent topic list). Also `] T`, `[ T`, `] U`
     (next unread topic), and `g ^` (parent topic list).
   - In the chat list (`:chats`): `, p` preview, `, m` chat menu, `, a` archive,
     `, f` / `, F` next/previous folder.
@@ -245,9 +246,11 @@ on the modal status line and cheatsheet footer.
   pauses automatic loading. `SPC b T` / `, T` opens it filtered to unread
   topics, `SPC b n`/`N` (`, n`/`N`,
   `] T`/`[ T`) cycle topics, `] U` jumps to the next unread topic, `SPC b l` /
-  `, b` toggles the last viewed topic, `SPC b c` / `, c` creates a new forum
-  topic or reserves a new bot thread, and `SPC b h` / `, h` / `g ^` opens or
-  closes the parent topic list.
+  `, b` toggles the last viewed topic, and `SPC b h` / `, h` / `g ^` opens or
+  closes the parent topic list. `SPC b c`, `, c`, and the picker's `c` action
+  open the new topic or thread composer when Telegram grants permission. For
+  bots that manage their own threads, the action opens the off-topic composer
+  for a regular message. The bot decides whether to start a thread.
 - **Evil notices and notice history (`SPC h e`):** when modal keys are enabled,
   detailed Purple notices (such as settings-file reload impacts, sync-chat
   problems, archive recovery warnings, and actionable errors) open in a modal

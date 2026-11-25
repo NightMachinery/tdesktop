@@ -1133,8 +1133,24 @@ void Histories::sendCreateTopicRequest(
 		MTPInputPeer() // send_as
 	)).done([=](const MTPUpdates &result) {
 		api->applyUpdates(result, randomId);
-	}).fail([=](const MTP::Error &error) {
-		api->sendMessageFail(error, history->peer, randomId);
+	}).fail([=](const MTP::Error &error, const MTP::Response &response) {
+		_owner->unregisterMessageRandomId(randomId);
+		const auto i = _creatingTopics.find({ history->peer->id, rootId });
+		if (i == end(_creatingTopics) || i->second.empty()) {
+			if (i != end(_creatingTopics)) {
+				_creatingTopics.erase(i);
+			}
+			api->sendMessageFail(error, history->peer, randomId);
+			return;
+		}
+		auto scheduled = base::take(i->second);
+		_creatingTopics.erase(i);
+		for (const auto &entry : scheduled) {
+			_creatingTopicRequests.erase(entry.requestId);
+		}
+		for (const auto &entry : scheduled) {
+			entry.fail(error, response);
+		}
 	}).send();
 }
 

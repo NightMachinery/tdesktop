@@ -2041,3 +2041,7 @@ worker's pending database transactions. The existing playlist menu hook in
 - `boxes/language_box.cpp`: adds the **Don't Translate Chats** row in
   `LanguageBox::setupTop` via `Purple::AddExcludedTranslationChatsRow`. See
   [translation.md](translation.md).
+**`Telegram/SourceFiles/data/data_histories.cpp`**: when a provisional
+topic's creation request fails, clear its queued send IDs and deliver the
+error through the normal send failure callbacks. This covers the stock and
+Purple entry points to the provisional composer.

@@ -370,17 +370,28 @@ ordered(keys, "void Keys::showTopicPicker", "CreateTopicPickerLayer", "onRefresh
         "onCreateTopic", "guard->owner() != ctrl", "CreateTopic(ctrl, liveForum)")
 ordered(keys, "case Action::TopicCreate:", "CreateTopic(current, forum)")
 create_topic = between(keys, "void CreateTopic(", "ModalUnread::ChatBucket BucketForPeer")
-ordered(create_topic, "reserveNewBotTopic", "showSection", "HistoryView::ChatMemento",
+ordered(create_topic, "Data::IsBotUserCreatesTopics", "showPeerHistory", "return;",
+        "reserveNewBotTopic", "showSection", "HistoryView::ChatMemento",
         ".repliesRootId = topic->rootId()", "SectionShow::Way::ClearStack", "NewForumTopicBox")
 assert "->showThread(" not in create_topic
+ordered(keys, "QString TopicActionLabel", "Data::IsBotUserCreatesTopics",
+        "New bot thread", "Message bot off-topic")
+ordered(keys, "void Keys::showWhichKey", "CommandLabel(b.action, target)")
+ordered(keys, "void Keys::showPalette", "CommandLabel(cmd.action, target)")
 stock_create = read("boxes/peers/edit_forum_topic_box.cpp")
 ordered(stock_create, "const auto create = ", "showSection", "ChatMemento", "reserveCreatingId")
+histories = read("data/data_histories.cpp")
+ordered(between(histories, "void Histories::sendCreateTopicRequest", "bool Histories::isCreatingTopic"),
+        "unregisterMessageRandomId(randomId)", "base::take(i->second)", "_creatingTopics.erase(i)",
+        "_creatingTopicRequests.erase(entry.requestId)", "entry.fail(error, response)")
 stock_replies = read("window/window_session_controller.cpp")
 ordered(stock_replies, "void SessionNavigation::showRepliesForMessage", "unreadCountKnown()",
         "!history->peer->asChannel()", "return;")
 ordered(keys, "avatarSession", "avatarPeerId")
 
 keys_ui = read("purple/purple_keys_ui.cpp")
+ordered(keys_ui, "class TopicPickerLayer final", "_config.actionLabel",
+        "_topicAction->setClickedCallback", "Qt::Key_C && !mods && _topicAction", "openTopicAction()")
 ordered(keys_ui, "sends read receipts", "ModalUnread::NeedsMarkReadConfirmation", "executeMarkRead")
 ordered(keys_ui, "paintUserpic")
 ordered(keys_ui, "class TopicPickerLayer final", "QTimer::timeout", "_config.pageUpdates",

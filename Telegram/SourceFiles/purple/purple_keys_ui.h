@@ -210,7 +210,7 @@ struct TopicPickerConfig {
 	QString parentTitle;
 	bool isBot = false;
 	bool startUnreadOnly = false;
-	bool canCreate = false;
+	QString actionLabel;
 	std::vector<TopicItem> items;
 	bool hasMore = false;
 	Fn<TopicPickerSnapshot()> onRefresh;

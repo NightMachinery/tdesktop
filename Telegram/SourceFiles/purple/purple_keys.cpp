@@ -398,8 +398,8 @@ const Command kCommands[] = {
 		[] { return u"Next unread topic"_q; } },
 	{ Action::TopicLast, "topic-last", "topics", "Needs a previous topic in this forum",
 		[] { return u"Last viewed topic"_q; } },
-	{ Action::TopicCreate, "topic-create", "topics", "Needs a forum or threaded bot where you can create topics",
-		[] { return u"New topic"_q; } },
+	{ Action::TopicCreate, "topic-create", "topics", "Needs a forum where you can create topics or a threaded bot",
+		[] { return u"New topic or bot message"_q; } },
 	{ Action::TopicParent, "topic-parent", "topics", "Needs a forum group or threaded bot",
 		[] { return u"Show forum topic list"_q; } },
 	{ Action::PreviousFolder, "folder-previous", "chats", "Needs main chat list focus",
@@ -1317,18 +1317,26 @@ Data::Forum *ActiveForum(const Target &target) {
 	return nullptr;
 }
 
-bool CanCreateTopicInForum(Data::Forum *forum) {
+QString TopicActionLabel(Data::Forum *forum) {
 	if (!forum) {
-		return false;
+		return {};
+	} else if (forum->bot()) {
+		return Data::IsBotUserCreatesTopics(forum->peer())
+			? u"New bot thread"_q
+			: u"Message bot off-topic"_q;
 	}
-	return (forum->bot() != nullptr) || forum->peer()->canCreateTopics();
+	return forum->peer()->canCreateTopics() ? u"New topic"_q : QString();
 }
 
 void CreateTopic(not_null<Window::SessionController*> controller, Data::Forum *forum) {
-	if (!CanCreateTopicInForum(forum)) {
+	if (!forum) {
 		return;
 	}
 	if (forum->bot()) {
+		if (!Data::IsBotUserCreatesTopics(forum->peer())) {
+			controller->showPeerHistory(forum->history(), Window::SectionShow::Way::ClearStack);
+			return;
+		}
 		if (const auto topic = forum->reserveNewBotTopic()) {
 			// A local root has no server unread state for showThread() to use.
 			controller->showSection(
@@ -1338,9 +1346,18 @@ void CreateTopic(not_null<Window::SessionController*> controller, Data::Forum *f
 				}),
 				Window::SectionShow::Way::ClearStack);
 		}
-	} else {
+	} else if (forum->peer()->canCreateTopics()) {
 		controller->show(Box(NewForumTopicBox, controller, forum->history()));
 	}
+}
+
+QString CommandLabel(Action action, const Target &target) {
+	if (action == Action::TopicCreate) {
+		if (const auto label = TopicActionLabel(ActiveForum(target)); !label.isEmpty()) {
+			return label;
+		}
+	}
+	return FindCommand(action).label();
 }
 
 ModalUnread::ChatBucket BucketForPeer(not_null<PeerData*> peer) {
@@ -1540,7 +1557,7 @@ bool Available(Action action, const Target &target) {
 	case Action::TopicParent:
 		return ActiveForum(target) != nullptr;
 	case Action::TopicCreate:
-		return CanCreateTopicInForum(ActiveForum(target));
+		return !TopicActionLabel(ActiveForum(target)).isEmpty();
 	case Action::NoticeHistory:
 		return target.controller != nullptr
 			&& !Core::App().passcodeLocked()
@@ -2479,7 +2496,7 @@ void Keys::showTopicPicker(bool unreadOnly, const Target &target) {
 		.parentTitle = forum->peer()->name(),
 		.isBot = (forum->bot() != nullptr),
 		.startUnreadOnly = unreadOnly,
-		.canCreate = CanCreateTopicInForum(forum),
+		.actionLabel = TopicActionLabel(forum),
 		.items = std::move(initial.items),
 		.hasMore = initial.hasMore,
 		.onRefresh = [weakCtrl, weakSession, peerId, buildSnapshot]() {
@@ -2534,7 +2551,8 @@ void Keys::showTopicPicker(bool unreadOnly, const Target &target) {
 		.onCreateTopic = [guard, weakCtrl, peerId] {
 			QTimer::singleShot(0, guard.data(), [guard, weakCtrl, peerId] {
 				const auto ctrl = weakCtrl.get();
-				if (!guard || !ctrl || !Enabled() || guard->owner() != ctrl) {
+				if (!guard || !ctrl || !Enabled() || guard->owner() != ctrl
+					|| Core::App().passcodeLocked() || Purple::PrivacyScreenActive(guard->_window)) {
 					return;
 				}
 				const auto peer = ctrl->session().data().peerLoaded(peerId);
@@ -3114,7 +3132,7 @@ void Keys::showWhichKey() {
 					.keys = { keyLbl },
 					.label = (b.action == Action::UnreadBuffer)
 						? u"Unread unmuted chats"_q
-						: FindCommand(b.action).label(),
+						: CommandLabel(b.action, target),
 					.isGroup = false,
 				});
 			}
@@ -4022,7 +4040,7 @@ void Keys::showDescribeKeyResult(const Chord &chord, const Target &target) {
 	if (it != end(effective)) {
 		const auto &cmd = FindCommand(it->action);
 		data.found = true;
-		data.title = cmd.label();
+		data.title = CommandLabel(it->action, target);
 		data.commandId = QString::fromLatin1(cmd.id);
 		data.availableHere = Available(it->action, target);
 		data.keylessOnPurpose = Keymap().keyless.contains(it->action);
@@ -4078,7 +4096,7 @@ void Keys::showDescribeCommandResult(Action action, const Target &target) {
 	const auto &cmd = FindCommand(action);
 	auto data = ModalUi::DescribeData{
 		.isKeyMode = false,
-		.title = cmd.label(),
+		.title = CommandLabel(action, target),
 		.commandId = QString::fromLatin1(cmd.id),
 		.found = true,
 		.availableHere = Available(action, target),
@@ -4145,7 +4163,7 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 		items.push_back({
 			.actionId = int(cmd.action),
 			.id = QString::fromLatin1(cmd.id),
-			.label = cmd.label(),
+			.label = CommandLabel(cmd.action, target),
 			.category = QString::fromLatin1(cmd.category),
 			.unavailableReason = QString::fromLatin1(cmd.need),
 			.chords = ChordsForAction(cmd.action, effective),

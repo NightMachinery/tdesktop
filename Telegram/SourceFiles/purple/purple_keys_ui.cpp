@@ -3018,9 +3018,15 @@ public:
 		st::defaultMultiSelectSearchField,
 		Ui::InputField::Mode::SingleLine,
 		rpl::single(u"Filter topics (orderless)..."_q)))
+	, _topicAction(_config.actionLabel.isEmpty() ? nullptr
+		: Ui::CreateChild<Ui::RoundButton>(
+			this, rpl::single(_config.actionLabel + u"  (c)"_q), st::defaultLightButton))
 	, _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll)) {
 		setFocusPolicy(Qt::StrongFocus);
 		_close->setClickedCallback([=] { closeLayer(); });
+		if (_topicAction) {
+			_topicAction->setClickedCallback([=] { openTopicAction(); });
+		}
 		if (const auto s = _config.session.get()) {
 			s->downloaderTaskFinished() | rpl::on_next([this] {
 				update();
@@ -3133,7 +3139,13 @@ protected:
 			_close->move(width() - 12 - _close->width(), (kHeaderH - _close->height()) / 2);
 		}
 		_filter->setGeometry(28, kHeaderH + 6, std::max(120, width() - 56), 32);
-		_scroll->setGeometry(0, kHeaderH + kFilterH, width(), std::max(60, height() - kHeaderH - kFilterH - kFooterH));
+		auto top = kHeaderH + kFilterH;
+		if (_topicAction) {
+			const auto pad = _topicAction->height() / 4;
+			_topicAction->move((width() - _topicAction->width()) / 2, top + pad);
+			top += _topicAction->height() + 2 * pad;
+		}
+		_scroll->setGeometry(0, top, width(), std::max(60, height() - top - kFooterH));
 		if (_rows) {
 			_rows->resize(_scroll->width(), _rows->height());
 		}
@@ -3197,11 +3209,8 @@ protected:
 			refilter(/*preserveScroll=*/false, MsgId(0));
 			maybeRequestMore();
 			return;
-		} else if (key == Qt::Key_C && !mods && _config.canCreate && _config.onCreateTopic) {
-			_closing = true;
-			auto cb = std::move(_config.onCreateTopic);
-			closeLayer();
-			cb();
+		} else if (key == Qt::Key_C && !mods && _topicAction) {
+			openTopicAction();
 			return;
 		} else if (key == Qt::Key_Return || key == Qt::Key_Enter || (key == Qt::Key_O && !mods)) {
 			openRow(_selected);
@@ -3272,9 +3281,6 @@ protected:
 		p.setPen(st::windowSubTextFg);
 		const auto hint = [&] {
 			auto out = u"j/k move  ·  RET open  ·  / filter  ·  u unread"_q;
-			if (_config.canCreate) {
-				out += u"  ·  c new"_q;
-			}
 			if (_hasMore) {
 				out += _loadTimeout.isActive() ? u"  ·  loading..."_q : u"  ·  L more"_q;
 			}
@@ -3288,6 +3294,16 @@ protected:
 	}
 
 private:
+	void openTopicAction() {
+		if (_closing || !_config.onCreateTopic) {
+			return;
+		}
+		_closing = true;
+		auto callback = std::move(_config.onCreateTopic);
+		closeLayer();
+		callback();
+	}
+
 	void refreshFromSource(bool preserveScroll) {
 		if (!_config.onRefresh) {
 			return;
@@ -3430,6 +3446,7 @@ private:
 	Ui::PeerUserpicView _parentAvatar;
 	Ui::IconButton *_close = nullptr;
 	Ui::InputField *_filter = nullptr;
+	Ui::RoundButton *_topicAction = nullptr;
 	Ui::ScrollArea *_scroll = nullptr;
 	QPointer<TopicRowsWidget> _rows;
 	int _selected = 0;
