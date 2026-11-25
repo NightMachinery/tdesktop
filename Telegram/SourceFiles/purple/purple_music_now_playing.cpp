@@ -81,17 +81,19 @@ NowPlaying::NowPlaying(
 		_previous->setAccessibleName(tr::lng_shortcuts_media_previous(tr::now));
 		_play->setAccessibleName(tr::lng_keys_legend_media_play(tr::now));
 		_next->setAccessibleName(tr::lng_shortcuts_media_next(tr::now));
-		_previous->setAccessibleDescription(keys.previous.join(u' '));
-		_play->setAccessibleDescription(keys.togglePlayback.join(u' '));
-		_next->setAccessibleDescription(keys.next.join(u' '));
 		_previous->setClickedCallback(std::move(actions.previous));
 		_play->setClickedCallback(std::move(actions.toggle));
 		_next->setClickedCallback(std::move(actions.next));
 		_hints = {
-			MakeMusicKeyHint(this, keys.previous).release(),
-			MakeMusicKeyHint(this, keys.togglePlayback).release(),
-			MakeMusicKeyHint(this, keys.next).release(),
+			MakeMusicKeyHint(this, keys.previous, _previous).release(),
+			MakeMusicKeyHint(this, keys.togglePlayback, _play).release(),
+			MakeMusicKeyHint(this, keys.next, _next).release(),
 		};
+		for (const auto hint : _hints) {
+			hint->widthValue() | rpl::skip(1) | rpl::on_next([=] {
+				resizeToWidth(width());
+			}, lifetime());
+		}
 	}
 }
 

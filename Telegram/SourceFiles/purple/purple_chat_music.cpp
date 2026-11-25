@@ -23,6 +23,7 @@
 #include "purple/purple_exact_search.h"
 #include "purple/purple_keys.h"
 #include "purple/purple_music_now_playing.h"
+#include "purple/purple_music_section.h"
 #include "purple/purple_music_widgets.h"
 #include "purple/purple_playlist_player.h"
 #include "purple/purple_playlist_song_list.h"
@@ -55,11 +56,6 @@ namespace Purple {
 namespace {
 
 constexpr auto kPageSize = 100;
-#ifdef Q_OS_MAC
-constexpr auto kMusicControl = Qt::MetaModifier;
-#else
-constexpr auto kMusicControl = Qt::ControlModifier;
-#endif // Q_OS_MAC
 
 struct SharedTrack {
 	FullMsgId message;
@@ -67,12 +63,19 @@ struct SharedTrack {
 	QString searchText;
 };
 
-class ChatMusicBox final : public QObject {
+class ChatMusicBox final : public QObject, public ChatMusicKeyTarget {
 public:
 	ChatMusicBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller,
 		SparseIdsMergedSlice::Key source);
+
+	[[nodiscard]] bool ownsKeys(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> focus) const;
+	void navigate(TrackListAction action, int count) override;
+	void act(MusicTrackAction action) override;
+	void focusFilter() override;
 
 protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
@@ -114,10 +117,7 @@ private:
 	const MsgId _topic;
 	const PeerId _sublist;
 	const PeerId _migrated;
-	not_null<Ui::InputField*> _search;
-	not_null<Ui::FlatLabel*> _status;
-	not_null<PlaylistSongList*> _list;
-	QPointer<Ui::RoundButton> _more;
+	ChatMusicLayout _view;
 	rpl::variable<QString> _markSummary;
 	std::vector<SharedTrack> _tracks;
 	std::set<uint64_t> _marked;
@@ -127,8 +127,6 @@ private:
 	int _limit = kPageSize;
 	bool _loading = true;
 	bool _hasMore = false;
-	bool _pendingG = false;
-	bool _pendingLocal = false;
 	bool _tail = false;
 	bool _closed = false;
 
@@ -145,53 +143,46 @@ ChatMusicBox::ChatMusicBox(
 , _peer(source.peerId)
 , _topic(source.topicRootId)
 , _sublist(source.monoforumPeerId)
-, _migrated(source.migratedPeerId)
-, _search(box->addRow(MakeMusicFilter(box, MusicEffectiveShortcuts(true).filter)))
-, _status(box->addRow(object_ptr<Ui::FlatLabel>(
-	box, tr::lng_contacts_loading(tr::now), st::boxLabel)))
-, _list(box->addRow(object_ptr<PlaylistSongList>(
-	box,
-	std::vector<PlaylistSongListRow>(),
-	0,
-	0,
-	[=](uint64_t key) { play(key); },
-	Fn<void(std::vector<uint64_t>)>(),
-	PlaylistSongList::Mode::Library))) {
-	_search->rawTextEdit()->installEventFilter(this);
+, _migrated(source.migratedPeerId) {
+	const auto keys = MusicEffectiveShortcuts();
+	_view = AddChatMusicLayout(box, {
+		.player = MakeMusicNowPlaying(box, _session, true, keys),
+		.tiles = MusicTilesValue(),
+		.marks = _markSummary.value(),
+		.selection = {
+			.play = [=] { playMarked(); },
+			.queue = [=] { if (!_marked.empty()) queue(*_marked.begin()); },
+			.add = [=] { if (!_marked.empty()) addToPlaylist(*_marked.begin()); },
+			.forward = [=] { if (!_marked.empty()) forward(*_marked.begin()); },
+			.clear = [=] { _marked.clear(); updateMarks(); },
+		},
+		.selectView = [](bool tiles) { if (tiles != MusicTiles()) ToggleMusicTiles(); },
+		.play = [=](uint64_t key) { play(key); },
+		.loadMore = [=] {
+			if (_hasMore && !_loading && current()) {
+				_limit += kPageSize;
+				load();
+			}
+		},
+	}, keys);
+	_view.filter->rawTextEdit()->installEventFilter(this);
 	box->installEventFilter(this);
-	_search->changes() | rpl::on_next([=] { filter(); }, box->lifetime());
-	_search->submits() | rpl::on_next([=] { focusList(); }, box->lifetime());
-	_list->setViewportLimit(std::max(1, controller->content()->height() / 2));
-	_list->setKeyHandler([=](QKeyEvent *event) { return keyPress(event); });
-	_list->setSelectionActions([=](uint64_t key) { mark(key); },
+	_view.filter->changes() | rpl::on_next([=] { filter(); }, box->lifetime());
+	_view.filter->submits() | rpl::on_next([=] { focusList(); }, box->lifetime());
+	_view.tracks->setViewportLimit(std::max(1, controller->content()->height() / 2));
+	_view.tracks->setKeyHandler([=](QKeyEvent *event) { return keyPress(event); });
+	_view.tracks->setSelectionActions([=](uint64_t key) { mark(key); },
 		[=] { return playMarked(); }, [=](std::vector<uint64_t> keys) {
 			_marked.insert(keys.begin(), keys.end());
 			updateMarks();
 		});
-	_list->setArtworkSession(_session);
-	MusicTilesValue() | rpl::on_next([=](bool tiles) {
-		_list->setTiles(tiles);
-	}, box->lifetime());
-	const auto keys = MusicEffectiveShortcuts(true);
-	box->insertRow(0, MakeMusicViewControl(box, MusicTilesValue(), [](bool tiles) {
-		if (tiles != MusicTiles()) ToggleMusicTiles();
-	}, keys.view));
-	box->insertRow(0, MakeMusicNowPlaying(box, _session, true, keys));
-
-	box->addRow(MakeMusicSelectionBar(box, _markSummary.value(), {
-		.play = [=] { playMarked(); },
-		.queue = [=] { if (!_marked.empty()) queue(*_marked.begin()); },
-		.add = [=] { if (!_marked.empty()) addToPlaylist(*_marked.begin()); },
-		.forward = [=] { if (!_marked.empty()) forward(*_marked.begin()); },
-		.more = [=] { _list->showActions(); },
-		.clear = [=] { _marked.clear(); updateMarks(); },
-	}, keys));
-	_list->setContextActions([=](not_null<Ui::PopupMenu*> menu, uint64_t key) {
+	_view.tracks->setArtworkSession(_session);
+	_view.tracks->setContextActions([=](not_null<Ui::PopupMenu*> menu, uint64_t key) {
 		fillActions(menu, key);
 	});
 	box->setFocusCallback([=] {
 		if (ModalKeysEnabled()) focusList();
-		else _search->setFocusFast();
+		else focusFilter();
 	});
 	box->setCloseByEscape(false);
 	box->boxClosing() | rpl::on_next([=] {
@@ -199,19 +190,8 @@ ChatMusicBox::ChatMusicBox(
 		_viewer.destroy();
 	}, box->lifetime());
 	controller->content()->widthValue() | rpl::on_next([=](int width) {
-		box->setWidth(std::max(st::boxWidth, std::min(
-			st::purpleChatMusicWidth, width - 2 * st::purpleChatMusicMargin)));
+		box->setWidth(ChatMusicWidth(width));
 	}, box->lifetime());
-	box->setTitle(rpl::single(u"Music shared in this chat"_q));
-	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
-	box->addButton(rpl::single(u"Actions"_q), [=] { _list->showActions(); });
-	_more = box->addLeftButton(tr::lng_purple_music_more(), [=] {
-		if (_hasMore && !_loading && current()) {
-			_limit += kPageSize;
-			load();
-		}
-	});
-	_more->hide();
 	const auto player = Media::Player::instance();
 	player->updatedNotifier() | rpl::on_next([=](const Media::Player::TrackState &state) {
 		if (state.id.type() == AudioMsgId::Type::Song) updatePlayback();
@@ -316,21 +296,21 @@ void ChatMusicBox::apply(const SparseIdsMergedSlice &slice) {
 	_loading = (slice.size() < std::min(_limit, available))
 		&& !slice.skippedBefore();
 	_hasMore = !_tail && slice.skippedBefore().value_or(available - slice.size()) > 0;
-	_more->setVisible(_hasMore);
-	_more->setDisabled(_loading);
+	_view.loadMore->setVisible(_hasMore);
+	_view.loadMore->setDisabled(_loading);
 	_tracks = std::move(tracks);
 	render();
-	if (_tail) _list->navigate(TrackListAction::Last);
+	if (_tail) _view.tracks->navigate(TrackListAction::Last);
 }
 
 void ChatMusicBox::render(std::optional<Anchor> anchor) {
-	if (!anchor) anchor = Anchor{ _list->selectedDocument(), _list->scrollTop() };
+	if (!anchor) anchor = Anchor{ _view.tracks->selectedDocument(), _view.tracks->scrollTop() };
 	auto visible = std::vector<PlaylistSongListRow>();
 	for (const auto &track : _tracks) {
 		if (MatchExactSearch(_terms, track.searchText)) visible.push_back(track.row);
 	}
 	const auto empty = visible.empty();
-	_list->setRows(std::move(visible), anchor->cursor, anchor->scrollTop);
+	_view.tracks->setRows(std::move(visible), anchor->cursor, anchor->scrollTop);
 	updateMarks();
 	updatePlayback();
 	setStatus(_loading ? tr::lng_contacts_loading(tr::now)
@@ -356,40 +336,40 @@ void ChatMusicBox::updatePlayback() {
 				: MusicRowPlayback::Playing;
 		}
 	}
-	_list->setMusicPlayback(key, playback);
+	_view.tracks->setMusicPlayback(key, playback);
 }
 
 void ChatMusicBox::filter() {
-	const auto next = ExactSearchTerms(_search->getLastText());
+	const auto next = ExactSearchTerms(_view.filter->getLastText());
 	if (next == _terms) return;
 	if (_terms.empty()) {
-		_unfiltered = Anchor{ _list->selectedDocument(), _list->scrollTop() };
+		_unfiltered = Anchor{ _view.tracks->selectedDocument(), _view.tracks->scrollTop() };
 	}
 	_terms = next;
 	render(_terms.empty() ? base::take(_unfiltered) : std::nullopt);
 }
 
 void ChatMusicBox::focusList() {
-	_list->focusSelected();
+	_view.tracks->focusSelected();
 }
 
 bool ChatMusicBox::eventFilter(QObject *object, QEvent *event) {
 	if (event->type() != QEvent::KeyPress) return false;
 	const auto key = static_cast<QKeyEvent*>(event);
 	if (object == _box.get()) return keyPress(key);
-	if (object != _search->rawTextEdit()) return false;
-	const auto layout = _search->textCursor().block().layout();
+	if (object != _view.filter->rawTextEdit()) return false;
+	const auto layout = _view.filter->textCursor().block().layout();
 	if (layout && !layout->preeditAreaText().isEmpty()) return false;
 	if (key->key() == Qt::Key_Escape && !key->modifiers()) {
-		_search->setText(QString());
+		_view.filter->setText(QString());
 		filter();
 		focusList();
 	} else if (key->key() == Qt::Key_Down || key->key() == Qt::Key_Up) {
 		const auto down = key->key() == Qt::Key_Down;
 		if (key->modifiers() == Qt::AltModifier) {
-			_list->navigate(down ? TrackListAction::HalfDown : TrackListAction::HalfUp);
+			_view.tracks->navigate(down ? TrackListAction::HalfDown : TrackListAction::HalfUp);
 		} else if (!key->modifiers()) {
-			_list->navigate(down ? TrackListAction::Down : TrackListAction::Up);
+			_view.tracks->navigate(down ? TrackListAction::Down : TrackListAction::Up);
 		} else {
 			return false;
 		}
@@ -400,14 +380,11 @@ bool ChatMusicBox::eventFilter(QObject *object, QEvent *event) {
 }
 
 bool ChatMusicBox::keyPress(QKeyEvent *event) {
-	const auto key = ModalPhysicalKey(*event);
-	const auto mods = event->modifiers() & ~Qt::KeypadModifier;
-	if (key == Qt::Key_Escape && !mods) {
-		if (std::exchange(_pendingG, false) || std::exchange(_pendingLocal, false)) {
-			return true;
-		}
-		if (_list->cancelRangeMark()) return true;
-		else if (_marked.empty()) _box->closeBox();
+	if (event->modifiers() & ~Qt::KeypadModifier) return false;
+	const auto key = event->key();
+	if (key == Qt::Key_Escape) {
+		if (_view.tracks->cancelRangeMark()) return true;
+		if (_marked.empty()) _box->closeBox();
 		else {
 			_marked.clear();
 			updateMarks();
@@ -415,87 +392,46 @@ bool ChatMusicBox::keyPress(QKeyEvent *event) {
 		return true;
 	}
 	if (key == Qt::Key_Home || key == Qt::Key_End) {
-		const auto tail = key == Qt::Key_End;
+		navigate(key == Qt::Key_Home ? TrackListAction::First : TrackListAction::Last, 1);
+		return true;
+	}
+	return false;
+}
+
+bool ChatMusicBox::ownsKeys(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> focus) const {
+	return controller.get() == _controller.get() && current()
+		&& (focus == _box.get() || _view.tracks->isAncestorOf(focus));
+}
+
+void ChatMusicBox::navigate(TrackListAction action, int count) {
+	if (action == TrackListAction::First || action == TrackListAction::Last) {
+		const auto tail = action == TrackListAction::Last;
 		if (_tail != tail && (_hasMore || _tail)) {
 			_tail = tail;
 			_limit = kPageSize;
 			load();
-			return true;
+			return;
 		}
 	}
-	if (!ModalKeysEnabled()) return false;
-	const auto shift = (mods == Qt::ShiftModifier);
-	const auto player = Media::Player::instance();
-	const auto song = player->current(AudioMsgId::Type::Song).audio();
-	const auto ownSong = song && &song->session() == _session.get() && current();
-	if ((shift || !mods) && key == Qt::Key_N) {
-		if (AllowModalLayerKey(*event, _box) && ownSong) {
-			if (shift) player->previous(AudioMsgId::Type::Song);
-			else player->next(AudioMsgId::Type::Song);
-		}
-		_pendingLocal = false;
-		return true;
+	_view.tracks->navigate(action, count);
+}
+
+void ChatMusicBox::act(MusicTrackAction action) {
+	const auto track = _view.tracks->selectedDocument();
+	switch (action) {
+	case MusicTrackAction::Forward: forward(track); break;
+	case MusicTrackAction::GoTo: goTo(track); break;
+	case MusicTrackAction::AddToPlaylist: addToPlaylist(track); break;
+	case MusicTrackAction::Queue: queue(track); break;
+	case MusicTrackAction::CopyMessageLink: copyLink(track); break;
+	case MusicTrackAction::Menu: _view.tracks->showActions(); break;
 	}
-	if (_pendingLocal) {
-		_pendingLocal = false;
-		if (!AllowModalLayerKey(*event, _box)) return true;
-		const auto current = _list->selectedDocument();
-		if (!mods && key == Qt::Key_T) ToggleMusicTiles();
-		else if (!mods && key == Qt::Key_P && ownSong) {
-			player->playPauseCancelClicked(AudioMsgId::Type::Song);
-		} else if (!mods && key == Qt::Key_Period) _list->showActions();
-		else if (!mods && key == Qt::Key_G) goTo(current);
-		else if (!mods && key == Qt::Key_A) addToPlaylist(current);
-		else if (!mods && key == Qt::Key_Q) queue(current);
-		else if (!mods && key == Qt::Key_Y) copyLink(current);
-		else if (shift && key == Qt::Key_F) forward(current);
-		return true;
-	}
-	if (!mods && key == Qt::Key_Comma) {
-		if (AllowModalLayerKey(*event, _box)) _pendingLocal = true;
-		return true;
-	}
-	const auto motion = (!mods && key == Qt::Key_J) ? TrackListAction::Down
-		: (!mods && key == Qt::Key_K) ? TrackListAction::Up
-		: (!mods && key == Qt::Key_H && MusicTiles()) ? TrackListAction::Left
-		: (!mods && key == Qt::Key_L && MusicTiles()) ? TrackListAction::Right
-		: (mods == kMusicControl && key == Qt::Key_D) ? TrackListAction::HalfDown
-		: (mods == kMusicControl && key == Qt::Key_U) ? TrackListAction::HalfUp
-		: std::optional<TrackListAction>();
-	if (motion) {
-		if (AllowModalLayerKey(*event, _box, true)) {
-			_pendingG = false;
-			_list->navigate(*motion);
-		}
-		return true;
-	}
-	if ((!mods && (key == Qt::Key_G || key == Qt::Key_M || key == Qt::Key_Slash))
-		|| ((shift || !mods) && key == Qt::Key_V) || (shift && key == Qt::Key_G)) {
-		if (!AllowModalLayerKey(*event, _box)) return true;
-		if (key == Qt::Key_G && !shift && !_pendingG) {
-			_pendingG = true;
-		} else {
-			_pendingG = false;
-			if (key == Qt::Key_G) {
-				if (_tail != shift && (_hasMore || _tail)) {
-					_tail = shift;
-					_limit = kPageSize;
-					load();
-				} else {
-					_list->navigate(shift ? TrackListAction::Last : TrackListAction::First);
-				}
-			} else if (key == Qt::Key_M) {
-				_list->navigate(TrackListAction::Mark);
-			} else if (key == Qt::Key_V) {
-				_list->navigate(shift ? TrackListAction::MarkPage : TrackListAction::RangeMark);
-			} else {
-				_search->setFocusFast();
-			}
-		}
-		return true;
-	}
-	_pendingG = false;
-	return false;
+}
+
+void ChatMusicBox::focusFilter() {
+	_view.filter->setFocusFast();
 }
 
 void ChatMusicBox::play(uint64_t key) {
@@ -651,7 +587,7 @@ void ChatMusicBox::mark(uint64_t key) {
 }
 
 void ChatMusicBox::updateMarks() {
-	_list->setChosenSongs(_marked);
+	_view.tracks->setChosenSongs(_marked);
 	const auto hidden = _marked.size() - std::ranges::count_if(_tracks, [=](const SharedTrack &track) {
 		return _marked.contains(track.row.documentId) && MatchExactSearch(_terms, track.searchText);
 	});
@@ -661,11 +597,26 @@ void ChatMusicBox::updateMarks() {
 }
 
 void ChatMusicBox::setStatus(const QString &text) {
-	_status->setText(text);
-	_status->setVisible(!text.isEmpty());
+	_view.status->setText(text);
+	_view.status->setVisible(!text.isEmpty());
 }
 
 } // namespace
+
+ChatMusicKeyTarget *FindChatMusicKeyTarget(
+		not_null<Window::SessionController*> controller,
+		not_null<QWidget*> focus) {
+	for (auto widget = focus.get(); widget; widget = widget->parentWidget()) {
+		if (const auto box = dynamic_cast<Ui::GenericBox*>(widget)) {
+			for (const auto child : box->children()) {
+				const auto music = dynamic_cast<ChatMusicBox*>(child);
+				if (music && music->ownsKeys(controller, focus)) return music;
+			}
+			return nullptr;
+		}
+	}
+	return nullptr;
+}
 
 void ShowChatMusicBox(
 	not_null<Window::SessionController*> controller,

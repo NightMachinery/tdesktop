@@ -166,7 +166,8 @@ assert "SubtitleMatchSpans" in keys_ui
 
 # Verify Normal-mode non-leakage guard: printable, Option/Alt text, Return/Enter, Backspace/Delete return Capture or Ignore, never Pass.
 classify = between(keys, "KeyUse Keys::classify", "bool Keys::handle")
-ordered(classify, "if (!_normal)", "return KeyUse::Pass;",
+ordered(classify, "const auto normal = _normal || target.musicDialog",
+        "if (!normal)", "return KeyUse::Pass;",
         "Qt::AltModifier", "!event.text().isEmpty()",
         "Qt::Key_Return", "Qt::Key_Enter", "KeyUse::Ignore", "KeyUse::Pass")
 
@@ -239,8 +240,9 @@ ordered(stroke, "_frozenEffective = EffectiveBindings", "IsExactLocalleader(_pre
         "KeyRepeat::CanArm", "clearPrefix()", "if (inspect)", "showDescribeKeyResult",
         "CommandAvailable(action, target)", "_motion.start", "dispatch(action, target, count)")
 repeat_path = between(keys, "void Keys::repeat", "bool Keys::layerKey")
-ordered(repeat_path, "Enabled()", "_normal", "_preeditInput", "_prefix.empty()", "_count",
-        "currentTarget(receiver)", "Available(*action, target)", "_motion.next", "dispatch(*action, target, 1)")
+ordered(repeat_path, "Enabled()", "_preeditInput", "_prefix.empty()", "_count",
+        "currentTarget(receiver)", "_normal || target.musicDialog",
+        "Available(*action, target)", "_motion.next", "dispatch(*action, target, 1)")
 ordered(keys, "QEvent::InputMethodQuery", "watched == _normalComposer",
         "Enabled() && _normal && owner()", "setValue(Qt::ImEnabled, false)")
 ordered(keys, "void Keys::clearPrefix", "_motion.cancel(keepChatNavigation)", "_layerMotion.cancel()")
@@ -427,6 +429,22 @@ for action, key in (
     ("TopicLast", "b"), ("TopicCreate", "c"), ("TopicParent", "h"),
 ):
     bound(action, key, chat_body)
+
+music_target = between(keys, "Target Keys::currentTarget", "QWidget *Keys::windowFocusWidget")
+ordered(music_target, "isLayerShown()", "FindChatMusicKeyTarget(current, focus)", "MapKind::Music")
+music_dispatch = between(keys, "void Keys::dispatch", "using Native =")
+ordered(music_dispatch, "MusicAction(action)", "dialog->act(*trackAction)",
+        "MusicNavigation(action)", "dialog->navigate(*navigation, repeat)", "dialog->focusFilter()")
+music_defaults = between(keys, "std::vector<EffectiveBinding> EffectiveBindings",
+                         "bool IsLocalleaderPrefix")
+ordered(music_defaults, "km.localleaders", "b.map == MapKind::Normal",
+        "km.unboundNormal.contains(keys)", "StartsWith(binding.keys, keys)")
+music_caps = between(keys, "MusicShortcutHints MusicEffectiveShortcuts()", "bool ModalKeysInNormal")
+ordered(music_caps, "KeymapChanges.events()", "EnabledChanges.events()",
+        "ChordsForAction(*action, EffectiveBindings(true, MapKind::Music))")
+chat_music = read("purple/purple_chat_music.cpp")
+assert "_pendingG" not in chat_music and "_pendingLocal" not in chat_music
+ordered(chat_music, "MusicEffectiveShortcuts()", "AddChatMusicLayout", "MakeMusicNowPlaying")
 
 # Phase 2 routes: unread status counts, avatars, iBuffer read-receipt confirm,
 # real fullscreen Zen mode with transient status bar, app-wide privacy screen, and topics.

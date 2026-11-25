@@ -28,7 +28,7 @@ class SectionBuilder;
 namespace Purple {
 
 struct MusicShortcutHints;
-[[nodiscard]] MusicShortcutHints MusicEffectiveShortcuts(bool chat);
+[[nodiscard]] MusicShortcutHints MusicEffectiveShortcuts();
 
 [[nodiscard]] bool HandleModalKeys(QObject *receiver, QEvent *event);
 [[nodiscard]] int ModalPhysicalKey(const QKeyEvent &event);

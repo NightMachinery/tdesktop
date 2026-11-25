@@ -104,5 +104,6 @@ tracks. **Load more tracks** expands the history and keeps the filter applied.
 Use the arrows or `j` and `k` to move the cursor, and Alt+Up or Alt+Down to move
 by half a page. Press Escape to close the filter, then Escape to close the
 dialog. The **Actions** button or a right-click offers play, forward, go to
-message, add to playlist, and copy message link. The library's **More** menu and
-localleader bindings expose the same track actions.
+message, add to playlist, and copy message link. The dialog and library share
+the now-playing card and effective Music keymap. Changes to `keys.edn` update
+the chords and their labels on both surfaces.

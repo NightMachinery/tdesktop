@@ -300,7 +300,7 @@ MusicSection::MusicSection(
 	not_null<Window::SessionController*> controller)
 : Window::SectionWidget(parent, controller)
 , _content(Ui::CreateChild<Ui::VerticalLayout>(this))
-, _search(_content->add(MakeMusicFilter(_content, MusicEffectiveShortcuts(false).filter),
+, _search(_content->add(MakeMusicFilter(_content, MusicEffectiveShortcuts().filter),
 	st::purpleMusicSearchMargin))
 , _status(_content->add(object_ptr<Ui::SlideWrap<Ui::FlatLabel>>(
 	_content,
@@ -316,7 +316,7 @@ MusicSection::MusicSection(
 , _connectionTimer([=] { pollConnection(); })
 , _scanTimer([=] { scan(); }) {
 	setFocusPolicy(Qt::StrongFocus);
-	const auto keys = MusicEffectiveShortcuts(false);
+	const auto keys = MusicEffectiveShortcuts();
 	_content->insert(0, MakeMusicHeader(
 		_content,
 		keys.playlists,

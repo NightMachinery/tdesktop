@@ -113,7 +113,7 @@ MusicSelectionBar::MusicSelectionBar(
 		const MusicShortcutHints &shortcuts)
 : Ui::RpWidget(parent)
 , _summary(Ui::CreateChild<Ui::FlatLabel>(this, QString(), st::boxLabel)) {
-	const auto add = [&](rpl::producer<QString> text, const QStringList &keys,
+	const auto add = [&](rpl::producer<QString> text, const MusicKeyHint &keys,
 			Fn<void()> callback) {
 		const auto action = MakeMusicActionButton(
 			this, std::move(text), keys, std::move(callback)).release();
