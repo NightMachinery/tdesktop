@@ -7,6 +7,7 @@
 #include "purple/purple_archive_sql_maintenance.h"
 #include "purple/purple_archive_sqlite.h"
 #include "purple/purple_archive_v2_schema.h"
+#include "purple/purple_archive_v2_writer.h"
 #include "purple/purple_desktop_archive_store.h"
 #include "purple/purple_sync_json.h"
 #include "tests/archive_test_support.h"
@@ -16,10 +17,13 @@
 #include <QtCore/QDirIterator>
 #include <QtCore/QFile>
 #include <QtCore/QLockFile>
+#include <QtCore/QProcess>
 #include <QtCore/QTemporaryDir>
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <cstdlib>
+#include <future>
 #include <set>
 #include <thread>
 
@@ -2476,11 +2480,11 @@ void ArchiveV2Schema() {
 		{u"INSERT INTO versions VALUES(x'01',3,x'A3',25,x'A0',x'AA')"_q},
 		{u"INSERT INTO blobs VALUES(x'04',1000,x'FE')"_q},
 		{u"INSERT INTO blob_parts VALUES(x'04',0,x'FD')"_q},
-		{u"INSERT INTO media VALUES(x'01',1,0,x'50',1,1,1,0,x'FC',x'04')"_q},
-		{u"INSERT INTO media VALUES(x'01',3,0,x'50',1,0,1,0,x'FC',x'04')"_q},
+		{u"INSERT INTO media VALUES(x'01',1,0,x'50',1,1,1,0,x'FC',x'04',x'FA')"_q},
+		{u"INSERT INTO media VALUES(x'01',3,0,x'50',1,0,1,0,x'FC',x'04',x'FA')"_q},
 	}));
 	CHECK(!apply({ {u"INSERT INTO versions VALUES(x'01',4,x'A3',25,x'A0',x'AA')"_q} }));
-	CHECK(!apply({ {u"INSERT INTO media VALUES(x'01',4,0,x'50',1,0,1,0,x'FC',x'04')"_q} }));
+	CHECK(!apply({ {u"INSERT INTO media VALUES(x'01',4,0,x'50',1,0,1,0,x'FC',x'04',x'FA')"_q} }));
 	CHECK(!apply({ {u"INSERT INTO meta VALUES(1,x'01',x'02')"_q} }));
 	CHECK(scalar(u"SELECT group_concat(seq) FROM (SELECT seq FROM versions ORDER BY seq)"_q)
 		== ArchiveSqlValue(u"1,2,3"_q));
@@ -2488,7 +2492,7 @@ void ArchiveV2Schema() {
 		"('messages_chat','messages_status','messages_lookup','media_blob')"_q) == ArchiveSqlValue(int64(4)));
 	CHECK(apply({ {u"DELETE FROM versions WHERE seq=1"_q} }));
 	CHECK(scalar(u"SELECT count(*) FROM blobs"_q) == ArchiveSqlValue(int64(1)));
-	CHECK(apply({ {u"UPDATE media SET blob_key=NULL WHERE seq=3"_q} }));
+	CHECK(apply({ {u"UPDATE media SET blob_key=NULL,sealed_blob_ref=NULL WHERE seq=3"_q} }));
 	CHECK(scalar(u"SELECT count(*) FROM blobs"_q) == ArchiveSqlValue(int64(0)));
 	CHECK(scalar(u"SELECT count(*) FROM blob_parts"_q) == ArchiveSqlValue(int64(0)));
 	CHECK(apply({ {u"DELETE FROM messages WHERE message_key=x'01'"_q} }));
@@ -2497,11 +2501,19 @@ void ArchiveV2Schema() {
 	CHECK(db.Close());
 }
 
+#include "test_archive_v2_writer.inc"
+
 }
 
 int main(int argc, char** argv) {
 	std::setvbuf(stdout, nullptr, _IOLBF, 0);
 	const auto application = QCoreApplication(argc, argv);
+	if (argc == 5 && QByteArray(argv[1]) == "archive-v2-crash-fixture") {
+		const auto phase = QByteArray(argv[4]).toInt();
+		if (phase < 0 || phase > int(Purple::ArchiveV2::Phase::AfterUnlink)) return 2;
+		return V2Fixtures::CrashChild(QString::fromUtf8(argv[2]), QString::fromUtf8(argv[3]),
+			Purple::ArchiveV2::Phase(phase));
+	}
 	if (argc > 1 && QByteArray(argv[1]) == "observation-upgrade-only") {
 		ObservationUpgradeOnOpen(false, false);
 		ObservationUpgradeOnOpen(true, false);
@@ -2525,6 +2537,11 @@ int main(int argc, char** argv) {
 		return Failures ? 1 : 0;
 	}
 	ArchiveV2Schema();
+	V2Fixtures::CrashCuts();
+	V2Fixtures::KeysAndIsolation();
+	V2Fixtures::LogoutAndOwnership();
+	V2Fixtures::CorruptStoreRefuses();
+	V2Fixtures::QueueCancellation();
 	LegacyProfileBinding();
 	KeySetMigrationAndRebind();
 	ExplicitDiscardRecovery();

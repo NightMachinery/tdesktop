@@ -23,6 +23,10 @@ DesktopArchiveSqlResult Failure(int code, QString phase) {
 
 }
 
+bool DesktopArchiveSqlResult::diskFull() const {
+	return (code & 255) == SQLITE_FULL;
+}
+
 void SetArchiveSqliteFailureSink(void (*sink)(int, QStringView)) {
 	FailureSink.store(sink);
 }
@@ -308,6 +312,32 @@ DesktopArchiveSqlResult DesktopArchiveSqlite::Execute(const ArchiveSqlProgram &p
 	auto result = DesktopArchiveSqlResult();
 	result.ok = result.committed
 		= AcknowledgeArchiveSqlCommit(true, sqlite3_get_autocommit(_impl->db) != 0);
+	return result;
+}
+
+DesktopArchiveSqlResult DesktopArchiveSqlite::ExecuteV2(
+		const std::function<bool(const Write &)> &body, const std::function<bool()> &beforeCommit) {
+	if (!body || !beforeCommit || !_impl->Current() || !_impl->configured || !sqlite3_get_autocommit(_impl->db)) {
+		return Failure(SQLITE_MISUSE, u"transaction-shape"_q);
+	}
+	auto result = _impl->Run({ u"BEGIN IMMEDIATE"_q }, false);
+	if (!result.ok) return result;
+	const auto rollback = gsl::finally([&] {
+		if (!sqlite3_get_autocommit(_impl->db) && !_impl->Run({ u"ROLLBACK"_q }, false).ok) {
+			_impl->poisoned = true;
+		}
+	});
+	const auto put = [&](const ArchiveSqlStatement &statement) {
+		if (result.ok) result = _impl->Run(statement, false);
+		return result.ok;
+	};
+	if (!body(put) || !result.ok) {
+		return result.ok ? Failure(SQLITE_INTERRUPT, u"transaction-cancelled"_q) : result;
+	}
+	if (!beforeCommit()) return Failure(SQLITE_INTERRUPT, u"commit-authority"_q);
+	if (_impl->Fail(u"commit"_q)) return Failure(SQLITE_IOERR, u"commit"_q);
+	result = _impl->Run({ u"COMMIT"_q }, false);
+	result.committed = result.ok && sqlite3_get_autocommit(_impl->db);
 	return result;
 }
 

@@ -35,7 +35,8 @@ ArchiveSqlProgram Schema() {
 			media_key BLOB NOT NULL, kind INTEGER NOT NULL,
 			timed INTEGER NOT NULL CHECK(timed IN (0,1)),
 			state INTEGER NOT NULL, reason INTEGER NOT NULL,
-			sealed_descriptor BLOB NOT NULL, blob_key BLOB REFERENCES blobs,
+			sealed_descriptor BLOB NOT NULL, blob_key BLOB REFERENCES blobs, sealed_blob_ref BLOB,
+			CHECK((blob_key IS NULL) = (sealed_blob_ref IS NULL)),
 			PRIMARY KEY(message_key, seq, ordinal),
 			FOREIGN KEY(message_key, seq) REFERENCES versions ON DELETE CASCADE
 		) STRICT)sql"_q },

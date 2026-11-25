@@ -22,6 +22,22 @@ effective value and where it comes from. The parser warns and uses `on_open`
 for `on_arrival` until the two-account receipt check is qualified.
 Only a chat's own account file may opt it in with `ordinary_on_arrival = true`.
 
+### Encryption and reset
+
+The pre-cutover writer fixtures supply an isolated profile and account slot,
+an unlocked profile key and a per-login secret. The protected pointer holds
+a wrapped random data key and authenticates the active generation and pending
+retirements. Separate derived keys seal records and generate lookup tokens.
+SQLite receives ciphertext for message data, descriptors and blob parts.
+An authenticated reference binds a saved copy to its specific version and media row.
+
+Reset publishes a fresh generation under the account lock. Logout publishes
+revocation without opening a replacement. Both retire only the former
+directory identity recorded by the authenticated pointer. Recovery can finish
+that cleanup using the profile key without reopening the old database or
+unwrapping its former login key. The worker keeps live startup and logout
+unwired until cutover.
+
 ## Stream retirement wakeups
 
 Retirement sets the cleanup predicate and notifies under the worker wait mutex.

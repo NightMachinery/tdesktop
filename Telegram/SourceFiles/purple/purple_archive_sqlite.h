@@ -12,6 +12,7 @@ struct DesktopArchiveSqlResult {
 	bool committed = false;
 	int code = 0;
 	QString failure;
+	[[nodiscard]] bool diskFull() const;
 	std::vector<std::vector<ArchiveSqlValue>> rows;
 };
 
@@ -29,6 +30,9 @@ class DesktopArchiveSqlite final {
 	[[nodiscard]] DesktopArchiveSqlResult Read(const ArchiveSqlStatement &statement);
 	[[nodiscard]] DesktopArchiveSqlResult Execute(const ArchiveSqlProgram &program,
 		std::function<bool()> beforeCommit = {});
+	using Write = std::function<bool(const ArchiveSqlStatement &)>;
+	[[nodiscard]] DesktopArchiveSqlResult ExecuteV2(
+		const std::function<bool(const Write &)> &body, const std::function<bool()> &beforeCommit);
 	[[nodiscard]] bool BeginRead();
 	[[nodiscard]] bool EndRead();
 	[[nodiscard]] bool Close();

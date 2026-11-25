@@ -61,6 +61,11 @@ PRIVATE
     purple/purple_archive_sqlite.h
     purple/purple_archive_v2_schema.cpp
     purple/purple_archive_v2_schema.h
+    purple/purple_archive_v2_storage.cpp
+    purple/purple_archive_v2_store.cpp
+    purple/purple_archive_v2_store.h
+    purple/purple_archive_v2_writer.cpp
+    purple/purple_archive_v2_writer.h
     purple/purple_archive_deleted_box.cpp
     purple/purple_archive_deleted_box.h
     purple/purple_archive_menu.cpp
