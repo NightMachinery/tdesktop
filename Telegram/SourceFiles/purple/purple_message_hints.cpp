@@ -1,4 +1,5 @@
 #include "purple/purple_message_hints.h"
+#include "purple/purple_message_hint_placement.h"
 
 #include "base/unixtime.h"
 #include "config.h"
@@ -206,14 +207,10 @@ protected:
 				continue;
 			}
 			const auto anchor = entry.rect.translated(-geometry().topLeft());
-			const auto size = LabelSize(entry.label);
-			const auto x = style::RightToLeft()
-				? anchor.right() + 1 - size.width()
-				: anchor.x();
-			const auto box = QRect(
-				QPoint(std::clamp(x, 0, std::max(width() - size.width(), 0)),
-					std::clamp(anchor.y(), 0, std::max(height() - size.height(), 0))),
-				size);
+			const auto bubble = entry.bubbleRect.translated(-geometry().topLeft());
+			const auto box = MessageHintBadgeRect(
+				bubble, anchor.y(), LabelSize(entry.label), rect(),
+				st::lineWidth, style::RightToLeft());
 			const auto placed = entry.bodyLink
 				? PlaceLinkBadge(box, this->size(), badges)
 				: box;
@@ -477,6 +474,7 @@ std::vector<MessageHints::Entry> MessageHints::snapshot() const {
 						.id = element->data()->fullId(),
 						.element = element,
 						.rect = glyph,
+						.bubbleRect = rect,
 						.bodyLink = BodyLink{
 							.owner = owner,
 							.itemPoint = hit.rect.center(),
@@ -492,6 +490,7 @@ std::vector<MessageHints::Entry> MessageHints::snapshot() const {
 			.id = element->data()->fullId(),
 			.element = element,
 			.rect = rect,
+			.bubbleRect = rect,
 			.group = std::move(group),
 		});
 		return true;

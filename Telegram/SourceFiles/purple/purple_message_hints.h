@@ -73,6 +73,7 @@ private:
 		FullMsgId id;
 		const HistoryView::Element *element = nullptr;
 		QRect rect;
+		QRect bubbleRect;
 		std::vector<FullMsgId> group;
 		QString label;
 		std::optional<BodyLink> bodyLink;
