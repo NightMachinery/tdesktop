@@ -425,6 +425,11 @@ private:
 			_toast->deleteLater();
 			_toast.clear();
 			schedule();
+		} else if (type == QEvent::FocusIn) {
+			const auto widget = qobject_cast<QWidget*>(object);
+			if (widget && dynamic_cast<::MainWindow*>(widget->window())) {
+				schedule();
+			}
 		} else if (type == QEvent::Show || type == QEvent::WindowActivate
 			|| type == QEvent::WindowStateChange) {
 			if (const auto window = dynamic_cast<::MainWindow*>(object)) {
@@ -534,15 +539,12 @@ void SubmitNotice(
 	const auto &accountKey = record.accountKey;
 	const auto window = ResolveEligibleMainWindow(origin, accountKey);
 	const auto ctx = ModalDeliveryContext(window);
-	const auto route = ModalNotices::DecideDelivery(
-		record.kind,
-		record.background,
-		record.persistent,
-		ctx);
-	const auto enqueue = !window
-		|| !CanPresentNotice(window, accountKey)
-		|| Store().hasPendingKey(record)
-		|| route == DeliveryRoute::QueueDialogWithCue;
+	const auto [route, id, enqueue] = Store().submit(
+		record,
+		ctx,
+		CanPresentNotice(window, accountKey),
+		GuardDeferredFallback(origin, accountKey, base::duplicate(fallback)),
+		crl::now());
 	if (!enqueue && route == DeliveryRoute::StockToast) {
 		if (fallback && (!origin || &window->controller() == origin)) {
 			fallback();
@@ -551,14 +553,9 @@ void SubmitNotice(
 			window->controller().showToast(record.summary);
 		}
 	}
-	if (!ctx.modalEnabled && !enqueue) {
+	if (!id) {
 		return;
 	}
-	const auto id = Store().record(
-		record,
-		enqueue,
-		enqueue ? GuardDeferredFallback(origin, accountKey, std::move(fallback)) : Fn<void()>(),
-		crl::now());
 	if (action) {
 		Actions()[id] = StoredAction{ accountKey, std::move(*action) };
 	} else {

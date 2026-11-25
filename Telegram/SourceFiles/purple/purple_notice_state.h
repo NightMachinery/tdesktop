@@ -245,8 +245,30 @@ struct PendingDelivery {
 	DeliveryRoute route = DeliveryRoute::StockToast;
 };
 
+struct NoticeSubmission {
+	DeliveryRoute route = DeliveryRoute::StockToast;
+	uint64_t id = 0;
+	bool queued = false;
+};
+
 class AccountNoticeStore final {
 public:
+	[[nodiscard]] NoticeSubmission submit(
+			const NoticeRecord &rec,
+			const DeliveryContext &ctx,
+			bool canPresent,
+			std::function<void()> fallback,
+			qint64 now) {
+		const auto route = DecideDelivery(rec.kind, rec.background, rec.persistent, ctx);
+		const auto queued = !canPresent || hasPendingKey(rec)
+			|| route == DeliveryRoute::QueueDialogWithCue
+			|| route == DeliveryRoute::QueueSilentUntilAvailable;
+		const auto id = (queued || ctx.modalEnabled)
+			? record(rec, queued, queued ? std::move(fallback) : std::function<void()>(), now)
+			: uint64_t(0);
+		return { route, id, queued };
+	}
+
 	uint64_t record(
 			NoticeRecord rec,
 			bool enqueuePending,

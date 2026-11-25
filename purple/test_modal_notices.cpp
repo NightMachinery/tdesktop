@@ -21,6 +21,28 @@ void Check(bool ok, const std::string &name) {
 } // namespace
 
 int main() {
+	for (const auto modal : { true, false }) {
+		auto store = AccountNoticeStore();
+		auto context = DeliveryContext{ .modalEnabled = modal, .privacyScreenActive = true };
+		const auto notice = NoticeRecord{
+			.accountKey = QStringLiteral("fixture"),
+			.summary = QStringLiteral("covered fixture"),
+		};
+		const auto submitted = store.submit(notice, context, false, {}, 1000);
+		Check(submitted.queued && submitted.id && store.pendingCount(notice.accountKey) == 1,
+			"router retains submission while covered");
+		Check(!store.takeNextPending(notice.accountKey, context), "router keeps cover silent");
+		context.privacyScreenActive = false;
+		context.canInterruptWindow = true;
+		context.statusBarVisible = true;
+		Check(!store.takeNextPending(QStringLiteral("another"), context), "wrong account cannot take queued notice");
+		const auto delivered = store.takeNextPending(notice.accountKey, context);
+		Check(delivered && delivered->notice.record.id == submitted.id
+			&& delivered->route == (modal ? DeliveryRoute::OpenDialogNow : DeliveryRoute::StockToast),
+			"router delivers retained record after uncovering");
+		Check(!store.takeNextPending(notice.accountKey, context), "retained record is delivered once");
+	}
+
 	// 1. Modal keys off uses stock toasts when the window is available.
 	{
 		DeliveryContext ctx;

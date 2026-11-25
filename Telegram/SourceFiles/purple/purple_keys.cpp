@@ -1817,6 +1817,7 @@ Keys::Keys(not_null<MainWindow*> window)
 		// Stay in Normal mode across eligible surfaces; reflect Insert if focus moved to an input outside Normal.
 		if (now && now->window() == _window) {
 			refreshStatusBar();
+			schedulePendingNoticeFlush();
 		}
 	});
 	QObject::connect(qGuiApp, &QGuiApplication::applicationStateChanged,
@@ -1838,6 +1839,7 @@ Keys::Keys(not_null<MainWindow*> window)
 	};
 
 	Core::App().passcodeLockValue() | rpl::on_next([=](bool locked) {
+		_held.clear();
 		if (locked) {
 			if (_zenMode) {
 				setZenMode(false);
@@ -1853,6 +1855,7 @@ Keys::Keys(not_null<MainWindow*> window)
 	}, _lifetime);
 
 	Purple::PrivacyScreenChanges() | rpl::on_next([=](bool active) {
+		_held.clear();
 		if (active) {
 			closeAllNoticeLayers();
 		}

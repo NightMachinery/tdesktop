@@ -84,8 +84,9 @@ For notice routing on a disposable Desktop fixture, configure with
 `-DPURPLE_BUILD_NOTICE_TEST_PROBES=ON` and launch the isolated test bundle
 with `PURPLE_TEST_NOTICE_PROBES=1`. In the active fixture account window,
 `Ctrl+Shift+F9` submits a dialog notice and `Ctrl+Shift+F10` submits an
-acknowledgement. They also submit while the window is passcode-locked, under
-the privacy cover, or with modal keys off. The stock fallback appends
+acknowledgement, including while passcode-locked or with modal keys off.
+To test the privacy cover, add Alt (Option on macOS) to either shortcut,
+then activate the cover before the probe fires six seconds later. The stock fallback appends
 “(stock toast)” to its text. These probes call the in-memory notice router
 directly and perform no settings writes or sync. The build option defaults
 to off and the probe is omitted in the CMake Release configuration.

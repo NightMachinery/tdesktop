@@ -509,7 +509,15 @@ assert re.search(r"option\(PURPLE_BUILD_NOTICE_TEST_PROBES[^)]*OFF\)", purple_cm
 assert "$<$<NOT:$<CONFIG:Release>>:PURPLE_BUILD_NOTICE_TEST_PROBES>" in purple_cmake
 ordered(keys, "bool Keys::eventFilter", "Test::TryPurpleNoticeProbe(_window, watched, event)")
 ordered(notice_probe, "PURPLE_TEST_NOTICE_PROBES", "QApplication::activeWindow() != window",
-        "key->isAutoRepeat()", "controller.maybeSession()", "ShowPurpleNotice", "ShowPurpleAck")
+        "key->isAutoRepeat()", "controller.maybeSession()", "QTimer::singleShot(6000",
+        "live.maybeSession() == session", "SubmitProbe(live, session, dialog, true)")
+ordered(notice_probe, "void SubmitProbe", "ShowPurpleNotice", "ShowPurpleAck")
+ordered(notices_cpp, "class PendingNoticeDelivery", "QEvent::FocusIn", "schedule()", "void flush()")
+ordered(notices_cpp, "void SubmitNotice", "Store().submit", "CanPresentNotice(window, accountKey)")
+ordered(keys, "Core::App().passcodeLockValue()", "_held.clear()", "if (!locked)", "schedulePendingNoticeFlush()")
+privacy_input = read("purple/purple_privacy_screen.cpp")
+ordered(privacy_input, "bool filterWindowEvent", "QEvent::ShortcutOverride", "QEvent::KeyRelease",
+        "Swallow every keystroke", "return true")
 assert all(word not in notice_probe for word in ("writePref", "WriteSettings", "sync(", "api()."))
 assert "Purple::IsChatPaletteController(_controller)" in read("boxes/peer_list_box.cpp")
 
