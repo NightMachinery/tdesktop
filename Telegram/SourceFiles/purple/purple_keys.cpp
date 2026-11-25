@@ -68,6 +68,7 @@
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/elastic_scroll.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/wrap/slide_wrap.h"
 #include "window/themes/window_theme.h"
 #include "window/window_controller.h"
@@ -110,6 +111,24 @@ namespace Purple {
 
 class KeyboardAttachment final {
 public:
+	static QTextEdit *Composer(QWidget *widget) {
+		for (auto parent = widget; parent; parent = parent->parentWidget()) {
+			auto field = static_cast<Ui::InputField*>(nullptr);
+			if (const auto history = dynamic_cast<HistoryWidget*>(parent)) {
+				field = history->_field.get();
+			} else if (const auto chat = dynamic_cast<HistoryView::ChatWidget*>(parent)) {
+				field = chat->_composeControls ? chat->_composeControls->fieldForMention() : nullptr;
+			} else if (const auto scheduled = dynamic_cast<HistoryView::ScheduledWidget*>(parent)) {
+				field = scheduled->_composeControls ? scheduled->_composeControls->fieldForMention() : nullptr;
+			} else {
+				continue;
+			}
+			const auto edit = field ? field->rawTextEdit().get() : nullptr;
+			return edit && (edit == widget || edit->isAncestorOf(widget)) ? edit : nullptr;
+		}
+		return nullptr;
+	}
+
 	template <typename Widget>
 	static Fn<void()> From(Widget *widget) {
 		if (!CanAttach(widget)) return {};
@@ -1678,6 +1697,7 @@ private:
 	void showTopicPicker(bool unreadOnly, const Target &target);
 	void stepTopic(const Target &target, int delta, bool unreadOnly);
 	void refreshStatusBar();
+	void setNormalComposer(QTextEdit *edit);
 	void showWhichKey();
 	void hideWhichKey();
 	void stroke(int key, const Target &target);
@@ -1691,6 +1711,8 @@ private:
 	const not_null<MainWindow*> _window;
 	QPointer<ModalUi::ModalStatusBar> _statusBar;
 	QPointer<ModalUi::WhichKeyOverlay> _whichKey;
+	QPointer<QTextEdit> _normalComposer;
+	int _composerCursorWidth = 0;
 	QTimer _whichKeyTimer;
 	QTimer _feedbackTimer;
 	QTimer _unreadRefreshTimer;
@@ -1971,6 +1993,7 @@ Keys::Keys(not_null<MainWindow*> window)
 }
 
 Keys::~Keys() {
+	setNormalComposer(nullptr);
 	if (qApp) {
 		qApp->removeEventFilter(this);
 	}
@@ -2004,14 +2027,9 @@ bool Keys::eventFilter(QObject *watched, QEvent *event) {
 			&& !_window->controller().isLayerShown()
 			&& watched->isWidgetType()) {
 		const auto widget = static_cast<QWidget*>(watched);
-		if (widget->window() == _window
-				&& (qobject_cast<QTextEdit*>(widget)
-					|| (widget->parentWidget()
-						&& qobject_cast<QTextEdit*>(widget->parentWidget())))) {
-			const auto target = FindTarget(owner(), qobject_cast<QTextEdit*>(widget)
-				? widget
-				: widget->parentWidget());
-			if (target.focus && target.history) {
+		if (widget->window() == _window) {
+			if (const auto edit = KeyboardAttachment::Composer(widget);
+				edit && FindTarget(owner(), edit).focus) {
 				enterInsert(true);
 			}
 		}
@@ -2622,10 +2640,28 @@ void Keys::clearPrefix() {
 	}
 }
 
+void Keys::setNormalComposer(QTextEdit *edit) {
+	if (_normalComposer == edit) {
+		return;
+	}
+	if (_normalComposer) {
+		_normalComposer->setCursorWidth(_composerCursorWidth);
+	}
+	_normalComposer = edit;
+	if (edit) {
+		_composerCursorWidth = edit->cursorWidth();
+		edit->setCursorWidth(0);
+	}
+}
+
 void Keys::refreshStatusBar() {
 	if (!_statusBar) {
 		return;
 	}
+	const auto target = activeTarget();
+	setNormalComposer((chromeVisible() && _normal && target.focus
+			&& !_window->controller().isLayerShown())
+		? KeyboardAttachment::Composer(target.focus) : nullptr);
 	if (!chromeVisible()) {
 		_statusBar->hide();
 		hideWhichKey();
@@ -2647,7 +2683,6 @@ void Keys::refreshStatusBar() {
 	}
 	_statusBar->show();
 	raiseChrome();
-	const auto target = activeTarget();
 	auto state = ModalUi::StatusState();
 	state.unreadDm = _unreadSummary.dm;
 	state.unreadGp = _unreadSummary.gp;

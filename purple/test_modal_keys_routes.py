@@ -488,6 +488,13 @@ ordered(menu, "MainMenu::MainMenu(", "setupMenu();",
         "Purple::InstallMainMenuKeys(", "_toggleAccounts.data(), _accounts)")
 
 assert "MusicAllowsModalKeys(owner, focus)" in keys
+composer = between(keys, "static QTextEdit *Composer", "static Fn<void()> From")
+for widget in ("HistoryWidget", "HistoryView::ChatWidget", "HistoryView::ScheduledWidget"):
+    assert widget in composer
+ordered(keys, "QEvent::MouseButtonPress", "KeyboardAttachment::Composer(widget)",
+        "FindTarget(owner(), edit).focus", "enterInsert(true)")
+ordered(keys, "void Keys::setNormalComposer", "setCursorWidth(_composerCursorWidth)", "setCursorWidth(0)")
+ordered(keys, "void Keys::refreshStatusBar", "activeTarget()", "chromeVisible() && _normal && target.focus")
 music = read("purple/purple_music_section.cpp")
 ordered(music, "void MusicSection::doSetInnerFocus", "ModalKeysInNormal", "setFocus()", "_search->setFocusFast()")
 ordered(keys, "&QApplication::focusChanged", "MusicSearchContains(current, now)", "enterInsert(true)")
