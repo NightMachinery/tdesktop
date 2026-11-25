@@ -313,17 +313,17 @@ public:
 	, _title(Label(_browser, u"Customize Purple settings"_q))
 	, _subject(new CustomizeLook::Chip(_browser))
 	, _destination(new CustomizeLook::Chip(_browser))
-	, _accountsButton(Button(_browser, u"Account"_q))
+	, _accountsButton(Button(_browser, u"Account"_q, ModalKeysEnabled() ? u"Shift+A"_q : QString()))
 	, _filter(new QLineEdit(_browser))
 	, _clear(Button(_browser, u"Clear filter"_q))
 	, _tree(new CustomizeLook::Tree(_browser))
 	, _inspector(Label(_browser))
 	, _feedback(Label(_browser))
 	, _edit(Button(_browser, u"Edit"_q, u"RET"_q))
-	, _reset(Button(_browser, u"Reset"_q, u"r"_q))
-	, _undo(Button(_browser, u"Undo"_q, u"u"_q))
-	, _reviewButton(Button(_browser, u"Review"_q, u"d"_q))
-	, _help(Button(_browser, u"Help"_q, u"?"_q))
+	, _reset(Button(_browser, u"Reset"_q, ModalKeysEnabled() ? u"r"_q : QString()))
+	, _undo(Button(_browser, u"Undo"_q, ModalKeysEnabled() ? u"u"_q : QString()))
+	, _reviewButton(Button(_browser, u"Review"_q, ModalKeysEnabled() ? u"d"_q : QString()))
+	, _help(Button(_browser, u"Help"_q, ModalKeysEnabled() ? u"?"_q : QString()))
 	, _sheetLayout(new QVBoxLayout(_sheet)) {
 		setAccessibleName(u"Customize Purple settings"_q);
 		setFont(st::normalFont);
@@ -336,6 +336,7 @@ public:
 		outer->addWidget(_pages);
 		_sheetPage->setViewport(new CustomizeLook::Canvas(_sheetPage));
 		_sheetPage->setWidgetResizable(true);
+		_sheetPage->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 		_sheetPage->setFrameShape(QFrame::NoFrame);
 		_sheetPage->setWidget(_sheet);
 		for (const auto page : { _browser, static_cast<QWidget*>(_sheetPage), _covered }) {
@@ -919,7 +920,13 @@ private:
 	}
 
 	bool handleKey(QObject *object, QKeyEvent *event) {
-		if (!visibleContent()) return true;
+		if (!visibleContent()) {
+			if (object == _coverClose && !event->isAutoRepeat()
+				&& (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)) {
+				_coverClose->click();
+			}
+			return true;
+		}
 		const auto mods = event->modifiers() & ~Qt::KeypadModifier;
 		const auto key = ModalPhysicalKey(*event);
 		const auto enter = key == Qt::Key_Return || key == Qt::Key_Enter;
@@ -1003,7 +1010,9 @@ private:
 			if (once()) _tree->setFocus();
 			return true;
 		}
-		if (object != _tree && object != this) return false;
+		if (object != _tree && object != this && !qobject_cast<QPushButton*>(object)) {
+			return false;
+		}
 		if (((key == Qt::Key_Down || (modal && key == Qt::Key_J)) && !mods)
 			|| (key == Qt::Key_N && mods == kCtrlMod)) { if (moving()) selectSibling(1); }
 		else if (((key == Qt::Key_Up || (modal && key == Qt::Key_K)) && !mods)
@@ -1464,6 +1473,9 @@ private:
 		clearSheet();
 		sheetTitle(u"Account to inspect"_q);
 		const auto list = new QListWidget(_sheet);
+		list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+		list->setTextElideMode(Qt::ElideRight);
+		list->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 		list->setAccessibleName(u"Signed-in accounts"_q);
 		auto accounts = std::vector<base::weak_ptr<Main::Account>>();
 		for (const auto &entry : Core::App().domain().accounts()) {
@@ -1628,6 +1640,9 @@ private:
 			return;
 		}
 		const auto list = new QListWidget(_sheet);
+		list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+		list->setTextElideMode(Qt::ElideRight);
+		list->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 		list->setAccessibleName(u"Budget chat"_q);
 		for (const auto &choice : choices) {
 			const auto item = new QListWidgetItem(choice.avatar, choice.label, list);
@@ -1818,7 +1833,7 @@ private:
 		if (_line) connect(_line, &QLineEdit::textChanged, this, [this] { updateFormStatus(); });
 		if (_multi) connect(_multi, &QPlainTextEdit::textChanged, this, [this] { updateFormStatus(); });
 		updateFormStatus();
-		const auto stageButton = Button(_sheet, u"Stage"_q);
+		const auto stageButton = Button(_sheet, u"Stage"_q, u"C-Enter"_q);
 		addSheetWidget(stageButton);
 		connect(stageButton, &QPushButton::clicked, this, [this] { stageForm(); });
 		if (descriptor.codec != SettingCodec::Boolean && SettingsTree::CanReset(descriptor)) {

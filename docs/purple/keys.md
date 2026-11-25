@@ -180,8 +180,11 @@ Customize settings…** also opens the editor with modal keys off.
   the default `SPC z` chord also works with modal keys enabled.
 - Use `Ctrl+Return` to submit a form. In a multiline field, `Return`
   inserts a newline. The focused field keeps its native text editing keys.
-- In a collection, `a` adds, `Shift+D` duplicates, `x` removes, and
-  `Shift+J` / `Shift+K` reorder where supported. In the chat picker,
+- Button labels show their shortcuts. A button marked **Enter** activates
+  when focused. In a collection, `a` adds, `i` enters a chat ID, `Shift+D`
+  duplicates, `Shift+R` renames, `x` removes, and `Shift+J` / `Shift+K`
+  reorder where supported. Plain-letter shortcuts yield to text fields.
+  At narrow widths, the Members lists stack vertically. In the chat picker,
   `/` focuses search and `Space` or **Add** adds the selected chat.
   Use **Enter ID** to type a chat ID.
 - Use `u` to undo staged edits and `d` to review them. In **Lines**,

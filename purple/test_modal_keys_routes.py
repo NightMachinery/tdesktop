@@ -127,11 +127,12 @@ ordered(collection_edit, "FindSettingDescriptor(item.address)", "if (_config.nam
 assert not re.search(r"FindSettingDescriptor\([^\n]+\)->", collections)
 ordered(collections, "void showOtherReferences", "_config.otherReferences(object)", "Other accounts’ files are not checked")
 ordered(collection_edit, "showOtherReferences(item.address)", "_accept = button")
-ordered(collections, 'u"Add"_q, [this] { add()', 'u"Enter ID"_q, [this] { edit(Op::Insert)',
-        'u"Duplicate"_q, [this] { edit(Op::Duplicate)',
-        'u"Delete"_q, [this] { edit(Op::Erase)', 'u"Move up"_q, [this] { move(-1)',
+ordered(collections, 'u"Add"_q, ModalKeysEnabled() ? u"a"_q', 'u"Enter ID"_q',
+        'u"Duplicate"_q', 'u"Delete"_q', 'u"Move up"_q',
         "&QAbstractItemModel::rowsMoved", "moveTo(from, to)",
         "code == Qt::Key_D", "edit(Op::Duplicate)", "code == Qt::Key_A", "add()", "edit(Op::Erase)")
+assert "setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff)" in collections
+ordered(collections, "void resizeEvent", "QBoxLayout::TopToBottom", "QBoxLayout::LeftToRight")
 ordered(collections, "void add()", "_config.peerField", "addPeer()", "edit(Op::Insert)")
 # Verify new native UI surfaces reuse stock Ui::KeysLegend & Ui::LayerWidget, not Toasts/ASCII TextBox.
 assert "Ui::Toast::Show" not in keys, "Modal UI must not fall back to plain Toast popups"
