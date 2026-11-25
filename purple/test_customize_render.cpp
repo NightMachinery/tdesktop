@@ -9,6 +9,7 @@
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QListWidget>
 #include <QtWidgets/QScrollArea>
+#include <QtWidgets/QScrollBar>
 #include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QTextEdit>
 #include <QtWidgets/QVBoxLayout>
@@ -457,6 +458,7 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 	auto stack = new QStackedWidget(&host);
 	auto scroll = new QScrollArea(stack);
 	scroll->setFrameShape(QFrame::NoFrame);
+	scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	scroll->setWidgetResizable(true);
 	scroll->setViewport(new Canvas(scroll));
 	auto page = new Canvas(scroll);
@@ -505,10 +507,28 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 		layout->addStretch();
 	}
 	auto firstAction = static_cast<QPushButton*>(nullptr);
-	for (const auto action : actions) {
-		const auto button = new Action(QString::fromLatin1(action), page);
-		AppendAction(layout, button);
-		if (!firstAction) firstAction = button;
+	auto memberActions = std::vector<QPushButton*>();
+	if (kind == QStringLiteral("collection")) {
+		const auto addGroup = [&](std::initializer_list<std::pair<const char*, const char*>> entries) {
+			const auto group = new Actions(page);
+			layout->addWidget(group);
+			for (const auto &[label, key] : entries) {
+				const auto button = new Action(QString::fromLatin1(label), group, QString::fromLatin1(key));
+				group->append(button);
+				memberActions.push_back(button);
+			}
+		};
+		addGroup({ { "Add", "a" }, { "Enter ID", "i" }, { "Edit", "Enter" }, { "Delete", "x" } });
+		addGroup({ { "Move up", "Shift+K" }, { "Move down", "Shift+J" },
+			{ "Undo", "u" }, { "Reset members", "r" } });
+		addGroup({ { "Stage collection", "C-Enter" }, { "Back", "Esc" } });
+		firstAction = memberActions.front();
+	} else {
+		for (const auto action : actions) {
+			const auto button = new Action(QString::fromLatin1(action), page);
+			AppendAction(layout, button);
+			if (!firstAction) firstAction = button;
+		}
 	}
 	if (kind == QStringLiteral("rename")) layout->addStretch();
 	Theme(&host, !dark);
@@ -520,6 +540,12 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 	if (firstAction) firstAction->setFocus();
 	Render(host, output, QStringLiteral("%1-%2-%3.png").arg(kind,
 		dark ? QStringLiteral("dark") : QStringLiteral("light")).arg(width), QSize(width, 460));
+	if (!memberActions.empty()) {
+		Check(scroll->horizontalScrollBar()->maximum() == 0, "Members fits the viewport width");
+		for (const auto button : memberActions) {
+			Check(button->width() >= button->sizeHint().width(), "Members fits each label and keycap");
+		}
+	}
 }
 
 } // namespace
@@ -542,8 +568,7 @@ int main(int argc, char **argv) {
 			ReviewRender(output, false, dark, width);
 			ReviewRender(output, true, dark, width);
 			SheetRender(output, dark, width, QStringLiteral("collection"), QStringLiteral("Members"),
-				{ "Add", "Enter ID", "Edit", "Delete", "Move up", "Move down", "Undo",
-					"Reset members", "Stage collection", "Back" });
+				{});
 			SheetRender(output, dark, width, QStringLiteral("rename"), QStringLiteral("Rename collection"),
 				{ "Cancel", "Keep change" });
 			SheetRender(output, dark, width, QStringLiteral("confirm"), QStringLiteral("Confirm settings change"),

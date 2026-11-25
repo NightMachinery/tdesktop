@@ -97,6 +97,7 @@ public:
 		setAutoDefault(false);
 		setDefault(false);
 		setAttribute(Qt::WA_LayoutUsesWidgetRect);
+		setToolTip(text);
 		setAccessibleName(text);
 		setAccessibleDescription(_shortcut == QStringLiteral("Enter")
 			? QStringLiteral("Press Enter when focused")
@@ -107,8 +108,7 @@ public:
 	QSize sizeHint() const override {
 		const auto fm = fontMetrics();
 		const auto pad = fm.height() / 2;
-		return QSize(fm.horizontalAdvance(text()) + 2 * pad
-			+ (_shortcut.isEmpty() ? 0 : fm.horizontalAdvance(_shortcut) + 2 * pad),
+		return QSize(fm.horizontalAdvance(text()) + fm.horizontalAdvance(_shortcut) + 4 * pad,
 			fm.height() + pad + 2);
 	}
 
@@ -140,22 +140,21 @@ protected:
 		p.setFont(font());
 		const auto fg = ReadableText(isEnabled() ? ink : BlendColor(ink, bg, .45), surface);
 		p.setPen(fg);
-		const auto capW = _shortcut.isEmpty() ? 0 : fm.horizontalAdvance(_shortcut) + pad;
-		const auto gap = capW ? pad : 0;
-		const auto label = fm.elidedText(text(), Qt::ElideRight,
-			std::max(0, width() - 2 * pad - gap - capW));
+		const auto capW = fm.horizontalAdvance(_shortcut) + pad;
+		const auto labelSpace = std::max(0, width() - 3 * pad - capW);
+		const auto label = fm.horizontalAdvance(text()) <= labelSpace
+			? text()
+			: fm.elidedText(text(), Qt::ElideRight, labelSpace);
 		const auto labelW = fm.horizontalAdvance(label);
-		const auto start = (width() - labelW - gap - capW) / 2;
+		const auto start = (width() - labelW - pad - capW) / 2;
 		p.drawText(QRect(start, 0, labelW, height()), Qt::AlignCenter, label);
-		if (capW) {
-			const auto cap = QRect(start + labelW + gap, (height() - fm.height()) / 2, capW, fm.height());
-			const auto capBg = BlendColor(surface, ink, .12);
-			p.setPen(Qt::NoPen);
-			p.setBrush(capBg);
-			p.drawRoundedRect(cap, radius / 2, radius / 2);
-			p.setPen(ReadableText(fg, capBg));
-			p.drawText(cap, Qt::AlignCenter, _shortcut);
-		}
+		const auto cap = QRect(start + labelW + pad, (height() - fm.height()) / 2, capW, fm.height());
+		const auto capBg = BlendColor(surface, ink, .12);
+		p.setPen(Qt::NoPen);
+		p.setBrush(capBg);
+		p.drawRoundedRect(cap, radius / 2, radius / 2);
+		p.setPen(ReadableText(fg, capBg));
+		p.drawText(cap, Qt::AlignCenter, _shortcut);
 	}
 
 private:
