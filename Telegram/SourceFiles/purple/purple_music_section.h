@@ -5,6 +5,8 @@ namespace Window { class SectionWidget; class SessionController; }
 
 namespace Purple {
 
+enum class TrackListAction;
+
 void AddMusicMenuRow(
 	not_null<Ui::VerticalLayout*> menu,
 	not_null<Window::SessionController*> controller);
@@ -21,6 +23,11 @@ void FocusMusicSearch(
 	not_null<Window::SessionController*> controller,
 	QWidget *focus,
 	bool search);
+void NavigateMusic(
+	not_null<Window::SessionController*> controller,
+	QWidget *focus,
+	TrackListAction action,
+	int repeat);
 [[nodiscard]] bool MusicHidesChats(const Window::SectionWidget *section);
 void UpdateMusicSidebar(QWidget *widget, bool suppress, bool restore);
 [[nodiscard]] bool MusicHideChatsCurrent();

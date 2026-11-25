@@ -162,6 +162,7 @@ public:
 	[[nodiscard]] bool allowsModalKeys(QWidget *focus) const;
 	[[nodiscard]] bool searchContains(QWidget *widget) const;
 	void focusSearch(bool search);
+	void navigate(TrackListAction action, int repeat);
 
 private:
 	enum class CatalogRead {
@@ -468,15 +469,16 @@ std::shared_ptr<Window::SectionMemento> MusicSection::createMemento() {
 
 void MusicSection::doSetInnerFocus() {
 	if (ModalKeysInNormal(controller()->window().widget())) {
-		setFocus();
+		if (_list) _list->focusSelected();
+		else setFocus();
 	} else {
 		_search->setFocusFast();
 	}
 }
 
 void MusicSection::keyPressEvent(QKeyEvent *event) {
-	if (_list && !event->modifiers() && isVisible() && current()) {
-		if (event->key() == Qt::Key_Down
+	if (!event->modifiers() && !isHidden() && current()) {
+		if (_list && event->key() == Qt::Key_Down
 			&& _search->rawTextEdit()->hasFocus()
 			&& !_reading
 			&& _displayedSearch == _search->getLastText().trimmed()
@@ -489,11 +491,15 @@ void MusicSection::keyPressEvent(QKeyEvent *event) {
 				return;
 			}
 		}
-		const auto focus = QApplication::focusWidget();
-		if (event->key() == Qt::Key_Escape && focus
-			&& _list->isAncestorOf(focus)) {
+		if (event->key() == Qt::Key_Escape
+			&& ModalKeysInNormal(controller()->window().widget())) {
 			event->accept();
-			doSetInnerFocus();
+			if (!_selection.empty()) {
+				_selection.clear();
+				updateSelection();
+			} else {
+				controller()->showBackFromStack();
+			}
 			return;
 		}
 	}
@@ -544,7 +550,16 @@ void MusicSection::focusSearch(bool search) {
 	if (search) {
 		_search->setFocusFast();
 	} else if (searchContains(QApplication::focusWidget())) {
-		setFocus();
+		_search->setText(QString());
+		if (_list) _list->focusSelected();
+		else setFocus();
+	}
+}
+
+void MusicSection::navigate(TrackListAction action, int repeat) {
+	if (_list) {
+		_snapshotHeld = true;
+		_list->navigate(action, repeat);
 	}
 }
 
@@ -1020,7 +1035,7 @@ void MusicSection::render() {
 	updateSelection();
 	updatePlayback();
 	updateStatus();
-	if (hadFocus && _list) _list->focusSelected();
+	if (_list && (hadFocus || hasFocus())) _list->focusSelected();
 }
 
 void MusicSection::updateListHeight() {
@@ -1494,6 +1509,16 @@ void FocusMusicSearch(
 		bool search) {
 	if (const auto music = MusicForWidget(controller, focus)) {
 		music->focusSearch(search);
+	}
+}
+
+void NavigateMusic(
+		not_null<Window::SessionController*> controller,
+		QWidget *focus,
+		TrackListAction action,
+		int repeat) {
+	if (const auto music = MusicForWidget(controller, focus)) {
+		music->navigate(action, repeat);
 	}
 }
 

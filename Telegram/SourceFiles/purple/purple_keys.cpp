@@ -54,6 +54,7 @@
 #include "purple/purple_keys_zen.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
+#include "purple/purple_playlist_song_list.h"
 #include "purple/purple_notices.h"
 #include "purple/purple_peek_controls.h"
 #include "purple/purple_picker.h"
@@ -317,6 +318,8 @@ enum class Action {
 	AddContact,
 	OpenScheduled,
 	OpenMusic,
+	MusicFirstTrack,
+	MusicMarkTrack,
 	OpenPlaylists,
 	OpenChatInfo,
 	OpenChatMedia,
@@ -460,6 +463,10 @@ const Command kCommands[] = {
 		[] { return tr::lng_scheduled_messages(tr::now); } },
 	{ Action::OpenMusic, "open-music", "playback", "",
 		[] { return tr::lng_purple_music_title(tr::now); } },
+	{ Action::MusicFirstTrack, "music-first-track", "playback", "Needs Music",
+		[] { return u"First track"_q; } },
+	{ Action::MusicMarkTrack, "music-mark-track", "playback", "Needs Music",
+		[] { return u"Mark track"_q; } },
 	{ Action::OpenPlaylists, "open-playlists", "playback", "",
 		[] { return tr::lng_purple_playlists_title(tr::now); } },
 	{ Action::OpenChatInfo, "open-chat-info", "chat", "Needs an open chat",
@@ -1533,8 +1540,29 @@ std::vector<Data::ForumTopic*> OrderedForumTopics(not_null<Data::Forum*> forum) 
 	return out;
 }
 
-bool Available(Action action, const Target &target) {
+std::optional<TrackListAction> MusicNavigation(Action action) {
 	switch (action) {
+	case Action::MoveUp:
+	case Action::PreviousChat: return TrackListAction::Up;
+	case Action::MoveDown:
+	case Action::NextChat: return TrackListAction::Down;
+	case Action::HistoryHalfUp: return TrackListAction::HalfUp;
+	case Action::HistoryHalfDown: return TrackListAction::HalfDown;
+	case Action::OlderMessagesPage: return TrackListAction::PageUp;
+	case Action::NewerMessagesPage: return TrackListAction::PageDown;
+	case Action::MusicFirstTrack: return TrackListAction::First;
+	case Action::LatestMessages: return TrackListAction::Last;
+	case Action::OpenChat: return TrackListAction::Play;
+	case Action::MusicMarkTrack: return TrackListAction::Mark;
+	default: return std::nullopt;
+	}
+}
+
+bool Available(Action action, const Target &target) {
+	if (target.contextMap == MapKind::Music && MusicNavigation(action)) return true;
+	switch (action) {
+	case Action::MusicFirstTrack:
+	case Action::MusicMarkTrack: return false;
 	case Action::MoveUp:
 	case Action::MoveDown:
 		return target.list != nullptr || HistoryScroll(target) != nullptr;
@@ -1702,8 +1730,19 @@ std::vector<EffectiveBinding> EffectiveBindings(
 	}
 	for (const auto &b : km.bindings) {
 		if (b.map == MapKind::Normal) {
-			result.push_back({ b.action, b.keys, MapKind::Normal, false });
+			const auto firstTrack = contextMap == MapKind::Music
+				&& b.action == Action::OlderMessagesPage
+				&& b.keys == Chord{ Qt::Key_G, Qt::Key_G };
+			result.push_back({
+				firstTrack ? Action::MusicFirstTrack : b.action,
+				b.keys,
+				MapKind::Normal,
+				false,
+			});
 		}
+	}
+	if (contextMap == MapKind::Music) {
+		result.push_back({ Action::MusicMarkTrack, { Qt::Key_M }, MapKind::Music, false });
 	}
 	return result;
 }
@@ -3584,6 +3623,12 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 	const auto repeat = (FindCommand(action).repeat != RepeatPolicy::Never)
 		? std::clamp(count, 1, kMaxCount)
 		: 1;
+	if (target.contextMap == MapKind::Music) {
+		if (const auto navigation = MusicNavigation(action)) {
+			NavigateMusic(current, target.focus, *navigation, repeat);
+			return;
+		}
+	}
 	using Native = Shortcuts::Command;
 	const auto launch = [this, window = QPointer(_window.get())](Native native) {
 		if (!Shortcuts::Launch(std::vector<Native>{ native }) && window) {
@@ -3612,6 +3657,9 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		}
 	};
 	switch (action) {
+	case Action::MusicFirstTrack:
+	case Action::MusicMarkTrack:
+		break;
 	case Action::EnterNormalMode:
 		enterNormal(false);
 		break;

@@ -49,6 +49,7 @@ public:
 	[[nodiscard]] uint64_t selectedDocument() const;
 	[[nodiscard]] int reorderDelta(const QKeyEvent &event) const;
 	void moveSelected(int delta);
+	void navigate(TrackListAction action, int repeat);
 	void setPlayback(uint64_t current, uint64_t checked, QString state, bool unavailable);
 	void setMusicPlayback(uint64_t current, MusicRowPlayback state, uint64_t loading);
 	void setVerifiedDownloads(std::set<uint64_t> documents);
@@ -461,6 +462,34 @@ void PlaylistSongList::Rows::moveSelected(int delta) {
 	submitMove(_selected, _selected + delta);
 }
 
+void PlaylistSongList::Rows::navigate(TrackListAction action, int repeat) {
+	if (!isEnabled() || _data.empty()) return;
+	cancelInteraction();
+	const auto page = std::max(1, _scroll->viewport()->height() / rowHeight());
+	const auto half = std::max(1, _scroll->viewport()->height() / (2 * rowHeight()));
+	auto next = std::max(0, _selected);
+	switch (action) {
+	case TrackListAction::Up: next -= repeat; break;
+	case TrackListAction::Down: next += repeat; break;
+	case TrackListAction::HalfUp: next -= half * repeat; break;
+	case TrackListAction::HalfDown: next += half * repeat; break;
+	case TrackListAction::PageUp: next -= page * repeat; break;
+	case TrackListAction::PageDown: next += page * repeat; break;
+	case TrackListAction::First: next = 0; break;
+	case TrackListAction::Last: next = int(_data.size()) - 1; break;
+	case TrackListAction::Mark:
+		if (const auto toggle = _toggle) toggle(_data[next].documentId);
+		return;
+	case TrackListAction::Play: {
+		const auto playSelection = _playSelection;
+		if (playSelection && playSelection()) return;
+		const auto play = _play;
+		play(_data[next].documentId);
+	} return;
+	}
+	select(std::clamp(next, 0, int(_data.size()) - 1));
+}
+
 void PlaylistSongList::Rows::keyPressEvent(QKeyEvent *e) {
 	if (!isEnabled()) return;
 	if (_copyOrgLink && _selected >= 0 && e->matches(QKeySequence::Copy)) {
@@ -482,37 +511,24 @@ void PlaylistSongList::Rows::keyPressEvent(QKeyEvent *e) {
 		moveSelected(delta);
 		return;
 	}
-	const auto size = int(_data.size());
-	if (!size) return;
-	const auto page = std::max(1, _scroll->viewport()->height() / rowHeight());
-	auto next = _selected < 0 ? 0 : _selected;
-	if (key == Qt::Key_Up) --next;
-	else if (key == Qt::Key_Down) ++next;
-	else if (key == Qt::Key_Home) next = 0;
-	else if (key == Qt::Key_End) next = size - 1;
-	else if (key == Qt::Key_PageUp) next -= page;
-	else if (key == Qt::Key_PageDown) next += page;
-	else if (key == Qt::Key_Return || key == Qt::Key_Enter || key == Qt::Key_Space) {
-		e->accept();
-		cancelInteraction();
-		if (_toggle && key == Qt::Key_Space) {
-			if (e->isAutoRepeat()) return;
-			const auto toggle = _toggle;
-			toggle(_data[next].documentId);
-		} else {
-			const auto playSelection = _playSelection;
-			if (playSelection && playSelection()) return;
-			const auto callback = _play;
-			callback(_data[next].documentId);
-		}
-		return;
-	} else {
+	const auto half = (_mode == Mode::Library && e->modifiers() == Qt::AltModifier);
+	const auto action = (key == Qt::Key_Up)
+		? (half ? TrackListAction::HalfUp : TrackListAction::Up)
+		: (key == Qt::Key_Down)
+		? (half ? TrackListAction::HalfDown : TrackListAction::Down)
+		: (key == Qt::Key_Home) ? TrackListAction::First
+		: (key == Qt::Key_End) ? TrackListAction::Last
+		: (key == Qt::Key_PageUp) ? TrackListAction::PageUp
+		: (key == Qt::Key_PageDown) ? TrackListAction::PageDown
+		: (key == Qt::Key_Return || key == Qt::Key_Enter) ? TrackListAction::Play
+		: (key == Qt::Key_Space) ? (_toggle ? TrackListAction::Mark : TrackListAction::Play)
+		: std::optional<TrackListAction>();
+	if (!action) {
 		RpWidget::keyPressEvent(e);
 		return;
 	}
 	e->accept();
-	cancelInteraction();
-	select(std::clamp(next, 0, size - 1));
+	if (*action != TrackListAction::Mark || !e->isAutoRepeat()) navigate(*action, 1);
 }
 
 void PlaylistSongList::Rows::focusInEvent(QFocusEvent *e) {
@@ -779,6 +795,10 @@ rpl::producer<> PlaylistSongList::navigationEvents() const {
 
 void PlaylistSongList::moveSelected(int delta) {
 	_rows->moveSelected(delta);
+}
+
+void PlaylistSongList::navigate(TrackListAction action, int repeat) {
+	_rows->navigate(action, repeat);
 }
 
 void PlaylistSongList::setPlayback(

@@ -8,8 +8,11 @@ regular player. **Load more tracks** reads the next catalog page.
 You can also set the source under **Settings → Purple → Music source folder**.
 In modal Normal mode, use `SPC p m` or run `open-music` in the command palette
 to toggle Music. The search field opens unfocused in Normal. Press `/` or
-`i`, or click the field, to enter Insert and search. Press `Ctrl+[` to
-return focus to Music navigation.
+`i`, or click the field, to enter Insert and search. Escape clears the filter
+and returns focus to the track cursor. In Normal, `j` and `k` move by one row,
+`Ctrl+d` and `Ctrl+u` move by half a page, and `gg` and `G` move to the ends
+of the loaded rows. Press `m` to mark a track and Return to play. Escape
+clears marks or returns to the prior view.
 The chat list is hidden in Music by default. **Settings → Purple → Hide chat
 list in Music** restores the split view. The toolbar opens Playlists directly.
 The overflow menu contains the source picker and refresh.
