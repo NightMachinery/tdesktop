@@ -67,7 +67,11 @@ def exec_compile(shim_file, argv):
                 # each source gets a dependency-only pass of its own.
                 for index, source in enumerate(sources):
                     skip = {i for i in sources if i != source} | {i for i, t in enumerate(argv) if t == '-c'}
-                    skip |= {i + d for i, t in enumerate(argv) if t == '-o' for d in (0, 1)}
+                    skip |= {i + d for i, t in enumerate(argv)
+                             if t in ('-o', '-framework', '-weak_framework', '-Xlinker', '-L', '-l')
+                             for d in (0, 1)}
+                    skip |= {i for i, t in enumerate(argv)
+                             if t.startswith(('-Wl,', '-L', '-l')) or t.endswith(('.o', '.a', '.dylib'))}
                     extra.append([t for i, t in enumerate(argv) if i not in skip] + ['-M', '-MF', str(stem) + '-' + str(index) + '.d'])
                     depfiles.append(str(stem) + '-' + str(index) + '.d')
         start = time.monotonic()
