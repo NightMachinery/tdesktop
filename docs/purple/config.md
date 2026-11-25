@@ -317,8 +317,9 @@ file. Update references in other files separately.
 
 Choose **Review** (`d`) to read the draft's **Effects** and **Lines**. Check
 the destination path, the before and after lines, and any warnings. Effects
-groups changes by TOML path and calls out renames and their updated references. **Apply
-changes** uses the guarded writer for that destination. Consequential changes
+groups changes by TOML path and calls out renames and their updated references.
+Fields or members removed during a rename appear under the new name.
+**Apply changes** uses the guarded writer for that destination. Consequential changes
 ask for confirmation. Peek changes use the existing countdown and Peek
 confirmation. A successful local write gives feedback in Customize. If the
 primary file was saved and its last-good copy could not be refreshed, the

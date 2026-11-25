@@ -167,6 +167,109 @@ ConfigChangeSummary ChangeFixture() {
 	} } }, .parsed = true };
 }
 
+void ReviewRenameLosses() {
+	const auto draft = ConfigChangeSummary{ .entries = { { .keys = {
+		{ .table = QStringLiteral("lists.fixture"), .key = QStringLiteral("title"),
+			.beforeValue = QStringLiteral("'Removed title'") },
+		{ .table = QStringLiteral("lists.fixture"), .key = QStringLiteral("members"),
+			.beforeValue = QStringLiteral("[1, 2]") },
+		{ .table = QStringLiteral("lists.renamed"), .key = QStringLiteral("members"),
+			.afterValue = QStringLiteral("[1]") },
+	} } }, .parsed = true };
+	const auto renames = std::vector{ Review::Rename{ QStringLiteral("lists.fixture"),
+		QStringLiteral("lists.renamed"), QStringLiteral("fixture"), QStringLiteral("renamed"), {} } };
+	const auto page = Review::Effects(Review::Flatten(draft), renames, QColor(0xff8d92), QColor(0x81d6a3));
+	Check(page.contains(QStringLiteral("<b>lists.renamed.title</b><br/>"
+		"<span style=\"color:#ff8d92\">− 'Removed title'</span><br/>"
+		"<span style=\"color:#81d6a3\">+ absent</span>")),
+		"rename plus field deletion shows the old value and absence at the new path");
+	Check(page.contains(QStringLiteral("<b>lists.renamed.members</b><br/>"
+		"<span style=\"color:#ff8d92\">− [1, 2]</span><br/>"
+		"<span style=\"color:#81d6a3\">+ [1]</span>")),
+		"rename plus member removal shows both member lists");
+
+	using Impact = ConfigImpactKind;
+	auto loss = ConfigImpactFinding{ .kind = Impact::ListLoss, .change = {
+		.kind = ConfigChangeKind::Removed, .table = renames.front().from,
+		.addressKind = ConfigChangeAddressKind::ListDefinition,
+	} };
+	auto smaller = draft;
+	smaller.entries.front().keys.erase(smaller.entries.front().keys.begin());
+	Check(!Review::IsRenameOnlyLoss(loss, Review::Flatten(smaller), renames),
+		"member loss alone keeps the list warning");
+	smaller.entries.front().keys.back().afterValue = QStringLiteral("[1, 2]");
+	Check(Review::IsRenameOnlyLoss(loss, Review::Flatten(smaller), renames),
+		"a pure rename suppresses the list loss caused by the old name disappearing");
+	loss.kind = Impact::StrandedMembers;
+	Check(!Review::IsRenameOnlyLoss(loss, Review::Flatten(smaller), renames),
+		"a pure rename keeps stranded member warnings");
+	loss.kind = Impact::ListLoss;
+	loss.account = QStringLiteral("fixture account");
+	Check(!Review::IsRenameOnlyLoss(loss, Review::Flatten(smaller), renames),
+		"a pure rename keeps account-specific warnings");
+	loss.account.clear();
+	smaller.entries.front().keys.push_back(draft.entries.front().keys.front());
+	Check(!Review::IsRenameOnlyLoss(loss, Review::Flatten(smaller), renames),
+		"field loss alone keeps the list warning");
+
+	const auto presetRenames = std::vector{ Review::Rename{ QStringLiteral("presets.fixture"),
+		QStringLiteral("presets.renamed"), QStringLiteral("fixture"), QStringLiteral("renamed"), {} } };
+	const auto status = QStringLiteral("'active'");
+	auto preset = ConfigChangeSummary{ .entries = { { .keys = {
+		{ .table = presetRenames.front().from, .key = QStringLiteral("title"), .beforeValue = status },
+		{ .table = presetRenames.front().to, .key = QStringLiteral("title"), .afterValue = status },
+		{ .table = presetRenames.front().from, .key = QStringLiteral("list_order"),
+			.beforeValue = QStringLiteral("[{ list = 'fixture' }]") },
+	} } }, .parsed = true };
+	loss.kind = Impact::PresetLoss;
+	loss.change.table = presetRenames.front().from;
+	loss.change.addressKind = ConfigChangeAddressKind::Unit;
+	Check(!Review::IsRenameOnlyLoss(loss, Review::Flatten(preset), presetRenames),
+		"field loss keeps the preset warning");
+	loss.kind = Impact::AppWideLoss;
+	Check(!Review::IsRenameOnlyLoss(loss, Review::Flatten(preset), presetRenames),
+		"field loss keeps the app-wide warning");
+	preset.entries.front().keys.pop_back();
+	loss.kind = Impact::PresetLoss;
+	Check(Review::IsRenameOnlyLoss(loss, Review::Flatten(preset), presetRenames),
+		"a pure rename suppresses the preset loss caused by the old name disappearing");
+}
+
+void ReviewCollidingEntries() {
+	const auto str = [](const char *value) { return QString::fromLatin1(value); };
+	const auto entry = [&](const QString &path, const char *label, const char *value) {
+		return ConfigChangeEntry{ .label = str(label),
+			.keys = { { .table = path, .afterValue = str(value) } } };
+	};
+	const auto path = str("fixture");
+	const auto draft = ConfigChangeSummary{ .entries = {
+		entry(path, "", "first-value"),
+		entry(path, "", "second-value"),
+		entry(path, "same", "third-value"),
+		entry(path, "same", "fourth-value"),
+		entry(path, "same", "fifth-value"),
+		entry(QStringLiteral("fixture · same"), "", "literal-path-value"),
+	}, .parsed = true };
+	auto disk = ConfigChangeSummary{ .entries = {
+		entry(path, "same", "disk-first"),
+		entry(path, "same", "disk-second"),
+		entry(path, "same", "disk-third"),
+		entry(path, "same", "disk-fourth"),
+	}, .parsed = true };
+	disk.entries.front().keys.front().beforeValue = str("disk-original");
+	const auto page = Review::Effects(Review::Flatten(draft), {}, QColor(0xff8d92), QColor(0x81d6a3));
+	const auto conflict = Review::Conflict(draft, disk);
+	for (const auto *value : { "first-value", "second-value", "third-value", "fourth-value",
+			"fifth-value", "literal-path-value" }) {
+		Check(page.contains(str(value)), "Effects keeps each colliding entry");
+		Check(conflict.contains(str(value)), "Conflict keeps each colliding entry");
+	}
+	for (const auto *value : { "disk-first", "disk-second", "disk-third", "disk-fourth" }) {
+		Check(conflict.contains(str(value)), "Conflict keeps each colliding disk entry");
+	}
+	Check(conflict.contains(str("disk-original")), "Conflict keeps a distinct opening value at the same address");
+}
+
 void ReviewRender(const QDir &output, bool conflict) {
 	auto root = QWidget();
 	auto layout = new QVBoxLayout(&root);
@@ -191,7 +294,7 @@ void ReviewRender(const QDir &output, bool conflict) {
 		pane->setHtml(page);
 		layout->addWidget(new Action(QStringLiteral("Show raw files"), &root), 0, Qt::AlignLeft);
 	} else {
-		const auto page = Review::Effects(draft, { { QStringLiteral("lists.fixture"), QStringLiteral("lists.renamed"),
+		const auto page = Review::Effects(Review::Flatten(draft), { { QStringLiteral("lists.fixture"), QStringLiteral("lists.renamed"),
 			QStringLiteral("fixture"), QStringLiteral("renamed"), { QStringLiteral("presets.work.list_order") } } }, QColor(0xff8d92), QColor(0x81d6a3));
 		Check(!page.contains(QStringLiteral("lists.fixture.title")) && !page.contains(QStringLiteral("lists.renamed.title")),
 			"one rename block replaces paired descendants");
@@ -214,6 +317,8 @@ int main(int argc, char **argv) {
 	Check(argc == 2, "pass the render directory");
 	const auto output = QDir(QString::fromLocal8Bit(argv[1]));
 	Check(output.mkpath(QStringLiteral(".")), "create render directory");
+	ReviewRenameLosses();
+	ReviewCollidingEntries();
 	TreeRender(output, false, 640);
 	TreeRender(output, true, 1000);
 	TreeRender(output, true, 640, true);

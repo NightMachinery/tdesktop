@@ -1109,18 +1109,14 @@ private:
 			}
 		}
 		const auto color = CustomizeLook::Tone(this, "customizeSurface", QPalette::Base);
-		auto html = SettingsReviewDisplay::Effects(preview.summary, renames,
+		const auto changes = SettingsReviewDisplay::Flatten(preview.summary);
+		auto html = SettingsReviewDisplay::Effects(changes, renames,
 			ModalUi::ReadableText(QColor(0xb9, 0x3a, 0x42), color),
 			ModalUi::ReadableText(QColor(0x31, 0x81, 0x52), color), effective);
 		auto lines = QStringList();
 		for (const auto &finding : preview.impact.findings) {
-			const auto renamed = (finding.kind == ConfigImpactKind::ListLoss
-				|| finding.kind == ConfigImpactKind::PresetLoss
-				|| finding.kind == ConfigImpactKind::AppWideLoss)
-				&& std::any_of(renames.begin(), renames.end(), [&](const auto &rename) {
-					return SettingsReviewDisplay::Owns(rename.from, finding.change.table);
-				});
-			if (!renamed && (finding.dangerous || finding.kind != ConfigImpactKind::ValueChanged)) {
+			if ((finding.dangerous || finding.kind != ConfigImpactKind::ValueChanged)
+				&& !SettingsReviewDisplay::IsRenameOnlyLoss(finding, changes, renames)) {
 				lines.push_back(finding.label);
 			}
 		}
