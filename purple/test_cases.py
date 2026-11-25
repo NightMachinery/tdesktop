@@ -362,7 +362,8 @@ CASES = {
     },
     'music-progress': {
         'program': 'music_progress_cases.cpp',
-        'units': ['ui/widgets/continuous_sliders.cpp', '../lib_crl/crl/dispatch/crl_dispatch_async.cpp'],
+        'units': ['ui/widgets/continuous_sliders.cpp'],
+        'objects': ['Telegram/lib_crl/CMakeFiles/lib_crl.dir/crl/dispatch/crl_dispatch_async.cpp.o'],
         'build_libraries': ['libcrypto.a', 'libxxhash.dylib'],
         'libraries': ['Telegram/lib_ui/liblib_ui.a', 'Telegram/lib_base/liblib_base.a'],
         'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'QtSvg', 'QtTest', 'Foundation', 'AppKit', 'Metal'],

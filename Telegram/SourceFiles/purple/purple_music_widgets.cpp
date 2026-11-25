@@ -362,7 +362,7 @@ object_ptr<Ui::RpWidget> MakeMusicViewControl(
 		grid->naturalWidthValue(), hint->widthValue()
 	) | rpl::on_next(place, group->lifetime());
 	rpl::combine(std::move(tiles), rpl::single() | rpl::then(style::PaletteChanged()))
-		| rpl::on_next([=](bool isTiles) {
+		| rpl::on_next([=](bool isTiles, rpl::empty_value) {
 		const auto selected = st::activeButtonBg->c;
 		const auto surface = st::windowBgOver->c;
 		const auto set = [&](not_null<Ui::RoundButton*> button, bool active) {
