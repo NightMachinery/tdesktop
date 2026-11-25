@@ -217,7 +217,8 @@ class DesktopArchiveStore final {
 	[[nodiscard]] DesktopArchiveCaptureLosses TakeCaptureLosses();
 	[[nodiscard]] std::optional<ArchiveUsage> Usage();
 	[[nodiscard]] bool Remove(int maximumActions = 4096);
-	[[nodiscard]] static bool Recover(const DesktopArchiveOptions &options);
+	[[nodiscard]] static bool Recover(const DesktopArchiveOptions &options, bool *retryDiscards = nullptr);
+	[[nodiscard]] static bool RetryConfirmedDiscards(const DesktopArchiveOptions &options);
 	[[nodiscard]] static bool RemoveAccount(
 		DesktopArchiveOptions options, int maximumActions = 4096);
 	[[nodiscard]] static std::optional<AccountKey> AccountForSlot(

@@ -498,6 +498,7 @@ class ArchiveWorker final {
 		auto journalFailure = QString();
 		auto journalOpened = false;
 		auto startupHeld = false;
+		auto retryDiscards = false;
 		auto startupJournal = std::shared_ptr<DesktopArchiveJournal>();
 		auto authorityReady = !options.authorityReady;
 		for (const auto delay : {0, 100, 250, 500, 1000, 2000, 3000}) {
@@ -541,7 +542,7 @@ class ArchiveWorker final {
 				state->startupHeld = true;
 				startupHeld = true;
 				state->report(DesktopArchiveStatus::Unreadable, discard.reason, 0);
-			} else if (!DesktopArchiveStore::Recover(options)) {
+			} else if (!DesktopArchiveStore::Recover(options, &retryDiscards)) {
 				state->startupFailed = true;
 				state->startupHeld = true;
 				startupHeld = true;
@@ -729,6 +730,9 @@ class ArchiveWorker final {
 				nextViewsExpiry = now + std::chrono::seconds(5);
 			}
 			if (idle) {
+				if (retryDiscards) {
+					retryDiscards = DesktopArchiveStore::RetryConfirmedDiscards(removalOptions);
+				}
 				renewJournal();
 				drainJournal();
 				report();

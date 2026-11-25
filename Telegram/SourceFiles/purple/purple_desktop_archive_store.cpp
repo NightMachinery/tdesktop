@@ -254,6 +254,14 @@ bool NoProfileBinding(const DesktopArchiveOptions &options) {
 	return !Exists(marker) && !Exists(link);
 }
 
+void ScopeAccount(Layout &layout, const QString &account) {
+	layout.account = account;
+	layout.accountDirectory = layout.profileDirectory + u"/accounts/"_q + account;
+	layout.intent = layout.profileDirectory + u"/intents/"_q + account + u".json"_q;
+	layout.fence = layout.profileDirectory + u"/fences/"_q + account + u".json"_q;
+	layout.lock = layout.profileDirectory + u"/locks/"_q + account + u".lock"_q;
+}
+
 std::optional<Layout> Profile(const DesktopArchiveOptions &options, bool create,
 	bool explicitRecovery = false) {
 	const auto serial = std::lock_guard(CatalogueMutex);
@@ -373,11 +381,7 @@ std::optional<Layout> Profile(const DesktopArchiveOptions &options, bool create,
 		}
 	}
 	result.catalogue = result.profileDirectory + u"/catalogue.json"_q;
-	result.account = *account;
-	result.accountDirectory = result.profileDirectory + u"/accounts/"_q + *account;
-	result.intent = result.profileDirectory + u"/intents/"_q + *account + u".json"_q;
-	result.fence = result.profileDirectory + u"/fences/"_q + *account + u".json"_q;
-	result.lock = result.profileDirectory + u"/locks/"_q + *account + u".lock"_q;
+	ScopeAccount(result, *account);
 	return DesktopArchiveIdentity(options.profileRoot) == profileNative
 		&& BindingIdentity(options) == native ? std::optional(result) : std::nullopt;
 }
@@ -603,7 +607,8 @@ std::optional<PendingDiscard> ReadDiscard(const Layout &layout) {
 // The caller owns the account lock. Catalogues are shared across accounts,
 // so release the catalogue lock before removing the detached data.
 DesktopArchiveDiscardResult FinishDiscard(const Layout &layout,
-	const DesktopArchiveOptions &options, const DesktopArchiveDiscardToken *token) {
+	const DesktopArchiveOptions &options, const DesktopArchiveDiscardToken *token,
+	bool confirmed = false) {
 	const auto detached = DetachedAccountDirectory(layout);
 	const auto intent = DiscardIntent(layout);
 	{
@@ -688,8 +693,8 @@ DesktopArchiveDiscardResult FinishDiscard(const Layout &layout,
 			return {u"discard-cancelled"_q};
 		}
 		if (live) {
-			if ((options.active && !options.active()) || DiscardAuthority(options) != job->authority
-				|| options.loginAuthKeyIds != job->keys) {
+			if (!confirmed && ((options.active && !options.active()) || DiscardAuthority(options) != job->authority
+				|| options.loginAuthKeyIds != job->keys)) {
 				return {u"discard-login-changed-before-detach"_q};
 			}
 			if (!QDir().rename(layout.accountDirectory, detached)) {
@@ -724,6 +729,39 @@ DesktopArchiveDiscardResult FinishDiscard(const Layout &layout,
 	}
 	return DesktopArchiveRemoveFile(intent)
 		? DesktopArchiveDiscardResult{} : DesktopArchiveDiscardResult{u"discard-marker-remove-failed"_q};
+}
+
+bool RecoverConfirmedDiscards(const Layout &profile, const DesktopArchiveOptions &options) {
+	const auto suffix = u".discard.json"_q;
+	auto entries = QDirIterator(profile.profileDirectory + u"/accounts"_q,
+		QStringList{u"*"_q + suffix}, QDir::Files | QDir::Hidden | QDir::System | QDir::NoSymLinks);
+	auto retry = false;
+	while (entries.hasNext() && (!options.active || options.active())) {
+		entries.next();
+		const auto name = entries.fileName().chopped(suffix.size());
+		const auto account = ParseAccountKey(name);
+		if (!account || AccountKeyText(account->environment, account->userId) != name
+			|| *account == options.account) {
+			continue;
+		}
+		auto layout = profile;
+		ScopeAccount(layout, name);
+		auto lock = std::make_unique<QLockFile>(layout.lock);
+		const auto release = gsl::finally([&] { ReleaseAccountLock(lock, layout.lock); });
+		lock->setStaleLockTime(0);
+		if (!RecoverReleasedLock(layout.lock) || !lock->tryLock(0)) {
+			retry = true;
+			continue;
+		}
+		if (Exists(DiscardIntent(layout))) {
+			// A recorded confirmation authorizes only the exact identities
+			// in that job. It remains valid after the account logs out.
+			auto target = DesktopArchiveOptions();
+			target.account = *account;
+			retry = FinishDiscard(layout, target, nullptr, true).retryable || retry;
+		}
+	}
+	return retry;
 }
 
 bool UpdateRecord(const Layout &layout, const std::optional<QJsonObject> &record) {
@@ -1833,13 +1871,16 @@ bool DesktopArchiveStore::RemoveAccount(
 		return !Exists(options.archiveRoot);
 	}
 	auto layout = *profile;
-	auto lock = QLockFile(layout.lock);
-	lock.setStaleLockTime(0);
-	if (!RecoverReleasedLock(layout.lock) || !lock.tryLock(0)) {
+	auto lock = std::make_unique<QLockFile>(layout.lock);
+	const auto release = gsl::finally([&] { ReleaseAccountLock(lock, layout.lock); });
+	lock->setStaleLockTime(0);
+	if (!RecoverReleasedLock(layout.lock) || !lock->tryLock(0)) {
 		return false;
 	}
 	if (DiscardPending(layout)) {
-		return false;
+		auto confirmed = DesktopArchiveOptions();
+		confirmed.account = options.account;
+		return bool(FinishDiscard(layout, confirmed, nullptr, true));
 	}
 	const auto catalogue = Catalogue(layout, false);
 	const auto entry
@@ -1881,13 +1922,28 @@ bool DesktopArchiveStore::RemoveAccount(
 	return removal && RunRemoval(layout, *removal, nullptr, maximumActions, 0, options.maintenanceAllowed);
 }
 
-bool DesktopArchiveStore::Recover(const DesktopArchiveOptions &options) {
+bool DesktopArchiveStore::RetryConfirmedDiscards(const DesktopArchiveOptions &options) {
+	if (NoProfileBinding(options)) {
+		return false;
+	}
+	const auto profile = Profile(options, false);
+	return !profile || RecoverConfirmedDiscards(*profile, options);
+}
+
+bool DesktopArchiveStore::Recover(const DesktopArchiveOptions &options, bool *retryDiscards) {
+	if (retryDiscards) {
+		*retryDiscards = false;
+	}
 	if (NoProfileBinding(options)) {
 		return true;
 	}
 	const auto profile = Profile(options, false);
 	if (!profile) {
 		return !Exists(options.archiveRoot);
+	}
+	const auto retry = RecoverConfirmedDiscards(*profile, options);
+	if (retryDiscards) {
+		*retryDiscards = retry;
 	}
 	auto iterator = QDirIterator(profile->profileDirectory + u"/intents"_q,
 		QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System);

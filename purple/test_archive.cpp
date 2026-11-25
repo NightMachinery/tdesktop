@@ -567,6 +567,72 @@ void ExplicitDiscardFixtures() {
 	}
 }
 
+void DiscardAfterLogout() {
+	for (const auto beforeRename : {true, false}) for (const auto lockAtLogout : {true, false}) {
+		Section = "confirmed discard survives logout and restart without its login";
+		const auto temporary = QTemporaryDir();
+		auto options = Options(temporary.path());
+		const auto other = Options(temporary.path(), 456);
+		auto store = DesktopArchiveStore();
+		CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+		if (!store.Current()) {
+			continue;
+		}
+		CHECK(store.Capture(Event(Empty(), u"logout-fixture"_q, 1)).retained);
+		const auto root = store.directory();
+		const auto account = QFileInfo(root).absolutePath();
+		const auto profile = QFileInfo(QFileInfo(account).absolutePath()).absolutePath();
+		const auto marker = account + u".discard.json"_q;
+		const auto detached = account + u".discard"_q;
+		CHECK(store.Close());
+
+		auto survivor = DesktopArchiveStore();
+		CHECK(survivor.Open(other) == DesktopArchiveStatus::Ready);
+		const auto survivorEpoch = survivor.epoch();
+		CHECK(survivor.Capture(Event(Empty(other.account), u"keep"_q, 1, u"fixture"_q,
+			ArchiveOrigin::Baseline, Key(other.account))).retained);
+		CHECK(survivor.Close());
+
+		const auto token = DesktopArchiveStore::PrepareDiscard(options).token;
+		CHECK(token);
+		if (!token) {
+			continue;
+		}
+		auto steps = 0;
+		options.maintenanceAllowed = [&] { return ++steps <= (beforeRename ? 1 : 2); };
+		CHECK(DesktopArchiveStore::DiscardAccount(options, *token).reason == u"discard-cancelled"_q);
+		CHECK(QFileInfo::exists(marker));
+		CHECK(QFileInfo::exists(account) == beforeRename);
+		CHECK(QFileInfo::exists(detached) != beforeRename);
+
+		auto logout = options;
+		logout.loginAuthority.clear();
+		logout.loginAuthKeyIds.clear();
+		logout.localKey.clear();
+		logout.active = [] { return false; };
+		logout.maintenanceAllowed = [] { return false; };
+		auto held = QLockFile(profile + u"/locks/0-123.lock"_q);
+		if (lockAtLogout) {
+			CHECK(held.tryLock(0));
+		}
+		CHECK(DesktopArchiveStore::RemoveAccount(logout, 64) == !lockAtLogout);
+		CHECK(QFileInfo::exists(marker) == lockAtLogout);
+		auto retry = false;
+		CHECK(DesktopArchiveStore::Recover(other, &retry));
+		CHECK(retry == lockAtLogout);
+		if (lockAtLogout) {
+			CHECK(QFileInfo::exists(marker));
+			held.unlock();
+			CHECK(!DesktopArchiveStore::RetryConfirmedDiscards(other));
+		}
+		CHECK(!QFileInfo::exists(marker) && !QFileInfo::exists(detached) && !QFileInfo::exists(root));
+		CHECK(survivor.Open(other) == DesktopArchiveStatus::Ready);
+		CHECK(survivor.epoch() == survivorEpoch);
+		CHECK(survivor.Versions(Key(other.account)).versions.size() == 1);
+		CHECK(survivor.Close());
+	}
+}
+
 void AdmissionAuthentication() {
 	Section = "mandatory authenticated admission refuses corruption without deletion";
 	auto temporary = QTemporaryDir();
@@ -2409,6 +2475,7 @@ int main(int argc, char** argv) {
 	HistoricalObservationRevision();
 	ShortSendAcknowledgement();
 	ExplicitDiscardFixtures();
+	DiscardAfterLogout();
 	AttentionRecovery();
 	NewCaptureLosses();
 	PageDelivery();
