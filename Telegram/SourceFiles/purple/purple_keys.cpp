@@ -427,8 +427,10 @@ enum class Action {
 	NextChat,
 	OpenChat,
 	ChatPalette,
+	RecentChatPalette,
 	UnreadBuffer,
 	ToggleZenMode,
+	ToggleZenChats,
 	TogglePrivacyScreen,
 	TopicPalette,
 	TopicUnreadPalette,
@@ -519,6 +521,7 @@ struct Command {
 	const char *id;
 	const char *category;
 	const char *need;
+	const char *aliases;
 	QString (*label)();
 	RepeatPolicy repeat = RepeatPolicy::Never;
 	ChatMediaType mediaType = ChatMediaType::kCount;
@@ -526,203 +529,302 @@ struct Command {
 
 const Command kCommands[] = {
 	{ Action::EnterNormalMode, "enter-normal-mode", "mode", "",
+		"command navigation escape vim",
 		[] { return tr::lng_purple_keys_normal(tr::now); } },
 	{ Action::EnterInsertMode, "enter-insert-mode", "mode", "",
+		"type write compose editing",
 		[] { return tr::lng_purple_keys_insert(tr::now); } },
 	{ Action::ModalInputToggle, "modal-input-toggle", "mode", "",
+		"vim evil keyboard shortcuts enable disable",
 		[] { return tr::lng_purple_keys_toggle_modal_input(tr::now); } },
 	{ Action::Backgrounds, "chat-backgrounds-visibility-toggle", "toggle", "",
+		"wallpaper plain background artwork",
 		[] { return tr::lng_purple_keys_backgrounds(tr::now); } },
 	{ Action::ToggleNightMode, "toggle-night-mode", "toggle", "",
+		"dark light appearance theme",
 		[] { return tr::lng_menu_night_mode(tr::now); } },
 	{ Action::MoveUp, "move-up", "navigate", "Needs chat list or scrollable conversation",
+		"scroll backward previous above",
 		[] { return u"Move or scroll up"_q; }, RepeatPolicy::SameTarget },
 	{ Action::MoveDown, "move-down", "navigate", "Needs chat list or scrollable conversation",
+		"scroll forward next below",
 		[] { return u"Move or scroll down"_q; }, RepeatPolicy::SameTarget },
 	{ Action::PreviousChat, "chat-cursor-previous", "chats", "Needs chat list visible",
+		"previous conversation cursor up",
 		[] { return tr::lng_purple_keys_chat_previous(tr::now); }, RepeatPolicy::ChatNavigation },
 	{ Action::NextChat, "chat-cursor-next", "chats", "Needs chat list visible",
+		"next conversation cursor down",
 		[] { return tr::lng_purple_keys_chat_next(tr::now); }, RepeatPolicy::ChatNavigation },
 	{ Action::OpenChat, "chat-cursor-open", "chats", "J/K to pick a chat first",
+		"visit conversation enter selected",
 		[] { return tr::lng_purple_keys_chat_open(tr::now); } },
 	{ Action::ChatPalette, "chat-palette", "chats", "",
+		"switch jump find conversation buffers",
 		[] { return tr::lng_purple_chat_palette(tr::now); } },
+	{ Action::RecentChatPalette, "recent-chat-palette", "chats", "",
+		"last visited switch buffer history",
+		[] { return u"Switch to a recently viewed chat"_q; } },
 	{ Action::UnreadBuffer, "unread-chats-buffer", "chats", "",
+		"ibuffer missed conversations notifications",
 		[] { return u"Unread unmuted chats (iBuffer)"_q; } },
 	{ Action::ToggleZenMode, "toggle-chat-zen-mode", "window", "Needs an open chat",
+		"fullscreen maximize distraction focus",
 		[] { return u"Toggle Zen fullscreen chat"_q; } },
+	{ Action::ToggleZenChats, "toggle-zen-chat-list", "window", "Needs Zen fullscreen chat",
+		"show hide sidebar dialogs conversation list",
+		[] { return u"Toggle Zen chat list"_q; } },
 	{ Action::TogglePrivacyScreen, "toggle-privacy-screen", "toggle", "",
+		"clock cover hide screen lock",
 		[] { return u"Toggle privacy screen"_q; } },
 	{ Action::TopicPalette, "topic-palette", "topics", "Needs a forum group or threaded bot",
+		"thread forum switch picker",
 		[] { return u"Switch topic"_q; } },
 	{ Action::TopicUnreadPalette, "topic-unread-palette", "topics", "Needs a forum group or threaded bot",
+		"unread thread forum picker",
 		[] { return u"Switch unread topic"_q; } },
 	{ Action::TopicNext, "topic-next", "topics", "Needs a forum group or threaded bot",
+		"thread forum forward next",
 		[] { return u"Next topic"_q; }, RepeatPolicy::Count },
 	{ Action::TopicPrevious, "topic-previous", "topics", "Needs a forum group or threaded bot",
+		"thread forum backward previous",
 		[] { return u"Previous topic"_q; }, RepeatPolicy::Count },
 	{ Action::TopicNextUnread, "topic-next-unread", "topics", "Needs a forum group or threaded bot",
+		"thread forum unread jump",
 		[] { return u"Next unread topic"_q; } },
 	{ Action::TopicLast, "topic-last", "topics", "Needs a previous topic in this forum",
+		"thread forum return back",
 		[] { return u"Last viewed topic"_q; } },
 	{ Action::TopicCreate, "topic-create", "topics", "Needs a forum where you can create topics or a threaded bot",
+		"new thread forum compose",
 		[] { return u"New topic or bot message"_q; } },
 	{ Action::TopicParent, "topic-parent", "topics", "Needs a forum group or threaded bot",
+		"thread forum back list",
 		[] { return u"Show forum topic list"_q; } },
 	{ Action::PreviousFolder, "folder-previous", "chats", "Folders are available in the main chat list",
+		"tab filter previous left",
 		[] { return tr::lng_purple_keys_folder_previous(tr::now); }, RepeatPolicy::FolderNavigation },
 	{ Action::NextFolder, "folder-next", "chats", "Folders are available in the main chat list",
+		"tab filter next right",
 		[] { return tr::lng_purple_keys_folder_next(tr::now); }, RepeatPolicy::FolderNavigation },
 	{ Action::SelectMessage, "message-hint-select", "messages", "Needs visible messages",
+		"mark pick visible bubble hints",
 		[] { return tr::lng_purple_keys_message_select(tr::now); } },
 	{ Action::CopyMessage, "message-hint-copy-text", "yank", "Needs visible messages",
+		"yank clipboard bubble contents",
 		[] { return tr::lng_purple_keys_message_copy(tr::now); } },
 	{ Action::Search, "search-messages", "search", "Unavailable in scheduled messages",
+		"find lookup filter conversation",
 		[] { return tr::lng_shortcuts_search(tr::now); } },
 	{ Action::OpenMainMenu, "open-main-menu", "open", "",
+		"hamburger drawer account sidebar",
 		[] { return tr::lng_main_menu(tr::now); } },
 	{ Action::OpenSettings, "open-settings", "open", "",
+		"preferences configuration options",
 		[] { return tr::lng_menu_settings(tr::now); } },
 	{ Action::CustomizeSettings, "customize-settings", "files", "Needs an unlocked account window",
+		"config editor toml preferences work mode",
 		[] { return u"Customize Purple settings"_q; } },
 	{ Action::LogExport, "log-export", "files", "Needs an unlocked account window",
+		"diagnostics troubleshoot support download",
 		[] { return u"Export Purple diagnostics"_q; } },
 	{ Action::LogClear, "log-clear", "files", "Needs an unlocked account window",
+		"diagnostics delete reset history",
 		[] { return u"Clear Purple diagnostics"_q; } },
 	{ Action::OpenSavedMessages, "open-saved-messages", "open", "",
+		"bookmark notes self favorites",
 		[] { return tr::lng_saved_messages(tr::now); } },
 	{ Action::OpenArchive, "open-archived-chats", "open", "",
+		"hidden inbox archived conversations",
 		[] { return tr::lng_shortcuts_archive(tr::now); } },
 	{ Action::OpenContacts, "open-contacts", "open", "",
+		"people address book friends",
 		[] { return tr::lng_shortcuts_contacts(tr::now); } },
 	{ Action::OpenCalls, "open-calls", "open", "Unavailable in support mode",
+		"phone recent video voice history",
 		[] { return tr::lng_menu_calls(tr::now); } },
 	{ Action::OpenDownloads, "open-downloads", "open", "",
+		"transfers downloaded attachments",
 		[] { return tr::lng_downloads_section(tr::now); } },
 	{ Action::NewGroup, "new-group", "new", "Unavailable in support mode",
+		"create conversation chat members",
 		[] { return tr::lng_create_group_title(tr::now); } },
 	{ Action::NewChannel, "new-channel", "new", "Unavailable in support mode",
+		"create broadcast feed",
 		[] { return tr::lng_create_channel_title(tr::now); } },
 	{ Action::AddContact, "add-contact", "new", "",
+		"new person phone address book",
 		[] { return tr::lng_profile_add_contact(tr::now); } },
 	{ Action::OpenScheduled, "open-scheduled-messages", "chat", "Needs an open chat",
+		"queue delayed future timed posts",
 		[] { return tr::lng_scheduled_messages(tr::now); } },
 	{ Action::OpenMusic, "open-music", "playback", "",
+		"audio library songs tracks",
 		[] { return tr::lng_purple_music_title(tr::now); } },
 	{ Action::OpenPlaylists, "open-playlists", "playback", "",
+		"queue collections music songs",
 		[] { return tr::lng_purple_playlists_title(tr::now); } },
 	{ Action::OpenChatInfo, "open-chat-info", "chat", "Needs an open chat",
+		"details profile members about",
 		[] { return tr::lng_purple_keys_chat_info(tr::now); } },
 	{ Action::OpenChatMedia, "open-chat-media", "chat media", "Needs an open chat",
+		"gallery pictures photos videos",
 		[] { return tr::lng_media_type_media(tr::now); }, RepeatPolicy::Never,
 		ChatMediaType::PhotoVideo },
 	{ Action::OpenChatMusic, "open-chat-music", "chat media", "Needs an open chat",
+		"songs audio tracks shared",
 		[] { return tr::lng_purple_keys_chat_music(tr::now); }, RepeatPolicy::Never,
 		ChatMediaType::MusicFile },
 	{ Action::OpenChatFiles, "open-chat-files", "chat media", "Needs an open chat",
+		"documents attachments shared",
 		[] { return tr::lng_media_type_files(tr::now); }, RepeatPolicy::Never,
 		ChatMediaType::File },
 	{ Action::OpenChatLinks, "open-chat-links", "chat media", "Needs an open chat",
+		"URLs websites browser shared",
 		[] { return tr::lng_media_type_links(tr::now); }, RepeatPolicy::Never,
 		ChatMediaType::Link },
 	{ Action::OpenChatVoice, "open-chat-voice", "chat media", "Needs an open chat",
+		"audio messages video notes recordings",
 		[] { return tr::lng_media_type_audios(tr::now); }, RepeatPolicy::Never,
 		ChatMediaType::RoundVoiceFile },
 	{ Action::OpenChatGifs, "open-chat-gifs", "chat media", "Needs an open chat",
+		"animations images shared",
 		[] { return tr::lng_media_type_gifs(tr::now); }, RepeatPolicy::Never,
 		ChatMediaType::GIF },
 	{ Action::OpenChatPolls, "open-chat-polls", "chat media", "Needs an open chat",
+		"votes surveys questions shared",
 		[] { return tr::lng_media_type_polls(tr::now); }, RepeatPolicy::Never,
 		ChatMediaType::Poll },
 	{ Action::OpenPinnedMessages, "open-pinned-messages", "chat", "Needs an open chat",
+		"bookmarks important sticky posts",
 		[] { return tr::lng_settings_events_pinned(tr::now); } },
 	{ Action::AttachFiles, "attach-files", "chat", "Needs a chat you can send files to",
+		"send upload add document photo",
 		[] { return tr::lng_attach(tr::now); } },
 	{ Action::OpenChatMenu, "open-chat-menu", "chat", "Needs chat list or open chat",
+		"options actions context conversation",
 		[] { return tr::lng_shortcuts_show_chat_menu(tr::now); } },
 	{ Action::PreviewChat, "preview-chat", "chats", "J/K to pick a chat first",
+		"peek quick view conversation",
 		[] { return tr::lng_shortcuts_show_chat_preview(tr::now); } },
 	{ Action::MessageMenu, "message-hint-menu", "messages", "Needs visible messages",
+		"context options actions popup bubble",
 		[] { return tr::lng_purple_keys_message_menu(tr::now); } },
 	{ Action::TogglePlayback, "playback-toggle", "playback", "Needs active audio in this account",
+		"music audio song play pause resume",
 		[] { return tr::lng_shortcuts_media_play_pause(tr::now); } },
 	{ Action::StopPlayback, "playback-stop", "playback", "Needs active audio in this account",
+		"music audio song end stop",
 		[] { return tr::lng_shortcuts_media_stop(tr::now); } },
 	{ Action::PreviousTrack, "playback-previous-track", "playback", "Needs active audio in this account",
+		"music audio song back skip previous",
 		[] { return tr::lng_shortcuts_media_previous(tr::now); } },
 	{ Action::NextTrack, "playback-next-track", "playback", "Needs active audio in this account",
+		"music audio song forward skip next",
 		[] { return tr::lng_shortcuts_media_next(tr::now); } },
 	{ Action::SeekBackward, "playback-seek-backward", "playback", "Needs active audio in this account",
+		"music audio rewind back position",
 		[] { return tr::lng_purple_shortcuts_seek_backward(tr::now); }, RepeatPolicy::SameTarget },
 	{ Action::SeekForward, "playback-seek-forward", "playback", "Needs active audio in this account",
+		"music audio fast forward position",
 		[] { return tr::lng_purple_shortcuts_seek_forward(tr::now); }, RepeatPolicy::SameTarget },
 	{ Action::Account1, "switch-account-1", "accounts", "Needs a signed-in 1st account",
+		"profile login identity first",
 		[] { return tr::lng_shortcuts_show_account_n(
 			tr::now, lt_index, QString::number(1)); } },
 	{ Action::Account2, "switch-account-2", "accounts", "Needs a signed-in 2nd account",
+		"profile login identity second",
 		[] { return tr::lng_shortcuts_show_account_n(
 			tr::now, lt_index, QString::number(2)); } },
 	{ Action::Account3, "switch-account-3", "accounts", "Needs a signed-in 3rd account",
+		"profile login identity third",
 		[] { return tr::lng_shortcuts_show_account_n(
 			tr::now, lt_index, QString::number(3)); } },
 	{ Action::Account4, "switch-account-4", "accounts", "Needs a signed-in 4th account",
+		"profile login identity fourth",
 		[] { return tr::lng_shortcuts_show_account_n(
 			tr::now, lt_index, QString::number(4)); } },
 	{ Action::Account5, "switch-account-5", "accounts", "Needs a signed-in 5th account",
+		"profile login identity fifth",
 		[] { return tr::lng_shortcuts_show_account_n(
 			tr::now, lt_index, QString::number(5)); } },
 	{ Action::Account6, "switch-account-6", "accounts", "Needs a signed-in 6th account",
+		"profile login identity sixth",
 		[] { return tr::lng_shortcuts_show_account_n(
 			tr::now, lt_index, QString::number(6)); } },
 	{ Action::FocusChats, "focus-chat-list", "window", "Needs chat list visible",
+		"sidebar dialogs channel list left",
 		[] { return tr::lng_purple_keys_focus_chats(tr::now); } },
 	{ Action::FocusConversation, "focus-conversation", "window", "Needs an open conversation",
+		"history messages thread right",
 		[] { return tr::lng_purple_keys_focus_conversation(tr::now); } },
 	{ Action::FocusOtherPane, "focus-other-pane", "window", "Needs two panes open",
+		"switch column split sidebar",
 		[] { return u"Switch between chat list and conversation"_q; } },
 	{ Action::HistoryHalfUp, "history-half-up", "navigate", "Needs a scrollable conversation",
+		"scroll backwards older half",
 		[] { return u"Scroll conversation half-page up"_q; }, RepeatPolicy::SameTarget },
 	{ Action::HistoryHalfDown, "history-half-down", "navigate", "Needs a scrollable conversation",
+		"scroll forwards newer half",
 		[] { return u"Scroll conversation half-page down"_q; }, RepeatPolicy::SameTarget },
 	{ Action::OlderMessagesPage, "history-page-older", "navigate", "Needs a scrollable conversation",
+		"scroll up backward history previous",
 		[] { return tr::lng_purple_keys_history_page_older(tr::now); }, RepeatPolicy::SameTarget },
 	{ Action::NewerMessagesPage, "history-page-newer", "navigate", "Needs a scrollable conversation",
+		"scroll down forward history next",
 		[] { return tr::lng_purple_keys_history_page_newer(tr::now); }, RepeatPolicy::SameTarget },
 	{ Action::LatestMessages, "history-jump-to-latest", "navigate", "Needs a scrollable conversation",
+		"end bottom newest current",
 		[] { return tr::lng_jump_to_bottom(tr::now); } },
 	{ Action::UnreadMessages, "history-jump-to-unread", "navigate", "Needs an open chat",
+		"first new messages jump unseen",
 		[] { return tr::lng_unread_bar_some(tr::now); } },
 	{ Action::OpenHistoryCalendar, "history-open-calendar", "chat", "Needs an open chat",
+		"date day time month jump",
 		[] { return tr::lng_calendar(tr::now); } },
 	{ Action::CopyMessageLink, "message-hint-copy-link", "yank", "Needs visible non-scheduled messages",
+		"URL permalink yank clipboard",
 		[] { return tr::lng_purple_keys_message_link(tr::now); } },
 	{ Action::CopyMessageUrl, "message-hint-copy-url", "yank", "Needs visible messages",
+		"hyperlink address yank clipboard",
 		[] { return tr::lng_context_copy_link(tr::now); } },
 	{ Action::OpenMessageUrl, "message-hint-open-url", "messages", "Needs visible messages",
+		"hyperlink visit browser address",
 		[] { return tr::lng_polls_option_open_link_title(tr::now); } },
 	{ Action::WindowHint, "window-hint", "window", "Needs an active window",
+		"follow link button mouse keyboard activate",
 		[] { return u"Click a visible target"_q; } },
 	{ Action::WindowHintMenu, "window-hint-menu", "window", "Needs an active window",
+		"target actions menu context options",
 		[] { return u"Actions for a visible target"_q; } },
 	{ Action::ReplyToMessage, "message-hint-reply", "messages", "Needs a chat you can reply in",
+		"respond answer quote",
 		[] { return tr::lng_context_reply_msg(tr::now); } },
 	{ Action::EditMessage, "message-hint-edit", "messages", "Needs editable messages",
+		"change modify correct rewrite",
 		[] { return tr::lng_context_edit_msg(tr::now); } },
 	{ Action::Cheatsheet, "cheatsheet", "help", "",
+		"reference keyboard hotkeys guide",
 		[] { return u"Keyboard cheatsheet"_q; } },
 	{ Action::Help, "keys-help", "help", "",
+		"bindings keys reference list shortcuts",
 		[] { return u"All active bindings"_q; } },
 	{ Action::Run, "command-search", "help", "",
+		"palette execute action command",
 		[] { return tr::lng_purple_keys_run(tr::now); } },
 	{ Action::DescribeChord, "key-describe", "help", "",
+		"lookup binding shortcut key",
 		[] { return tr::lng_purple_keys_describe_key(tr::now); } },
 	{ Action::DescribeCommand, "command-describe", "help", "",
+		"inspect action lookup information",
 		[] { return tr::lng_purple_keys_describe_command(tr::now); } },
 	{ Action::NoticeHistory, "notice-history", "help", "Unavailable while locked or private",
+		"warnings errors notifications log messages",
 		[] { return u"Recent notices (*Messages*)"_q; } },
 	{ Action::StockShortcuts, "stock-shortcuts", "help", "",
+		"native default keyboard bindings",
 		[] { return u"Telegram stock shortcuts"_q; } },
 	{ Action::ReloadKeymap, "reload-keymap", "help", "",
+		"refresh bindings keys configuration",
 		[] { return u"Reload keys.edn"_q; } },
 };
 
@@ -1793,6 +1895,9 @@ bool Available(Action action, const Target &target) {
 	case Action::UnreadBuffer:
 	case Action::TogglePrivacyScreen:
 		return target.controller != nullptr;
+	case Action::ToggleZenChats:
+		return target.controller
+			&& !ZenChatListToggleLabel(target.controller).isEmpty();
 	case Action::ToggleZenMode:
 		return target.controller != nullptr
 			&& (target.controller->purpleZenHidden()
@@ -1959,6 +2064,7 @@ QString FirstLocalleaderLabel() {
 enum class KeyUse {
 	Pass,
 	ExitInsertOrBackOut,
+	FullscreenBack,
 	Cancel,
 	CountDigit,
 	PrefixBackspace,
@@ -1986,6 +2092,7 @@ public:
 	[[nodiscard]] bool swallowNativeRepeat(int physical) const;
 #endif // Q_OS_MAC
 	[[nodiscard]] bool ownsChatListFocus() const;
+	void fullscreenChanged(bool fullscreen);
 	[[nodiscard]] bool isNormal() const { return _normal; }
 	[[nodiscard]] int statusBarHeight() const;
 	void updateLayout(QRect body);
@@ -2013,7 +2120,6 @@ private:
 	[[nodiscard]] Dialogs::InnerWidget *liveChatCursor(
 		Window::SessionController *controller) const;
 	[[nodiscard]] bool chromeVisible() const;
-	[[nodiscard]] bool zenNeedsTransientBar() const;
 	[[nodiscard]] KeyUse classify(
 		const QKeyEvent &event,
 		int key,
@@ -2391,7 +2497,7 @@ Keys::Keys(not_null<MainWindow*> window)
 			++_revision;
 			recordActiveTopic();
 			if (_zenMode && !owner->activeChatCurrent().thread()) {
-				setZenMode(false);
+				owner->setPurpleZenHidden(true);
 			}
 			clearPrefix(keepMotion);
 		};
@@ -2574,17 +2680,8 @@ bool Keys::chromeVisible() const {
 		&& _window->controller().sessionController() != nullptr;
 }
 
-bool Keys::zenNeedsTransientBar() const {
-	return !_prefix.empty()
-		|| _count > 0
-		|| _inspect
-		|| _hints.active()
-		|| visibleLayer() != ActiveLayer::None
-		|| !_feedbackText.isEmpty();
-}
-
 int Keys::statusBarHeight() const {
-	return (chromeVisible() && !_zenMode) ? ModalUi::ModalStatusBar::PreferredHeight() : 0;
+	return chromeVisible() ? ModalUi::ModalStatusBar::PreferredHeight() : 0;
 }
 
 void Keys::refreshColumns() {
@@ -2603,11 +2700,10 @@ void Keys::updateLayout(QRect body) {
 		_whichKey->hide();
 		return;
 	}
-	const auto showBar = !_zenMode || zenNeedsTransientBar();
 	const auto h = ModalUi::ModalStatusBar::PreferredHeight();
 	_statusBar->setGeometry(body.x(), body.y() + body.height() - h, body.width(), h);
 	refreshColumns();
-	_statusBar->setVisible(showBar);
+	_statusBar->show();
 	if (_whichKey->isVisible()) {
 		const auto above = QRect(body.x(), body.y(), body.width(), std::max(0, body.height() - h));
 		_whichKey->updateBounds(above);
@@ -2931,7 +3027,7 @@ ModalNotices::DeliveryContext Keys::deliveryContext() const {
 		.hasPendingPrefix = !_prefix.empty() || _count > 0 || _inspect || _hints.active(),
 		.hasBlockingLayerOrBox = hasBox,
 		.inZenMode = _zenMode,
-		.statusBarVisible = chromeVisible() && !_zenMode && !hasBox,
+		.statusBarVisible = chromeVisible() && !hasBox,
 		.canInterruptWindow = _window->isActiveWindow() && _held.isEmpty(),
 	};
 }
@@ -2943,11 +3039,7 @@ void Keys::setStatusMessage(
 		bool persistent) {
 	if (persistent) {
 		_persistentCue = text;
-		if (_zenMode) {
-			showFeedback(std::move(text), false, ModalNotices::kAckDurationInfoMs);
-		} else {
-			refreshStatusBar();
-		}
+		refreshStatusBar();
 		return;
 	}
 	showFeedback(std::move(text), isError, durationMs);
@@ -3018,6 +3110,12 @@ void Keys::refreshUnreadSummary() {
 	_unreadSummary = next;
 	if (changed) {
 		refreshStatusBar();
+	}
+}
+
+void Keys::fullscreenChanged(bool fullscreen) {
+	if (!fullscreen && _zenMode) {
+		setZenMode(false);
 	}
 }
 
@@ -3418,12 +3516,6 @@ void Keys::refreshStatusBar() {
 		hideWhichKey();
 		return;
 	}
-	const auto showBar = !_zenMode || zenNeedsTransientBar();
-	if (!showBar) {
-		_statusBar->hide();
-		hideWhichKey();
-		return;
-	}
 	if (!_lastBody.isEmpty()) {
 		const auto h = ModalUi::ModalStatusBar::PreferredHeight();
 		_statusBar->setGeometry(
@@ -3709,8 +3801,13 @@ KeyUse Keys::classify(
 		if (pending) {
 			return KeyUse::Cancel;
 		}
-		// In Insert mode on an eligible surface, Escape returns to Normal mode!
-		return (!_normal && target.focus) ? KeyUse::ExitInsertOrBackOut : KeyUse::Pass;
+		if (!_normal && target.focus) {
+			return KeyUse::ExitInsertOrBackOut;
+		}
+		if (key == Qt::Key_Escape && _window->isFullScreen()) {
+			return KeyUse::FullscreenBack;
+		}
+		return KeyUse::Pass;
 	}
 	if (_hints.active()) {
 		const auto printable = key >= Qt::Key_Space && key < Qt::Key_Escape;
@@ -3912,6 +4009,13 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 	switch (use) {
 	case KeyUse::ExitInsertOrBackOut:
 		enterNormal(true);
+		break;
+	case KeyUse::FullscreenBack:
+		if (target.history) {
+			target.history->escape();
+		} else if (target.messages.section) {
+			target.messages.section->delegate()->listCancelRequest();
+		}
 		break;
 	case KeyUse::Cancel:
 		clearPrefix();
@@ -4523,12 +4627,17 @@ void Keys::dispatch(Action action, const Target &target, int count, ScrollPress 
 		current->showSettings();
 		break;
 	case Action::ChatPalette:
+	case Action::RecentChatPalette:
 		clearPrefix();
-		ShowChatPalette(current);
+		ShowChatPalette(current, action == Action::RecentChatPalette);
 		break;
 	case Action::UnreadBuffer:
 		clearPrefix();
 		showUnreadBuffer(target);
+		break;
+	case Action::ToggleZenChats:
+		clearPrefix();
+		ToggleZenChatList(current);
 		break;
 	case Action::ToggleZenMode:
 		clearPrefix();
@@ -5322,6 +5431,7 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 			.id = QString::fromLatin1(cmd.id),
 			.label = CommandLabel(cmd.action, target),
 			.category = QString::fromLatin1(cmd.category),
+			.aliases = QString::fromLatin1(cmd.aliases),
 			.unavailableReason = CommandUnavailableReason(cmd),
 			.chords = Enabled() ? ChordsForAction(cmd.action, effective)
 				: std::vector<QStringList>(),
@@ -5611,6 +5721,44 @@ int CalendarDayKeyOffset(const QKeyEvent &event) {
 	case Qt::Key_Up: return -7;
 	case Qt::Key_Down: return 7;
 	default: return 0;
+	}
+}
+
+QString ZenChatListToggleLabel(
+		not_null<Window::SessionController*> controller) {
+	if (!controller->purpleZenHidden()
+		|| !controller->window().id().hasChatsList()
+		|| !controller->activeChatCurrent().thread()) {
+		return {};
+	}
+	return (controller->adaptive().isOneColumn()
+		|| controller->purpleZenChatsHidden())
+		? u"Show chat list"_q
+		: u"Hide chat list"_q;
+}
+
+void ToggleZenChatList(not_null<Window::SessionController*> controller) {
+	if (ZenChatListToggleLabel(controller).isEmpty()) {
+		return;
+	} else if (controller->adaptive().isOneColumn()) {
+		controller->clearSectionStack();
+		return;
+	}
+	const auto hide = !controller->purpleZenChatsHidden();
+	const auto focus = QApplication::focusWidget();
+	const auto list = ChatsPane(controller);
+	const auto focusConversation = hide && list && focus
+		&& (list == focus || list->isAncestorOf(focus));
+	controller->setPurpleZenHidden(true, hide);
+	if (focusConversation) {
+		controller->content()->setInnerFocus();
+	}
+}
+
+void ModalFullscreenChanged(not_null<MainWindow*> window, bool fullscreen) {
+	window->controller().adaptive().setPurpleFullscreen(fullscreen);
+	if (const auto keys = FindKeys(window.get())) {
+		keys->fullscreenChanged(fullscreen);
 	}
 }
 

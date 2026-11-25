@@ -1,4 +1,5 @@
 #include "purple/purple_sync_chat_service.h"
+#include "purple/purple_sync_magic_box.h"
 #include "purple/purple_sync_magic_service.h"
 #include "core/application.h"
 #include "main/main_account.h"
@@ -65,6 +66,7 @@ void StartSyncChatService() {
 				if (session) {
 					crl::on_main(session, [=] {
 						SyncMagicLookup(session, SyncMagicTrigger::Startup, false);
+						NoticeUnlinkedSyncSettings(session);
 					});
 				}
 			};
@@ -76,6 +78,11 @@ void StartSyncChatService() {
 
 	};
 	Core::App().domain().accountsChanges() | rpl::on_next(refresh, lifetime);
+	SyncChatStatusChanges() | rpl::on_next([](Main::Session *session) {
+		if (session) {
+			crl::on_main(session, [=] { NoticeUnlinkedSyncSettings(session); });
+		}
+	}, lifetime);
 	// WHY: app services start before the domain, and upstream adds stored accounts without
 	// accountsChanges(), so an active session change is the first sign of a normal launch's sessions.
 	Core::App().domain().activeSessionChanges() | rpl::on_next([=] { refresh(); }, lifetime);

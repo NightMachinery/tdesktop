@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_session_controller.h"
 
+#include "purple/purple_chat_palette.h"
 #include "purple/purple_window_session_controller.h"
 #include "purple/purple_chat_background.h"
 
@@ -2056,7 +2057,7 @@ void SessionController::toggleFiltersMenu(bool enabled) {
 		_filters = std::make_unique<FiltersMenu>(
 			widget()->bodyWidget(),
 			this);
-		if (_purpleZenHidden) {
+		if (_purpleZenChatsHidden) {
 			_filters->setHiddenForZen(true);
 		}
 	} else {
@@ -2387,6 +2388,9 @@ void SessionController::setActiveChatEntry(Dialogs::RowDescriptor row) {
 		_invitePeekTimer.cancel();
 	}
 	_activeChatEntry = row;
+	if (row.key.peer() && row.key.peer() != was.key.peer()) {
+		Purple::RecordChatPaletteVisit(row.key.peer());
+	}
 	if (nowHistory) {
 		nowHistory->setFakeUnreadWhileOpened(true);
 		if (const auto channel = nowHistory->peer->asChannel()
@@ -2715,7 +2719,7 @@ int SessionController::countDialogsWidthFromRatio(int bodyWidth) const {
 	}
 	const auto nochat = !mainSectionShown();
 	const auto width = bodyWidth
-		* Core::App().settings().dialogsWidthRatio(nochat);
+		* _purpleZenDialogsRatio.value_or(Core::App().settings().dialogsWidthRatio(nochat));
 	auto result = int(base::SafeRound(width));
 	accumulate_max(result, st::columnMinimalWidthLeft);
 //	accumulate_min(result, st::columnMaximalWidthLeft);
@@ -3324,16 +3328,29 @@ not_null<MainWidget*> SessionController::content() const {
 }
 
 int SessionController::filtersWidth() const {
-	return (_filters && !_purpleZenHidden) ? st::windowFiltersWidth : 0;
+	return (_filters && !_purpleZenChatsHidden) ? st::windowFiltersWidth : 0;
 }
 
-void SessionController::setPurpleZenHidden(bool hidden) {
-	if (_purpleZenHidden == hidden) {
+std::optional<float64> SessionController::purpleZenDialogsRatio() const {
+	return _purpleZenDialogsRatio;
+}
+
+void SessionController::setPurpleZenDialogsRatio(float64 ratio) {
+	_purpleZenDialogsRatio = ratio;
+	widget()->updateControlsGeometry();
+}
+
+void SessionController::setPurpleZenHidden(bool hidden, bool hideChats) {
+	if (_purpleZenHidden == hidden && _purpleZenChatsHidden == hideChats) {
 		return;
 	}
 	_purpleZenHidden = hidden;
+	if (!hidden) {
+		_purpleZenDialogsRatio.reset();
+	}
+	_purpleZenChatsHidden = hideChats;
 	if (_filters) {
-		_filters->setHiddenForZen(hidden);
+		_filters->setHiddenForZen(hideChats);
 	}
 	_filtersMenuChanged.fire({});
 	widget()->updateControlsGeometry();

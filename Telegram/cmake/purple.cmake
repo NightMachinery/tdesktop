@@ -43,6 +43,7 @@ PRIVATE
     purple/purple_music_bookmark.h
     purple/purple_chat_palette.cpp
     purple/purple_chat_palette.h
+    purple/purple_chat_palette_search.h
     purple/purple_exact_search.h
     purple/purple_control_endpoint.cpp
     purple/purple_control_endpoint.h
@@ -210,8 +211,11 @@ PRIVATE
     purple/purple_notices.h
     purple/purple_privacy_screen.cpp
     purple/purple_privacy_screen.h
+    purple/purple_privacy_canvas.cpp
+    purple/purple_privacy_canvas.h
     purple/purple_privacy_state.h
     purple/purple_privacy_weather.h
+    purple/purple_privacy_clocks.h
     purple/purple_message_hint_placement.h
     purple/purple_hint_labels.h
     purple/purple_hint_hydra.cpp
@@ -453,6 +457,8 @@ PRIVATE
     purple/purple_sync_local_store.h
     purple/purple_sync_review_box.cpp
     purple/purple_sync_review_box.h
+    purple/purple_sync_merge.cpp
+    purple/purple_sync_merge.h
     purple/purple_sync_setup_box.cpp
     purple/purple_sync_setup_box.h
     purple/purple_system_unlock.h
@@ -476,6 +482,7 @@ nice_target_sources(Telegram ${res_loc} PRIVATE purple/keymaps.qrc)
 nice_target_sources(lib_ffmpeg ${src_loc} PRIVATE purple/purple_build_checks.cpp)
 
 if (APPLE)
+    nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_privacy_accessibility_mac.mm)
     nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_system_unlock_mac.mm)
     target_link_frameworks(Telegram PRIVATE LocalAuthenticationEmbeddedUI)
     nice_target_sources(Telegram ${src_loc} PRIVATE purple/purple_webp_paste_mac.mm)
@@ -616,6 +623,7 @@ set_source_files_properties(
     ${purple_core_loc}/purple/purple_settings_edit.cpp
     ${purple_core_loc}/purple/purple_splice.cpp
     ${purple_core_loc}/purple/purple_state.cpp
+    ${src_loc}/purple/purple_sync_merge.cpp
     PROPERTIES INCLUDE_DIRECTORIES ${purple_core_loc}/tomlplusplus)
 
 include(${CMAKE_CURRENT_LIST_DIR}/purple_version.cmake)

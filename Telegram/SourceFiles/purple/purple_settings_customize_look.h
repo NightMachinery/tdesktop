@@ -6,6 +6,7 @@
 #include <QtGui/QPainter>
 #include <QtWidgets/QBoxLayout>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QListWidget>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QStyledItemDelegate>
 #include <QtWidgets/QTreeWidget>
@@ -78,46 +79,44 @@ inline void Apply(QWidget *root, QColor bg, QColor surface, QColor ink, QColor m
 		" QTreeWidget:focus, QListWidget:focus { border-color: %9; }"
 		"QTreeWidget::item, QListWidget::item { padding: %10px; }"
 		"QTreeWidget::item:hover:!selected, QListWidget::item:hover:!selected { background: %11; }"
-		"QAbstractScrollArea { background: %3; }"
-		"QScrollBar:vertical { width: %12px; background: %3; margin: 0; }"
-		"QScrollBar:horizontal { height: %12px; background: %3; margin: 0; }"
-		"QScrollBar::handle { background: %4; border-radius: %5px; min-height: %13px; min-width: %13px; }"
-		"QScrollBar::handle:hover { background: %9; }"
-		"QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }"
-		"QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }")
+		"QAbstractScrollArea { background: %3; }")
 		.arg(quiet.name(), ink.name(), bg.name(), controlBorder.name())
 		.arg(radius)
 		.arg(select.name(), selectedInk.name())
 		.arg(unit / 3)
 		.arg(focus.name())
 		.arg(unit / 4)
-		.arg(surface.name())
-		.arg(std::max(5, unit / 2))
-		.arg(2 * unit));
+		.arg(surface.name()));
 	root->setAutoFillBackground(true);
 }
 
 class Action final : public QPushButton {
 public:
 	Action(const QString &text, QWidget *parent, QString shortcut = {})
-	: QPushButton(text, parent), _shortcut(std::move(shortcut)) {
+	: QPushButton(text, parent)
+	, _shortcut(shortcut.isEmpty() ? QStringLiteral("Enter") : std::move(shortcut)) {
 		setAutoDefault(false);
 		setDefault(false);
 		setAttribute(Qt::WA_LayoutUsesWidgetRect);
+		setToolTip(text);
 		setAccessibleName(text);
-		if (!_shortcut.isEmpty()) setAccessibleDescription(_shortcut);
+		setAccessibleDescription(_shortcut == QStringLiteral("Enter")
+			? QStringLiteral("Press Enter when focused")
+			: _shortcut);
 		setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
 	}
 
 	QSize sizeHint() const override {
 		const auto fm = fontMetrics();
 		const auto pad = fm.height() / 2;
-		return QSize(fm.horizontalAdvance(text()) + 2 * pad
-			+ (_shortcut.isEmpty() ? 0 : fm.horizontalAdvance(_shortcut) + 2 * pad),
+		return QSize(fm.horizontalAdvance(text()) + fm.horizontalAdvance(_shortcut) + 4 * pad,
 			fm.height() + pad + 2);
 	}
 
-	QSize minimumSizeHint() const override { return sizeHint(); }
+	QSize minimumSizeHint() const override {
+		const auto fm = fontMetrics();
+		return { fm.horizontalAdvance(_shortcut) + 3 * fm.height(), sizeHint().height() };
+	}
 
 protected:
 	void paintEvent(QPaintEvent *) override {
@@ -142,20 +141,21 @@ protected:
 		p.setFont(font());
 		const auto fg = ReadableText(isEnabled() ? ink : BlendColor(ink, bg, .45), surface);
 		p.setPen(fg);
-		const auto capW = _shortcut.isEmpty() ? 0 : fm.horizontalAdvance(_shortcut) + pad;
-		const auto labelW = fm.horizontalAdvance(text());
-		const auto gap = capW ? pad : 0;
-		const auto start = (width() - labelW - gap - capW) / 2;
-		p.drawText(QRect(start, 0, labelW, height()), Qt::AlignCenter, text());
-		if (capW) {
-			const auto cap = QRect(start + labelW + gap, (height() - fm.height()) / 2, capW, fm.height());
-			const auto capBg = BlendColor(surface, ink, .12);
-			p.setPen(Qt::NoPen);
-			p.setBrush(capBg);
-			p.drawRoundedRect(cap, radius / 2, radius / 2);
-			p.setPen(ReadableText(fg, capBg));
-			p.drawText(cap, Qt::AlignCenter, _shortcut);
-		}
+		const auto capW = fm.horizontalAdvance(_shortcut) + pad;
+		const auto labelSpace = std::max(0, width() - 3 * pad - capW);
+		const auto label = fm.horizontalAdvance(text()) <= labelSpace
+			? text()
+			: fm.elidedText(text(), Qt::ElideRight, labelSpace);
+		const auto labelW = fm.horizontalAdvance(label);
+		const auto start = (width() - labelW - pad - capW) / 2;
+		p.drawText(QRect(start, 0, labelW, height()), Qt::AlignCenter, label);
+		const auto cap = QRect(start + labelW + pad, (height() - fm.height()) / 2, capW, fm.height());
+		const auto capBg = BlendColor(surface, ink, .12);
+		p.setPen(Qt::NoPen);
+		p.setBrush(capBg);
+		p.drawRoundedRect(cap, radius / 2, radius / 2);
+		p.setPen(ReadableText(fg, capBg));
+		p.drawText(cap, Qt::AlignCenter, _shortcut);
 	}
 
 private:
@@ -180,7 +180,7 @@ public:
 
 	QSize minimumSizeHint() const override {
 		auto size = QSize(0, 0);
-		for (const auto button : _actions) size = size.expandedTo(button->sizeHint());
+		for (const auto button : _actions) size = size.expandedTo(button->minimumSizeHint());
 		return size;
 	}
 
@@ -217,7 +217,8 @@ private:
 		auto line = 0;
 		for (const auto button : _actions) {
 			if (button->isHidden()) continue;
-			const auto size = button->sizeHint();
+			auto size = button->sizeHint();
+			size.setWidth(std::min(size.width(), width));
 			if (x && x + size.width() > width) {
 				y += line + gap();
 				x = line = 0;
@@ -240,6 +241,20 @@ inline void AppendAction(QBoxLayout *layout, QPushButton *button) {
 		layout->addWidget(row);
 	}
 	row->append(button);
+}
+
+inline void ConfigureCollectionList(QListWidget *list) {
+	list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	list->setTextElideMode(Qt::ElideRight);
+	list->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+}
+
+inline QBoxLayout::Direction CollectionListDirection(
+		int width,
+		const QFontMetrics &metrics) {
+	return width < 72 * metrics.averageCharWidth()
+		? QBoxLayout::TopToBottom
+		: QBoxLayout::LeftToRight;
 }
 
 class Chip final : public QLabel {

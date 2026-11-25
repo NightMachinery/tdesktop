@@ -26,6 +26,7 @@ public:
 
 	void setWindowLayout(WindowLayout value);
 	void setChatLayout(ChatLayout value);
+	void setPurpleFullscreen(bool fullscreen);
 
 	[[nodiscard]] rpl::producer<> value() const;
 	[[nodiscard]] rpl::producer<> changes() const;
@@ -39,6 +40,8 @@ public:
 	[[nodiscard]] rpl::producer<bool> chatWideValue() const;
 
 private:
+	rpl::variable<ChatLayout> _measuredChatLayout;
+	bool _purpleFullscreen = false;
 	rpl::variable<ChatLayout> _chatLayout;
 	rpl::variable<WindowLayout> _layout;
 

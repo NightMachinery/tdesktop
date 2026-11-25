@@ -93,52 +93,89 @@ uint16 RenderedOffset(const Ui::Text::String &text, int offset) {
 	return uint16(left);
 }
 
+bool IsUrl(EntityType type) {
+	return type == EntityType::Url || type == EntityType::CustomUrl;
+}
+
+bool MatchesUrl(const ClickHandlerPtr &handler, const QString &url) {
+	return handler && !url.isEmpty()
+		&& IsUrl(handler->getTextEntity().type)
+		&& handler->url() == url;
+}
+
 struct BodyLinkHit {
 	QRect rect;
 	ClickHandlerPtr handler;
 };
+
+void CollectVisibleBodyLinks(
+		not_null<HistoryView::Message*> message,
+		const Ui::Text::String &text,
+		const Ui::Text::HighlightRectsRequest &geometry,
+		QPoint origin,
+		bool all,
+		std::vector<BodyLinkHit> &result) {
+	const auto exported = text.toTextWithEntities();
+	for (const auto &entity : exported.entities) {
+		if (!all && !IsUrl(entity.type())) {
+			continue;
+		}
+		const auto range = TextSelection{
+			RenderedOffset(text, entity.offset()),
+			RenderedOffset(text, entity.offset() + entity.length()),
+		};
+		if (range.empty()) {
+			continue;
+		}
+		const auto ranges = std::array{ range };
+		const auto rects = text.countHighlightRects(ranges, geometry);
+		for (const auto &part : rects) {
+			const auto rect = part.intersected(geometry.clip);
+			if (rect.isEmpty()) {
+				continue;
+			}
+			const auto point = rect.center();
+			auto request = Ui::Text::StateRequest();
+			request.align = geometry.align;
+			const auto leafState = text.getState(
+				point - geometry.position,
+				geometry.geometry,
+				request);
+			if (!leafState.link || text.linkRangeFor(leafState.link) != range) {
+				continue;
+			}
+			const auto state = BodyLinkState(message, point + origin);
+			if (!state.link || state.itemId != message->textItem()->fullId()) {
+				continue;
+			}
+			if ((all && state.link == leafState.link)
+				|| MatchesUrl(state.link, leafState.link->url())) {
+				result.push_back({ rect.translated(origin), state.link });
+				break;
+			}
+		}
+	}
+}
 
 std::vector<BodyLinkHit> VisibleBodyLinks(
 		not_null<HistoryView::Message*> message,
 		QRect clip,
 		bool all = false) {
 	auto result = std::vector<BodyLinkHit>();
+	const auto [article, origin] = message->purpleRichLinkLayout();
 	const auto [text, bounds] = message->purpleBodyLinkLayout();
-	if (!text || !clip.intersects(bounds)) {
-		return result;
-	}
-	const auto exported = text->toTextWithEntities();
-	for (const auto &entity : exported.entities) {
-		if (!all && entity.type() != EntityType::Url
-			&& entity.type() != EntityType::CustomUrl) {
-			continue;
-		}
-		const auto range = TextSelection{
-			RenderedOffset(*text, entity.offset()),
-			RenderedOffset(*text, entity.offset() + entity.length()),
-		};
-		if (range.empty()) {
-			continue;
-		}
-		const auto ranges = std::array{ range };
-		const auto rects = text->countHighlightRects(ranges, {
+	if (article) {
+		article->forEachVisibleLinkText(clip.translated(-origin), [&](
+				const Ui::Text::String &leaf,
+				const Ui::Text::HighlightRectsRequest &geometry) {
+			CollectVisibleBodyLinks(message, leaf, geometry, origin, all, result);
+		});
+	} else if (text && clip.intersects(bounds)) {
+		CollectVisibleBodyLinks(message, *text, {
 			.position = bounds.topLeft(),
 			.geometry = Ui::Text::SimpleGeometry(bounds.width(), 0, 0, false),
-			.clip = clip,
-		});
-		for (const auto &part : rects) {
-			const auto rect = part.intersected(clip);
-			if (rect.isEmpty()) {
-				continue;
-			}
-			const auto state = BodyLinkState(message, rect.center());
-			if (state.link && (all || dynamic_cast<UrlClickHandler*>(state.link.get()))
-				&& text->linkRangeFor(state.link) == range
-				&& state.itemId == message->textItem()->fullId()) {
-				result.push_back({ rect, state.link });
-				break;
-			}
-		}
+			.clip = clip.intersected(bounds),
+		}, QPoint(), all, result);
 	}
 	return result;
 }
@@ -465,8 +502,8 @@ std::vector<MessageHints::Entry> MessageHints::snapshot() const {
 			const auto message = dynamic_cast<HistoryView::Message*>(element.get());
 			if (message) {
 				const auto owner = message->textItem()->fullId();
-				auto hits = VisibleBodyLinks(message, rect.translated(0, -top));
-				for (auto &hit : hits) {
+				const auto hits = VisibleBodyLinks(message, rect.translated(0, -top));
+				for (const auto &hit : hits) {
 					const auto glyph = hit.rect.translated(0, top);
 					entries.push_back({
 						.id = element->data()->fullId(),
@@ -477,7 +514,7 @@ std::vector<MessageHints::Entry> MessageHints::snapshot() const {
 							.owner = owner,
 							.itemPoint = hit.rect.center(),
 							.listPoint = glyph.center(),
-							.handler = std::move(hit.handler),
+							.url = hit.handler->url(),
 						},
 					});
 				}
@@ -668,8 +705,16 @@ void MessageHints::appendWindowMessages(
 			}
 			handlers.insert(handler.get());
 			const auto point = bounds.center();
+			const auto url = body ? handler->url() : QString();
 			const auto hit = [=] {
-				return body ? BodyLinkState(element, point) : element->textState(point, {});
+				const auto state = body
+					? BodyLinkState(element, point)
+					: element->textState(point, {});
+				if (state.link == handler
+					|| (state.itemId == owner && MatchesUrl(state.link, url))) {
+					return state.link;
+				}
+				return ClickHandlerPtr();
 			};
 			out.push_back({
 				.widget = widget,
@@ -677,12 +722,14 @@ void MessageHints::appendWindowMessages(
 				.name = handler->tooltip(),
 				.current = [=] {
 					return current() && widget->mapToGlobal(QPoint()) == origin
-						&& hit().link == handler;
+						&& bool(hit());
 				},
 				.activate = [=] {
-					ActivateClickHandler(widget, handler, view.main
-						? view.main->prepareClickContext(Qt::LeftButton, owner)
-						: view.section->prepareClickContext(Qt::LeftButton, owner));
+					if (const auto link = hit()) {
+						ActivateClickHandler(widget, link, view.main
+							? view.main->prepareClickContext(Qt::LeftButton, owner)
+							: view.section->prepareClickContext(Qt::LeftButton, owner));
+					}
 				},
 			});
 		};
@@ -897,17 +944,17 @@ MessageHints::Input MessageHints::applyBodyLink(
 		return Input::Finished;
 	}
 	const auto state = BodyLinkState(element, link.itemPoint);
-	if (state.itemId != link.owner || state.link != link.handler) {
+	if (state.itemId != link.owner || !MatchesUrl(state.link, link.url)) {
 		return Input::Finished;
 	}
 	if (action == Action::CopyUrl) {
-		const auto text = link.handler->copyToClipboardText();
+		const auto text = state.link->copyToClipboardText();
 		if (!text.isEmpty()) {
 			QGuiApplication::clipboard()->setText(text);
 		}
 		return Input::Finished;
 	}
-	ActivateClickHandler(widget, link.handler, view.main
+	ActivateClickHandler(widget, state.link, view.main
 		? view.main->prepareClickContext(Qt::LeftButton, link.owner)
 		: view.section->prepareClickContext(Qt::LeftButton, link.owner));
 	return Input::LeaveNormal;

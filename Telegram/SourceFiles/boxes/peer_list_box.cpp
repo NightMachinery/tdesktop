@@ -1691,6 +1691,19 @@ void PeerListContent::setSearchMode(PeerListSearchMode mode) {
 	}
 }
 
+void PeerListContent::sortSearchRows(
+		Fn<bool(const PeerListRow&, const PeerListRow&)> compare) {
+	const auto selected = saveSelectedData(_selected);
+	const auto pressed = saveSelectedData(_pressed);
+	setSelected(Selected());
+	setPressed(Selected());
+	std::stable_sort(begin(_filterResults), end(_filterResults), [&](auto a, auto b) {
+		return compare(*a, *b);
+	});
+	setSelected(restoreSelectedData(selected));
+	setPressed(restoreSelectedData(pressed));
+}
+
 void PeerListContent::clearSearchRows() {
 	while (!_searchRows.empty()) {
 		removeRow(_searchRows.back().get());

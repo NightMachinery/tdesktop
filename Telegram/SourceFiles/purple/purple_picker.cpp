@@ -60,7 +60,7 @@ void InstallPickerFilter(
 			return Result::Cancel;
 		} else if (closeOnEscape && ListFilter::Submit(key)) {
 			return AllowModalLayerKey(*press, box) ? Result::Continue : Result::Cancel;
-		} else if (modal && mods == ListFilter::kControl
+		} else if (mods == ListFilter::kControl
 			&& (key == Qt::Key_N || key == Qt::Key_P)) {
 			if (AllowModalLayerKey(*press, box, true)) {
 				list->selectSkip(key == Qt::Key_N ? 1 : -1);

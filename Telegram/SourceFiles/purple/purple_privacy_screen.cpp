@@ -2,22 +2,28 @@
 
 #include "base/weak_ptr.h"
 #include "core/application.h"
+#include "core/current_geo_location.h"
 #include "core/core_settings.h"
 #include "core/core_settings_proxy.h"
 #include "main/main_domain.h"
+#include "platform/platform_current_geo_location.h"
 #include "mainwindow.h"
+#include "purple/purple_config.h"
+#include "purple/purple_privacy_canvas.h"
+#include "purple/purple_privacy_clocks.h"
 #include "purple/purple_privacy_state.h"
 #include "purple/purple_privacy_weather.h"
 #include "settings/settings_builder.h"
 #include "storage/storage_domain.h"
 #include "tray.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/effects/animations.h"
 #include "ui/layers/generic_box.h"
-#include "ui/painter.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/tooltip.h"
+#include "ui/wrap/vertical_layout.h"
 #include "window/main_window.h"
 #include "window/notifications_manager.h"
 #include "window/window_controller.h"
@@ -29,6 +35,7 @@
 #include "styles/style_widgets.h"
 
 #include <QtCore/QDateTime>
+#include <QtCore/QLocale>
 #include <QtCore/QPointer>
 #include <QtCore/QTimer>
 #include <QtGui/QFont>
@@ -119,6 +126,58 @@ void SuppressTopLevelWidget(QWidget *widget, PrivacyState::TopLevelAction action
 	});
 }
 
+using PrivacyWeather::GeoPoint;
+using PrivacyWeather::WeatherSnapshot;
+
+constexpr auto kWeatherSourcePref = "privacy_weather_source";
+constexpr auto kWeatherPlacePref = "privacy_weather_place_cell";
+constexpr auto kWeatherUnitsPref = "privacy_weather_units";
+constexpr auto kCurrentLocationInterval = qint64(6 * 60 * 60 * 1000);
+constexpr auto kFreshForecast = qint64(60 * 60 * 1000);
+constexpr auto kExpireForecast = qint64(24 * 60 * 60 * 1000);
+
+QByteArray WeatherPref(std::string_view name) {
+	return Core::App().settings().readPref<QByteArray>(name);
+}
+
+QByteArray WeatherSource() {
+	const auto source = WeatherPref(kWeatherSourcePref);
+	return source.isEmpty()
+		? QByteArray(WeatherPref(PrivacyWeather::kLocationPref).isEmpty() ? "off" : "place")
+		: source;
+}
+
+std::optional<GeoPoint> ConfiguredWeatherCell() {
+	const auto parts = WeatherPref(kWeatherPlacePref).split(',');
+	if (parts.size() != 2) {
+		return std::nullopt;
+	}
+	auto latOk = false;
+	auto lonOk = false;
+	const auto lat = parts[0].toDouble(&latOk);
+	const auto lon = parts[1].toDouble(&lonOk);
+	return (latOk && lonOk) ? PrivacyWeather::RoundedCell(lat, lon) : std::nullopt;
+}
+
+QByteArray CellKey(const GeoPoint &cell) {
+	return QByteArray::number(cell.latitude, 'f', 1)
+		+ ',' + QByteArray::number(cell.longitude, 'f', 1);
+}
+
+bool Fahrenheit(const QLocale &locale) {
+	const auto units = WeatherPref(kWeatherUnitsPref);
+	return units == "f" || ((units.isEmpty() || units == "system")
+		&& locale.measurementSystem() == QLocale::ImperialUSSystem);
+}
+
+bool WeatherPermitted() {
+	return !Core::App().settings().proxy().isEnabled();
+}
+
+bool WeatherSettingsVisible() {
+	return !Core::App().passcodeLocked() && !PrivacyScreenActiveAny();
+}
+
 class WeatherStore final : public QObject {
 public:
 	static WeatherStore &Instance() {
@@ -126,154 +185,266 @@ public:
 		return *instance;
 	}
 
-	[[nodiscard]] QString formattedLine() const {
-		const auto loc = PrivacyWeatherLocation();
-		const auto clean = PrivacyWeather::SanitizeLocation(loc);
-		if (clean.isEmpty() || Core::App().settings().proxy().isEnabled()) {
-			return QString();
+	[[nodiscard]] const WeatherSnapshot *snapshot(qint64 now) const {
+		return WeatherPermitted() && _snapshot && now - _updated < kExpireForecast
+			? &*_snapshot
+			: nullptr;
+	}
+
+	[[nodiscard]] bool locationFailed() const {
+		return _locationFailed;
+	}
+
+	[[nodiscard]] bool fresh(qint64 now) const {
+		return snapshot(now) && !_failed && now - _updated < kFreshForecast;
+	}
+
+	[[nodiscard]] QString status(const QDateTime &now) const {
+		if (!WeatherPermitted() || WeatherSource() == "off") {
+			return {};
 		}
-		if (clean != _fetchedLocation) {
-			return QString();
+		const auto ms = now.toMSecsSinceEpoch();
+		if (!snapshot(ms)) {
+			return (_failed || _locationFailed) ? u"Weather unavailable"_q : QString();
 		}
-		return PrivacyWeather::FormatWeatherLine(loc, _snapshot, _failed);
+		const auto updated = QLocale::system().toString(
+			QDateTime::fromMSecsSinceEpoch(_updated, now.timeZone()).time(),
+			QLocale::ShortFormat);
+		return (_failed
+			? u"Offline · last updated %1"_q.arg(updated)
+			: !fresh(ms)
+			? u"Forecast may be outdated · %1"_q.arg(updated)
+			: u"Updated %1"_q.arg(updated)) + u" · Open-Meteo"_q;
 	}
 
 	void ensureFresh() {
-		const auto raw = PrivacyWeatherLocation();
-		const auto loc = PrivacyWeather::SanitizeLocation(raw);
-		if (loc.isEmpty()) {
-			_fetchedLocation.clear();
-			_snapshot.reset();
-			_failed = false;
-			return;
-		}
+		const auto source = WeatherSource();
 		const auto now = QDateTime::currentMSecsSinceEpoch();
-		const auto proxyOn = Core::App().settings().proxy().isEnabled();
-		if (!PrivacyWeather::ShouldFetchWeather(
-				raw,
-				_fetchedLocation,
-				_snapshot.has_value(),
-				_failed,
-				_inFlight,
-				_inFlightLocation,
-				_lastAttemptMs,
-				now,
-				proxyOn)) {
+		if (!PrivacyWeather::CanFetchForecast(
+				PrivacyScreenActiveAny(),
+				WeatherPermitted(),
+				source != "off",
+				_forecast != nullptr,
+				_nextAttempt,
+				now)) {
 			return;
 		}
-		startFetch(loc);
+		if (source == "current") {
+#ifdef Q_OS_MAC
+			if (!_locating && now - _lastLocationAttempt >= kCurrentLocationInterval) {
+				resolveLocation(false);
+			}
+#endif // Q_OS_MAC
+			if (_currentCell && !_locating) {
+				fetch(*_currentCell);
+			}
+		} else if (const auto cell = ConfiguredWeatherCell()) {
+			fetch(*cell);
+		} else if (_legacyCell) {
+			fetch(*_legacyCell);
+		} else {
+			resolveLegacyPlace();
+		}
 	}
 
-	void invalidate() {
-		_fetchedLocation.clear();
+	void sourceChanged() {
+		++_generation;
+		_forecast = nullptr;
+		cancelRequests();
+		_currentCell.reset();
+		_legacyCell.reset();
 		_snapshot.reset();
-		_failed = false;
-		_lastAttemptMs = 0;
+		_updated = 0;
+		_nextAttempt = 0;
+		_lastLocationAttempt = 0;
+		_locating = false;
+		_failed = _locationFailed = false;
 		WeatherChanges.fire({});
 	}
 
-private:
-	WeatherStore() = default;
-
-	QNetworkRequest makeRequest(const QUrl &url) {
-		auto req = QNetworkRequest(url);
-		req.setRawHeader("User-Agent", PrivacyWeather::kGenericUserAgent);
-		req.setRawHeader("Accept-Language", PrivacyWeather::kFixedAcceptLanguage);
-		req.setAttribute(
-			QNetworkRequest::CookieLoadControlAttribute,
-			QNetworkRequest::Manual);
-		req.setAttribute(
-			QNetworkRequest::CookieSaveControlAttribute,
-			QNetworkRequest::Manual);
-		req.setAttribute(
-			QNetworkRequest::CacheLoadControlAttribute,
-			QNetworkRequest::AlwaysNetwork);
-		req.setTransferTimeout(8000);
-		return req;
-	}
-
-	void startFetch(const QString &location) {
-		const auto url = PrivacyWeather::BuildGeocodeUrl(location);
-		if (!url) {
+	void resolveLocation(bool fromSettings) {
+		if (!WeatherPermitted() || _locating) {
 			return;
 		}
-		if (!_nam) {
-			_nam = new QNetworkAccessManager(this);
+		_locating = true;
+		_lastLocationAttempt = QDateTime::currentMSecsSinceEpoch();
+		const auto generation = _generation;
+		const auto done = [=](Core::GeoLocation location) {
+			if (generation != _generation) {
+				return;
+			}
+			_locating = false;
+			const auto cell = location.exact()
+				? PrivacyWeather::RoundedCell(location.point.x(), location.point.y())
+				: std::nullopt;
+			if (!cell || !_currentCell || CellKey(*cell) != CellKey(*_currentCell)) {
+				_snapshot.reset();
+				_nextAttempt = 0;
+			}
+			_currentCell = cell;
+			_locationFailed = !cell;
+			WeatherChanges.fire({});
+			ensureFresh();
+		};
+#ifdef Q_OS_MAC
+		if (!fromSettings) {
+			Platform::ResolveCurrentAuthorizedLocation(done);
+			return;
 		}
-		_inFlight = true;
-		_inFlightLocation = location;
-		auto *reply = _nam->get(makeRequest(*url));
-		connect(reply, &QNetworkReply::finished, this, [this, reply, location] {
+#endif // Q_OS_MAC
+		if (fromSettings) {
+			Platform::ResolveCurrentExactLocation(done);
+		}
+	}
+
+	void findPlaces(const QString &query, Fn<void(std::vector<GeoPoint>)> done) {
+		const auto url = PrivacyWeather::BuildGeocodeUrl(query, 5);
+		if (!url || !WeatherPermitted()) {
+			done({});
+			return;
+		}
+		const auto reply = get(*url);
+		connect(reply, &QNetworkReply::finished, this, [=] {
 			reply->deleteLater();
-			if (_inFlightLocation != location) {
-				return;
-			}
-			if (reply->error() != QNetworkReply::NoError
-				|| Core::App().settings().proxy().isEnabled()) {
-				markFailed(location);
-				return;
-			}
-			const auto geo = PrivacyWeather::ParseGeocodeResponse(
-				reply->readAll(),
-				location);
-			if (!geo) {
-				markFailed(location);
-				return;
-			}
-			fetchForecast(location, *geo);
+			done(reply->error() == QNetworkReply::NoError && WeatherPermitted()
+				? PrivacyWeather::ParsePlaces(reply->readAll())
+				: std::vector<GeoPoint>());
 		});
 	}
 
-	void fetchForecast(
-			const QString &location,
-			const PrivacyWeather::GeoPoint &geo) {
-		const auto url = PrivacyWeather::BuildForecastUrl(
-			geo.latitude,
-			geo.longitude);
-		auto *reply = _nam->get(makeRequest(url));
-		connect(reply, &QNetworkReply::finished, this, [this, reply, location, geo] {
+private:
+	WeatherStore() {
+		Core::App().settings().proxy().connectionTypeChanges(
+		) | rpl::on_next([=] {
+			if (!WeatherPermitted()) {
+				cancelRequests();
+			}
+			WeatherChanges.fire({});
+		}, _lifetime);
+	}
+
+	void cancelRequests() {
+		if (_nam) {
+			for (const auto reply : _nam->findChildren<QNetworkReply*>()) {
+				if (reply->isRunning()) {
+					reply->abort();
+				}
+			}
+		}
+	}
+
+	QNetworkReply *get(const QUrl &url) {
+		if (!_nam) {
+			_nam = new QNetworkAccessManager(this);
+		}
+		auto request = QNetworkRequest(url);
+		request.setRawHeader("User-Agent", PrivacyWeather::kGenericUserAgent);
+		request.setRawHeader("Accept-Language", PrivacyWeather::kFixedAcceptLanguage);
+		request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+			QNetworkRequest::SameOriginRedirectPolicy);
+		request.setAttribute(QNetworkRequest::CookieLoadControlAttribute,
+			QNetworkRequest::Manual);
+		request.setAttribute(QNetworkRequest::CookieSaveControlAttribute,
+			QNetworkRequest::Manual);
+		request.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
+			QNetworkRequest::AlwaysNetwork);
+		request.setTransferTimeout(8000);
+		return _nam->get(request);
+	}
+
+	void resolveLegacyPlace() {
+		const auto url = PrivacyWeather::BuildGeocodeUrl(QString::fromUtf8(
+			WeatherPref(PrivacyWeather::kLocationPref)));
+		if (!url) {
+			return;
+		}
+		const auto reply = _forecast = get(*url);
+		connect(reply, &QNetworkReply::finished, this, [=] {
 			reply->deleteLater();
-			if (_inFlightLocation != location) {
+			if (_forecast != reply) {
 				return;
 			}
-			_inFlight = false;
-			if (reply->error() != QNetworkReply::NoError
-				|| Core::App().settings().proxy().isEnabled()) {
-				markFailed(location);
+			_forecast = nullptr;
+			if (reply->error() != QNetworkReply::NoError || !WeatherPermitted()) {
+				fail(reply);
 				return;
 			}
-			const auto snap = PrivacyWeather::ParseForecastResponse(
-				reply->readAll(),
-				geo.displayName);
-			if (!snap) {
-				markFailed(location);
+			_legacyCell = PrivacyWeather::ParseGeocodeResponse(reply->readAll(), {});
+			if (_legacyCell) {
+				ensureFresh();
+			} else {
+				fail(reply);
+			}
+		});
+	}
+
+	void fetch(const GeoPoint &cell) {
+		const auto reply = _forecast = get(PrivacyWeather::BuildForecastUrl(
+			cell.latitude,
+			cell.longitude));
+		connect(reply, &QNetworkReply::finished, this, [=] {
+			reply->deleteLater();
+			if (_forecast != reply) {
 				return;
 			}
-			_fetchedLocation = location;
-			_snapshot = snap;
+			_forecast = nullptr;
+			if (reply->error() != QNetworkReply::NoError || !WeatherPermitted()) {
+				fail(reply);
+				return;
+			}
+			auto snapshot = PrivacyWeather::ParseForecastResponse(reply->readAll(), {});
+			if (!snapshot) {
+				fail(reply);
+				return;
+			}
+			_updated = QDateTime::currentMSecsSinceEpoch();
+			_nextAttempt = _updated + PrivacyWeather::kRefreshIntervalMs;
 			_failed = false;
-			_lastAttemptMs = QDateTime::currentMSecsSinceEpoch();
+			_snapshot = std::move(snapshot);
 			WeatherChanges.fire({});
 		});
 	}
 
-	void markFailed(const QString &location) {
-		_inFlight = false;
-		_fetchedLocation = location;
-		_snapshot.reset();
+	void fail(not_null<QNetworkReply*> reply) {
+		auto ok = false;
+		const auto retrySeconds = reply->rawHeader("Retry-After").toLongLong(&ok);
+		const auto now = QDateTime::currentMSecsSinceEpoch();
+		const auto parsedDate = QDateTime::fromString(
+			QString::fromLatin1(reply->rawHeader("Retry-After")),
+			Qt::RFC2822Date);
+		const auto retry = ok
+			? std::clamp(retrySeconds, qint64(0), qint64(86400)) * 1000
+			: parsedDate.isValid()
+			? parsedDate.toMSecsSinceEpoch() - now
+			: 0;
+		_nextAttempt = now + std::max(PrivacyWeather::kFailureBackoffMs, retry);
 		_failed = true;
-		_lastAttemptMs = QDateTime::currentMSecsSinceEpoch();
 		WeatherChanges.fire({});
 	}
 
 	QNetworkAccessManager *_nam = nullptr;
-	bool _inFlight = false;
-	QString _inFlightLocation;
-	QString _fetchedLocation;
-	std::optional<PrivacyWeather::WeatherSnapshot> _snapshot;
+	QNetworkReply *_forecast = nullptr;
+	std::optional<GeoPoint> _currentCell;
+	std::optional<GeoPoint> _legacyCell;
+	std::optional<WeatherSnapshot> _snapshot;
+	qint64 _lastLocationAttempt = 0;
+	qint64 _nextAttempt = 0;
+	qint64 _updated = 0;
+	uint64 _generation = 0;
 	bool _failed = false;
-	qint64 _lastAttemptMs = 0;
+	bool _locationFailed = false;
+	bool _locating = false;
+	rpl::lifetime _lifetime;
 };
+
+void ChangeWeatherSource(QByteArray source, std::optional<GeoPoint> place = {}) {
+	auto &settings = Core::App().settings();
+	settings.writePref<QByteArray>(kWeatherSourcePref, source);
+	settings.writePref<QByteArray>(kWeatherPlacePref, place ? CellKey(*place) : QByteArray());
+	settings.writePref<QByteArray>(PrivacyWeather::kLocationPref, QByteArray());
+	WeatherStore::Instance().sourceChanged();
+	Core::App().saveSettingsDelayed();
+}
 
 class PrivacyOverlayWidget final : public Ui::RpWidget {
 public:
@@ -415,6 +586,7 @@ private:
 		const auto rw = std::max(120, _returnButton->width());
 		_returnButton->resize(rw, _returnButton->height());
 		const auto y = std::max(16, height() - _returnButton->height() - 48);
+		_backdrop->setControlsTop(y);
 		if (_lockButton->isVisible()) {
 			const auto lw = std::max(168, _lockButton->width());
 			_lockButton->resize(lw, _lockButton->height());
@@ -596,31 +768,26 @@ void RefreshMenusAndTitles() {
 
 } // namespace
 
-QString PrivacyWeatherLocation() {
-	return PrivacyWeather::SanitizeLocation(QString::fromUtf8(
-		Core::App().settings().readPref<QByteArray>(
-			PrivacyWeather::kLocationPref)));
-}
-
-void SetPrivacyWeatherLocation(const QString &location) {
-	const auto clean = PrivacyWeather::SanitizeLocation(location);
-	Core::App().settings().writePref<QByteArray>(
-		PrivacyWeather::kLocationPref,
-		clean.toUtf8());
-	WeatherStore::Instance().invalidate();
-}
-
 PrivacyBackdropWidget::PrivacyBackdropWidget(not_null<QWidget*> parent)
-: RpWidget(parent) {
+: RpWidget(parent)
+, _canvas(new PrivacyVisual::Canvas(this)) {
 	setFocusPolicy(Qt::NoFocus);
 	setAttribute(Qt::WA_TransparentForMouseEvents);
-	setAttribute(Qt::WA_OpaquePaintEvent);
+	_canvas->setFont(st::normalFont->f);
 
 	auto *tick = new QTimer(this);
 	tick->setInterval(1000);
-	connect(tick, &QTimer::timeout, this, [this] {
+	connect(tick, &QTimer::timeout, this, [this, last = qint64(-1)]() mutable {
+		const auto minute = QDateTime::currentMSecsSinceEpoch() / 60000;
+		if (isVisible() && last != minute) {
+			last = minute;
+			refreshCanvas();
+			refreshWeatherIfConfigured();
+		}
+	});
+	connect(qApp, &QApplication::applicationStateChanged, this, [this] {
 		if (isVisible()) {
-			update();
+			refreshCanvas();
 			refreshWeatherIfConfigured();
 		}
 	});
@@ -628,8 +795,11 @@ PrivacyBackdropWidget::PrivacyBackdropWidget(not_null<QWidget*> parent)
 
 	WeatherChanges.events() | rpl::on_next([this] {
 		if (isVisible()) {
-			update();
+			refreshCanvas();
 		}
+	}, _weatherLifetime);
+	style::PaletteChanged() | rpl::on_next([this] {
+		refreshCanvas();
 	}, _weatherLifetime);
 
 	refreshWeatherIfConfigured();
@@ -639,72 +809,60 @@ PrivacyBackdropWidget::~PrivacyBackdropWidget() = default;
 
 void PrivacyBackdropWidget::setInteractiveHint(const QString &hint) {
 	_hint = hint;
-	update();
+	refreshCanvas();
+}
+
+void PrivacyBackdropWidget::setControlsTop(int top) {
+	if (_controlsTop == top) {
+		return;
+	}
+	_controlsTop = top;
+	refreshCanvas();
+}
+
+void PrivacyBackdropWidget::resizeEvent(QResizeEvent *event) {
+	RpWidget::resizeEvent(event);
+	_canvas->setGeometry(rect());
+}
+
+void PrivacyBackdropWidget::showEvent(QShowEvent *event) {
+	RpWidget::showEvent(event);
+	refreshCanvas();
+	refreshWeatherIfConfigured();
 }
 
 void PrivacyBackdropWidget::refreshWeatherIfConfigured() {
-	if (!PrivacyWeatherLocation().isEmpty()) {
-		WeatherStore::Instance().ensureFresh();
-	}
+	WeatherStore::Instance().ensureFresh();
 }
 
-void PrivacyBackdropWidget::paintEvent(QPaintEvent *) {
-	auto p = Painter(this);
-	auto hq = PainterHighQualityEnabler(p);
-	const auto r = rect();
-
-	p.fillRect(r, st::windowBg->c);
-
-	const auto now = QDateTime::currentDateTime();
-	const auto timeText = now.toString(QStringLiteral("HH:mm"));
-	const auto dateText = now.toString(QStringLiteral("dddd, MMMM d, yyyy"));
-	const auto weatherText = WeatherStore::Instance().formattedLine();
-
-	const auto compact = (r.height() < 420);
-	auto clockFont = st::normalFont->f;
-	clockFont.setPixelSize(compact ? 44 : 68);
-	clockFont.setWeight(QFont::Light);
-
-	auto dateFont = st::normalFont->f;
-	dateFont.setPixelSize(compact ? 15 : 18);
-	dateFont.setWeight(QFont::Normal);
-
-	auto weatherFont = st::normalFont->f;
-	weatherFont.setPixelSize(compact ? 13 : 15);
-	weatherFont.setWeight(QFont::Medium);
-
-	const auto clockH = compact ? 52 : 78;
-	const auto dateH = compact ? 24 : 28;
-	const auto weatherH = weatherText.isEmpty() ? 0 : (compact ? 24 : 28);
-	const auto blockH = clockH + 6 + dateH + (weatherH ? (10 + weatherH) : 0);
-
-	auto topY = std::max(36, (r.height() - blockH) / 2 - 28);
-
-	p.setFont(clockFont);
-	p.setPen(st::windowFg);
-	p.drawText(QRect(24, topY, r.width() - 48, clockH), Qt::AlignCenter, timeText);
-	topY += clockH + 6;
-
-	p.setFont(dateFont);
-	p.setPen(st::windowSubTextFg);
-	p.drawText(QRect(24, topY, r.width() - 48, dateH), Qt::AlignCenter, dateText);
-	topY += dateH;
-
-	if (!weatherText.isEmpty()) {
-		topY += 10;
-		p.setFont(weatherFont);
-		p.setPen(st::windowActiveTextFg);
-		p.drawText(QRect(24, topY, r.width() - 48, weatherH), Qt::AlignCenter, weatherText);
-	}
-
-	if (!_hint.isEmpty()) {
-		p.setFont(st::normalFont);
-		p.setPen(st::windowSubTextFg);
-		p.drawText(
-			QRect(24, r.height() - 36, r.width() - 48, 22),
-			Qt::AlignCenter,
-			_hint);
-	}
+void PrivacyBackdropWidget::refreshCanvas() {
+	const auto utc = QDateTime::currentDateTimeUtc();
+	const auto zone = QTimeZone::systemTimeZone();
+	const auto local = utc.toTimeZone(zone);
+	const auto locale = QLocale::system();
+	const auto ms = utc.toMSecsSinceEpoch();
+	const auto &weather = WeatherStore::Instance();
+	const auto forecast = weather.snapshot(ms);
+	const auto fresh = weather.fresh(ms);
+	const auto localDay = local.time().hour() >= 7 && local.time().hour() < 19;
+	auto flat = anim::Disabled();
+#ifdef Q_OS_MAC
+	flat = flat || PrivacyVisual::PrefersFlatColors();
+#endif // Q_OS_MAC
+	_canvas->setFrame({
+		.local = local,
+		.locale = locale,
+		.clocks = PrivacyClocks::At(utc, zone, ActiveSettings().worldClocks),
+		.weather = forecast ? std::make_optional(*forecast) : std::nullopt,
+		.update = weather.status(local),
+		.hint = _hint,
+		.controlsTop = _controlsTop,
+		.motifCode = fresh ? forecast->code : 0,
+		.dark = st::windowBg->c.lightness() < 128,
+		.day = fresh ? forecast->isDay.value_or(localDay) : localDay,
+		.flat = flat,
+		.fahrenheit = Fahrenheit(locale),
+	});
 }
 
 bool PrivacyScreenActiveAny() {
@@ -796,14 +954,155 @@ void RaisePrivacyScreen(not_null<::MainWindow*> window) {
 	}
 }
 
+void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller) {
+	if (!WeatherSettingsVisible()) {
+		return;
+	}
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(u"Privacy screen weather"_q));
+		box->addRow(object_ptr<Ui::FlatLabel>(box, rpl::single(
+			u"Weather uses a rounded area sent to Open-Meteo. It stays off unless "
+			"you choose a place or enable approximate location. An in-app proxy "
+			"suspends these requests."_q), st::boxLabel));
+#ifdef Q_OS_MAC
+		box->addRow(object_ptr<Ui::FlatLabel>(box, rpl::single(
+			u"Street address lookup sends the submitted address to Apple."_q),
+			st::boxLabel));
+		const auto placeholder = u"Town, postal code or street address"_q;
+#else
+		const auto placeholder = u"Town or postal code"_q;
+#endif // Q_OS_MAC
+		const auto field = box->addRow(object_ptr<Ui::InputField>(
+			box, st::defaultInputField, rpl::single(placeholder)));
+		const auto initial = (WeatherSource() == "current"
+			&& WeatherStore::Instance().locationFailed())
+			? u"Location is unavailable. Choose a place or permit location in system settings."_q
+			: QString();
+		const auto status = box->addRow(object_ptr<Ui::FlatLabel>(
+			box, rpl::single(initial), st::boxLabel));
+		const auto results = box->addRow(object_ptr<Ui::VerticalLayout>(box));
+		const auto weak = QPointer(box.get());
+		const auto generation = box->lifetime().make_state<int>(0);
+		const auto accept = [=](const GeoPoint &cell) {
+			if (weak && WeatherPermitted() && WeatherSettingsVisible()) {
+				ChangeWeatherSource("place", cell);
+				box->closeBox();
+			}
+		};
+		const auto addResult = [=](QString title, GeoPoint cell) {
+			const auto choice = results->add(object_ptr<Ui::RoundButton>(
+				results, rpl::single(std::move(title)), st::defaultLightButton));
+			choice->setClickedCallback([=] { accept(cell); });
+		};
+		const auto search = [=] {
+			if (!WeatherSettingsVisible()) {
+				return;
+			}
+			if (!WeatherPermitted()) {
+				status->setText(u"Weather search is paused while the app proxy is on."_q);
+				return;
+			}
+			const auto query = field->getLastText().trimmed();
+			if (query.isEmpty()) {
+				return;
+			}
+			const auto serial = ++*generation;
+			results->clear();
+			status->setText(u"Looking up places…"_q);
+			WeatherStore::Instance().findPlaces(query, [=](std::vector<GeoPoint> places) {
+				if (!weak || serial != *generation || !WeatherSettingsVisible()) {
+					return;
+				}
+				status->setText(places.empty()
+					? u"No places found. Try adding a country or region."_q
+					: u"Choose a place to use its rounded area."_q);
+				for (auto &place : places) {
+					auto title = base::take(place.displayName);
+					addResult(std::move(title), std::move(place));
+				}
+			});
+		};
+		field->submits() | rpl::on_next([=](Qt::KeyboardModifiers) { search(); },
+			field->lifetime());
+		const auto lookup = box->addRow(object_ptr<Ui::RoundButton>(
+			box, rpl::single(u"Search towns"_q), st::defaultLightButton));
+		lookup->setClickedCallback(search);
+#ifdef Q_OS_MAC
+		const auto address = box->addRow(object_ptr<Ui::RoundButton>(
+			box, rpl::single(u"Resolve street address with Apple"_q),
+			st::defaultLightButton));
+		address->setClickedCallback([=] {
+			const auto query = field->getLastText().trimmed();
+			if (query.isEmpty() || !WeatherPermitted() || !WeatherSettingsVisible()) {
+				return;
+			}
+			const auto serial = ++*generation;
+			results->clear();
+			status->setText(u"Apple receives the address you submit. Looking it up…"_q);
+			Platform::ResolveWeatherAddress(query, [=](Core::GeoLocation location) {
+				if (!weak || serial != *generation || !WeatherPermitted()
+					|| !WeatherSettingsVisible()) {
+					return;
+				}
+				const auto cell = location.exact()
+					? PrivacyWeather::RoundedCell(location.point.x(), location.point.y())
+					: std::nullopt;
+				status->setText(cell
+					? u"Confirm to use the rounded area."_q
+					: u"Address unavailable. Try a town or postal code."_q);
+				if (cell) {
+					addResult(u"Use this area"_q, *cell);
+				}
+			});
+		});
+#endif // Q_OS_MAC
+		const auto unitsText = [] {
+			const auto units = WeatherPref(kWeatherUnitsPref);
+			return (units == "c")
+				? u"Units · Celsius"_q
+				: (units == "f")
+				? u"Units · Fahrenheit"_q
+				: u"Units · System"_q;
+		};
+		const auto units = box->addRow(object_ptr<Ui::RoundButton>(box,
+			rpl::single(unitsText()) | rpl::then(WeatherChanges.events() | rpl::map(unitsText)),
+			st::defaultLightButton));
+		units->setClickedCallback([] {
+			const auto units = WeatherPref(kWeatherUnitsPref);
+			Core::App().settings().writePref<QByteArray>(kWeatherUnitsPref,
+				QByteArray(units == "c" ? "f" : units == "f" ? "system" : "c"));
+			Core::App().saveSettingsDelayed();
+			WeatherChanges.fire({});
+		});
+		box->addButton(rpl::single(u"Use approximate location"_q), [=] {
+			if (!WeatherSettingsVisible()) {
+				return;
+			}
+			if (!WeatherPermitted()) {
+				status->setText(u"Disable the app proxy before requesting location."_q);
+				return;
+			}
+			ChangeWeatherSource("current");
+			WeatherStore::Instance().resolveLocation(true);
+			box->closeBox();
+		});
+		box->addButton(rpl::single(u"Turn off"_q), [=] {
+			ChangeWeatherSource("off");
+			box->closeBox();
+		});
+		box->addButton(rpl::single(u"Close"_q), [=] { box->closeBox(); });
+	}));
+}
+
 void BuildPrivacyScreenSetting(::Settings::Builder::SectionBuilder &builder) {
 	const auto labelText = [] {
-		const auto loc = PrivacyWeatherLocation();
-		return loc.isEmpty() ? QStringLiteral("Off") : loc;
+		const auto source = WeatherSource();
+		return source == "current" ? u"Approximate location"_q
+			: source == "place" ? u"Configured place"_q : u"Off"_q;
 	};
 	const auto button = builder.addButton({
 		.id = u"advanced/purple_privacy_weather"_q,
-		.title = rpl::single(QStringLiteral("Privacy screen weather location")),
+		.title = rpl::single(u"Privacy screen weather"_q),
 		.st = &st::settingsButtonNoIcon,
 		.label = rpl::single(labelText())
 			| rpl::then(WeatherChanges.events() | rpl::map(labelText)),
@@ -811,36 +1110,7 @@ void BuildPrivacyScreenSetting(::Settings::Builder::SectionBuilder &builder) {
 	});
 	if (button) {
 		const auto controller = builder.controller();
-		button->setClickedCallback([=] {
-			controller->show(Box([=](not_null<Ui::GenericBox*> box) {
-				box->setTitle(rpl::single(QStringLiteral("Privacy screen weather")));
-				box->addRow(object_ptr<Ui::FlatLabel>(
-					box,
-					rpl::single(QStringLiteral(
-						"Optional city name for weather on the privacy screen. "
-						"Leave blank to make zero weather network requests. "
-						"When set, the city name and your IP address are sent directly to Open-Meteo; "
-						"requests are skipped automatically while an in-app proxy is enabled.")),
-					st::boxLabel));
-				const auto field = box->addRow(object_ptr<Ui::InputField>(
-					box,
-					st::defaultInputField,
-					rpl::single(QStringLiteral("City (optional, e.g. London)")),
-					PrivacyWeatherLocation()));
-				const auto save = [=] {
-					SetPrivacyWeatherLocation(field->getLastText());
-					box->closeBox();
-				};
-				field->submits() | rpl::on_next([=](Qt::KeyboardModifiers) {
-					save();
-				}, field->lifetime());
-				box->setFocusCallback([=] { field->setFocusFast(); });
-				box->addButton(rpl::single(QStringLiteral("Save")), save);
-				box->addButton(rpl::single(QStringLiteral("Cancel")), [=] {
-					box->closeBox();
-				});
-			}));
-		});
+		button->setClickedCallback([=] { ShowPrivacyWeatherSettings(controller); });
 	}
 }
 

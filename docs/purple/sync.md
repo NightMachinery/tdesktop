@@ -36,6 +36,16 @@ most one next step:
   share** also posts, after a fresh check, with the exact fingerprint and
   parents the choice produced. An unlinked device sees **Join with this
   version** or **Join and share** and always the disclosure.
+  Select a remote version and click **Merge with this device** to compare
+  two files using the same supported schema. The editor lists each differing
+  table value and one-sided string or integer list item. Keep or drop additions,
+  choose which version to keep for conflicts, and choose an order when shared
+  items were reordered. Shared values survive, and local order is the default.
+  **Review merge** previews the exact result and its settings impact.
+  **Apply merge** saves it locally and keeps the original file in History.
+  The generated file uses TOML formatting and drops comments. Share it
+  afterwards through the normal sync review. A file with more than 512
+  differences keeps the whole-version choices.
 - **Publish changes** when this device's file changed since it last matched,
   or its current version has not been posted. It checks again and confirms.
 - **Finish sending** when an earlier post may not have finished and the
@@ -46,6 +56,13 @@ most one next step:
   again, or to delete the failed copy first. When Saved Messages also holds
   records this device cannot safely use, the box only explains that the post
   is paused.
+
+**Accounts, files & sync** shows **Not linked to sync** when a verified
+Magic sync chat exists but this device has no settings link. The app can also
+show one notice per launch. **Join** opens an account-specific review. Joining
+the chat's sync space waits for confirmation and does not send settings. A
+linked device still needs Automatic Sync enabled or a manual publish to send
+subsequent edits.
 
 **Up to date** reports how many other devices sync and when the check ran.
 Invalid records, clones, another account's state, store errors and incomplete

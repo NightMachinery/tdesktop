@@ -2716,7 +2716,7 @@ void MainWidget::updateControlsGeometry() {
 	const auto mainSectionTop = getMainSectionTop();
 	const auto musicWide = !isOneColumn() && Purple::MusicHidesChats(_mainSection.data());
 	const auto zenWide = !isOneColumn() && _controller->purpleZenHidden();
-	const auto hideChats = musicWide || zenWide;
+	const auto hideChats = musicWide || (zenWide && _controller->purpleZenChatsHidden());
 	Purple::UpdateMusicSidebar(_dialogs.get(), hideChats, !isOneColumn());
 	Purple::UpdateMusicSidebar(_sideShadow.get(), hideChats, !isOneColumn());
 	const auto syncZenHide = [](auto &state, QWidget *w, bool hide) {
@@ -2862,7 +2862,7 @@ void MainWidget::destroyThirdSection() {
 
 void MainWidget::refreshResizeAreas() {
 	const auto zen = _controller->purpleZenHidden();
-	if (!isOneColumn() && !zen && _dialogs) {
+	if (!isOneColumn() && !_controller->purpleZenChatsHidden() && _dialogs) {
 		ensureFirstColumnResizeAreaCreated();
 		_firstColumnResizeArea->setGeometryToLeft(
 			_history->x(),
@@ -2911,10 +2911,14 @@ void MainWidget::ensureFirstColumnResizeAreaCreated() {
 			? 0.
 			: float64(newWidth) / width();
 		const auto nochat = !_controller->mainSectionShown();
-		Core::App().settings().updateDialogsWidthRatio(newRatio, nochat);
+		if (_controller->purpleZenHidden()) {
+			_controller->setPurpleZenDialogsRatio(newRatio);
+		} else {
+			Core::App().settings().updateDialogsWidthRatio(newRatio, nochat);
+		}
 	};
 	auto moveFinishedCallback = [=] {
-		if (isOneColumn()) {
+		if (isOneColumn() || _controller->purpleZenHidden()) {
 			return;
 		}
 		const auto nochat = !_controller->mainSectionShown();
@@ -3183,7 +3187,8 @@ void MainWidget::updateWindowAdaptiveLayout() {
 	const auto nochat = !_controller->mainSectionShown();
 
 	auto layout = _controller->computeColumnLayout();
-	auto dialogsWidthRatio = Core::App().settings().dialogsWidthRatio(nochat);
+	auto dialogsWidthRatio = _controller->purpleZenDialogsRatio().value_or(
+		Core::App().settings().dialogsWidthRatio(nochat));
 
 	// Check if we are in a single-column layout in a wide enough window
 	// for the normal layout. If so, switch to the normal layout.
@@ -3226,7 +3231,9 @@ void MainWidget::updateWindowAdaptiveLayout() {
 		//}
 	}
 
-	Core::App().settings().updateDialogsWidthRatio(dialogsWidthRatio, nochat);
+	if (!_controller->purpleZenHidden()) {
+		Core::App().settings().updateDialogsWidthRatio(dialogsWidthRatio, nochat);
+	}
 
 	auto useSmallColumnWidth = !isOneColumn()
 		&& !dialogsWidthRatio

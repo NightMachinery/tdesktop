@@ -20,6 +20,18 @@ from voice_queue_fixture import voice_queue_include
 
 CORE = 'purple_core'
 CASES = {
+    'chat-palette': {
+        'program': 'chat_palette_cases.cpp',
+        'units': [],
+        'frameworks': ['QtCore'],
+    },
+    'sync-merge': {
+        'program': 'sync_merge_cases.cpp',
+        'generated': ['sync-settings-link.inc'],
+        'units': ['purple/purple_sync_merge.cpp'],
+        'frameworks': ['QtCore'],
+        'toml': True,
+    },
     'playlist-managed-cache': {
         'program': 'playlist_managed_cache_cases.cpp',
         'units': [
@@ -444,6 +456,11 @@ def slices(sources):
 
 
 
+def sync_settings_link_include(sources):
+    text = (sources / 'purple/purple_sync_magic_service.cpp').read_text()
+    return function(text, 'bool SyncMagicSettingsUnlinked(') + '\n'
+
+
 def sync_setup_status_include(sources):
     text = (sources / 'purple/purple_sync_setup_box.cpp').read_text()
     result = function(text, 'void RefreshFirstUseStatus(')
@@ -748,6 +765,7 @@ for name in case.get('generated', []):
         'sync-pickup.inc': sync_pickup_include,
         'sync-first-use-boundary.inc': sync_first_use_boundary_include,
         'sync-setup-status.inc': sync_setup_status_include,
+        'sync-settings-link.inc': sync_settings_link_include,
         'recording-store-startup.inc': recording_startup_include,
         'recording-round-encoder.inc': recording_encoder_include,
     }.get(name, flow_include)
@@ -772,7 +790,7 @@ with (work / 'build.log').open('w') as log:
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)
     for source in units:
         objects.append(work / (source.stem + '.o'))
-        toml = ['-I' + str(repo / 'Telegram/ThirdParty/purple_core/tomlplusplus')] if 'purple_core' in source.parts else []
+        toml = ['-I' + str(repo / 'Telegram/ThirdParty/purple_core/tomlplusplus')] if 'purple_core' in source.parts or case.get('toml') else []
         command = [recipe[0], *include, *toml, *flags.get(source.suffix, flags['.cpp']), '-g0',
             '-c', str(source), '-o', str(objects[-1]), '-MD', '-MF', str(objects[-1].with_suffix('.d'))]
         subprocess.run(command, cwd=build, stdout=log, stderr=subprocess.STDOUT, check=True)

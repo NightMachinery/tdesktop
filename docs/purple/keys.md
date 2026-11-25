@@ -57,7 +57,8 @@ the active layout. On macOS, `M-` (Option) chords such as `M-x`, `M-p`, and
 ## Docked which-key drawer
 
 Pausing ~280 ms inside a prefix opens a docked which-key drawer flush above the
-modal status line (reusing stock `Ui::KeysLegend` keycaps and theme colors).
+modal status line. Its rounded top edge uses the window theme and spans the
+window width. Keycaps reuse the stock `Ui::KeysLegend` style.
 The header displays the pending chord, group or localleader title, and
 `DEL back · ESC cancel`. The responsive multi-column grid lists only applicable continuations, placing
 `+group` prefixes in accent color above a hairline divider and merging duplicate
@@ -91,7 +92,7 @@ with at most four strokes per chord:
   through folders with wrapping when the main chat list is focused.
 - **Leader (`SPC`):**
   - `SPC SPC`, `M-x`, `:`, `SPC :`: command palette (`M-x`).
-  - `SPC ,`, `SPC RET`, `SPC b b`: chat switcher palette.
+  - `SPC ,`, `SPC RET`: chat switcher palette. `SPC b b`: recently viewed chats.
   - `SPC u`, `SPC b I`: unread unmuted chats buffer (iBuffer).
   - `SPC z`, `SPC t p`: privacy screen across all Purple windows.
   - `SPC b`: active chat (`b i` info, `b m` chat menu, `b p` pinned, `b v`
@@ -112,7 +113,7 @@ with at most four strokes per chord:
   - `SPC t`: toggles (`t b` chat background artwork visibility, `t n` Night Mode,
     `t z` Zen fullscreen chat, `t p` privacy screen).
   - `SPC w`: panes (`w h` chats, `w l` conversation, `w w` toggle, `w m` Zen
-    fullscreen chat).
+    fullscreen chat, `w z` toggle the chat list in Zen).
   - `SPC a 1` through `SPC a 6`: switch signed-in accounts.
   - `SPC h`: help (`h c` or `?` cheatsheet, `h b` or `SPC ?` all active
     bindings, `h k` describe key, `h f` describe command, `h s` Telegram stock
@@ -145,7 +146,8 @@ with at most four strokes per chord:
 - **Yank (`y`) and message hints (`g`):**
   - `y y` / `y m` copy visible message text, `y l` copy message link, `y u`
     copy URL in message text.
-  - `g o` opens a visible URL in message text.
+  - `g o` opens a visible URL in plain or rich message text. In a rich
+    message, expand a Details block before hinting links inside it.
   - `g s` select message, `g m` open message context menu, `g r` reply to
     message, `g e` edit message, `g u` jump to unread.
   - Hint tags render in high-contrast amber-gold with crimson typed-prefix
@@ -174,12 +176,14 @@ native message menu includes live reaction and read-receipt details.
 - **`M-x` / `:` / `SPC :` / `SPC SPC` (Command Palette):** upper-third anchored
   layer (never jumps vertically as results narrow) with an `amx` + `orderless`
   ranking engine: available commands first, then title matches ahead of
-  group/id-only matches, with `amx` top-7 recency, invocation frequency,
+  group/id and alias matches, with `amx` top-7 recency, invocation frequency,
   shorter labels, and A-Z breaking ties inside each tier (persisted in
   `mx-history.json`). Space-separated query terms match in any order as
   substrings, safe regexes, or word initialisms (`opm` for Open pinned
   messages), highlighting matches in both the title and the category/command-id
-  subtitle alongside right-aligned live keycaps. Navigate with `C-n`/`C-p`,
+  subtitle alongside right-aligned live keycaps. Matching aliases appear in
+  the subtitle when they help find a command. Try `music play` for playback
+  toggle. Navigate with `C-n`/`C-p`,
   `C-j`/`C-k`, arrows, or `Tab`/`S-Tab`; step input history with `M-p`/`M-n`.
   Hold the arrow, Control, or Alt motions to repeat them. `F6` switches between
   the search field and results. With modal input enabled, hold `j` or `k` to
@@ -195,8 +199,9 @@ origin. `q` closes directly. In the Customize collection picker, use `i`
 or `/` to filter and `a` to add the selected chat.
 
 M-x, Describe Command, and chat palettes open with the search field
-focused. `Esc` closes these palettes in one press. `F6` switches between
-M-x search and results while keeping the query.
+focused. `C-n` / `C-p` move through results from search. `Esc` closes the
+palette and restores focus. `F6` switches between M-x search and results
+while keeping the query.
 Keypad Enter runs or describes the highlighted command, just like Return.
 
 With modal keyboard shortcuts off, **Option+X** on macOS (**Alt+X** elsewhere)
@@ -232,8 +237,12 @@ Customize settings…** also opens the editor with modal keys off.
   the default `SPC z` chord also works with modal keys enabled.
 - Use `Ctrl+Return` to submit a form. In a multiline field, `Return`
   inserts a newline. The focused field keeps its native text editing keys.
-- In a collection, `a` adds, `Shift+D` duplicates, `x` removes, and
-  `Shift+J` / `Shift+K` reorder where supported. In the chat picker,
+- Button labels show their shortcuts. A button marked **Enter** activates
+  when focused. In a collection, `a` adds, `i` enters a chat ID, `Shift+D`
+  duplicates, `Shift+R` renames, `x` removes, and `Shift+J` / `Shift+K`
+  reorder where supported. Plain-letter shortcuts yield to text fields.
+  At narrow widths, Available chats stacks below Members and Tab reaches each
+  action through vertical scrolling. In the chat picker,
   `/` focuses search and `Space` or **Add** adds the selected chat.
   Use **Enter ID** to type a chat ID.
 - Use `u` to undo staged edits and `d` to review them. In **Lines**,
@@ -292,12 +301,15 @@ on the modal status line and cheatsheet footer.
   people, groups, channels, and accounts in the unread buffer (`SPC u`), chat
   palette (`SPC ,`), topic picker header (`SPC b t`), and peer-scoped commands
   in `M-x`.
-- **Zen fullscreen chat (`SPC t z`, `SPC w m`):** puts the window into real OS
-  fullscreen and hides the folder rail, chat list, info sidebar, and modal
-  status bar so only the current conversation is visible. The status bar appears
-  transiently only while a prefix, count, hints, key capture, modal layer, or
-  error/feedback message is active. `Esc` does not exit Zen mode; toggle `SPC t z`
-  or `SPC w m` again to restore the exact prior window state and layout.
+- **Zen fullscreen chat (`SPC t z`, `SPC w m`):** enters OS fullscreen with the
+  chat list, folder rail, and modal status bar visible. The info sidebar is
+  hidden. `SPC w z` or the chat header menu toggles the chat list and folder
+  rail while a conversation is open. On narrow displays it opens the full
+  chat list. Resizing the list in Zen keeps the ordinary window's width
+  preference. Fullscreen uses normal bubble alignment and centers dates in
+  the conversation. `Esc` cancels a pending chord or layer first, returns from
+  Insert to Normal next, then goes back from the chat within fullscreen.
+  Toggle Zen again to restore the prior window state.
 - **Privacy screen (`SPC t p`, `SPC z`):** immediately covers all open Purple
   windows (primary and separate chat windows) with a neutral clock and date
   backdrop, closes media viewers and PiP windows, hides tooltips, popups,
@@ -317,17 +329,19 @@ on the modal status line and cheatsheet footer.
   URLs. The privacy screen is not a security lock; when a local passcode is
   configured, it offers a separate **Lock with passcode** button that engages
   the passcode lock before dismissing the privacy overlay so chats do not flash.
-  - **Optional weather (Settings -> Purple -> Privacy screen weather location):**
-    blank by default, making zero network requests. When a city name is set, it
-    is trimmed and capped to 80 characters, then sent directly to Open-Meteo's
-    geocoding API (`geocoding-api.open-meteo.com`) and forecast API
-    (`api.open-meteo.com`) at most once every 30 minutes (with 15-minute backoff
-    after failures), using a generic `ClockWidget/1.0` user agent, fixed
-    `Accept-Language: en-US,en;q=0.9`, and no cookies. The geocoding request
-    reveals the configured place name and your IP address directly to Open-Meteo.
-    Because `QNetworkAccessManager` does not route through Telegram's MTProto
-    proxy, weather requests are skipped automatically whenever an in-app proxy
-    is enabled.
+  - **World clocks.** Set an ordered list under `[privacy_screen]` in Customize
+    or in app-wide `settings.toml`. Clocks use IANA time zones. The cover
+    hides clocks with the same current UTC offset and marks differences in
+    calendar date. A label is visible on the cover.
+  - **Optional weather.** The cover can show current conditions, the next six
+    hours, and the next three days. Under **Settings → Purple → Privacy screen
+    weather**, choose a town or postal code, resolve a street address with
+    Apple on macOS, or enable approximate current location. The default is
+    off. Weather source and temperature units are device settings. The cover
+    displays a generic location label and suspends weather while an app proxy
+    is enabled. The forecast request sends the rounded area and your IP to
+    Open-Meteo. Town searches send the entered text to Open-Meteo only when
+    submitted. macOS address search sends the submitted address to Apple.
 - **Forum groups and threaded bots:** `SPC b t` / `, t` opens the live-updating
   topic picker for the current forum group or threaded bot. It loads more as
   you approach the end of the results or filter them. `L` loads a page and
@@ -392,7 +406,9 @@ on the modal status line and cheatsheet footer.
   The window title is `Clock` while the privacy screen is active.
 - `mainwidget.cpp`, `window/window_filters_menu.h`, and
   `window/window_session_controller.*`: hides the folder rail, chat list, side
-  shadows, and third column while Zen fullscreen chat mode is active.
+  shadows when the Zen chat list is toggled off, and hides the third column
+  throughout Zen. `window/window_adaptive.*` selects normal chat layout in
+  fullscreen.
 - `window/notifications_manager.cpp` and `media/view/media_view_overlay_widget.cpp`:
   hides notification details and blocks notification-click chat opening while the
   privacy screen is active, and closes active PiP windows when it activates.
@@ -404,6 +420,14 @@ on the modal status line and cheatsheet footer.
 
 ## Open chats with the keyboard
 
-`SPC ,`, `SPC RET`, or `SPC b b` opens the chat palette. Search chats, archived
-chats, channels, and contacts by name, username, phone number, or contact note.
-Use Up or Down to move and Enter to open the highlighted chat.
+Open the chat palette with `SPC ,` or `SPC RET` to browse chats, archived
+chats, channels, and contacts in their usual order. `SPC b b` starts with the
+most recently viewed chats and puts the current chat last among equal matches.
+Both respect Work Mode visibility. Recency stays in encrypted per-account
+storage and clears on logout.
+
+Every query word must match. Literal name matches rank first, followed by name
+matches using the other keyboard layout, username or phone, then contact note.
+Persian and US QWERTY layout conversion works in either direction for names.
+The palettes dim and elide contact notes and highlight matching text. Use
+Up or Down to move and Enter to open the selected chat.

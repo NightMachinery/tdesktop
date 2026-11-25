@@ -2,6 +2,10 @@
   "about": "Canonical Purple Desktop host gates, run by purple/run_host_gates.py. A patch that adds, renames or removes a gate, a variant, a compiled purple/test_*.cpp fixture or a program under Telegram/SourceFiles/purple/tests updates this list in the same commit. K3 removes dormant search/mark/setup/carry suites and retains active typed record, ordinary upload, account-fence and Magic first-use coverage. Placeholders: {build} is --build-dir, {qt} is the resolved Qt prefix, {out} is this configuration's output directory, and {out:NAME} is the output directory of configuration NAME, which then runs first. \"variants\" maps the flags of a driver with several configurations to the fixtures each selects; \"\" is its default. Media integration retains the K3 roster and adds every active media and recording configuration from the frozen reviewed feature tip.",
   "undriven": {},
   "variants": {
+    "purple/test_privacy_screen.sh": {
+      "": "purple/test_privacy_screen.cpp",
+      "--render": "purple/test_privacy_canvas.cpp"
+    },
     "purple/test_settings_navigation.py": {
       "--build": "purple/test_settings_navigation_render.cpp"
     },
@@ -18,6 +22,8 @@
       "--music-index": "purple/test_music_index.cpp"
     },
     "purple/test_cases.py": {
+      "chat-palette": "Telegram/SourceFiles/purple/tests/chat_palette_cases.cpp",
+      "sync-merge": "Telegram/SourceFiles/purple/tests/sync_merge_cases.cpp",
       "copy-article": "Telegram/SourceFiles/purple/tests/copy_article_cases.cpp",
       "peek-file": "Telegram/SourceFiles/purple/tests/peek_file_cases.cpp",
       "peek-admission": "Telegram/SourceFiles/purple/tests/peek_admission_cases.cpp",
@@ -61,6 +67,27 @@
     }
   },
   "gates": [
+    {
+      "name": "test_privacy_canvas",
+      "driver": "purple/test_privacy_screen.sh",
+      "compiles": true,
+      "args": ["--render", "{out}"],
+      "fixtures": ["purple/test_privacy_canvas.cpp"]
+    },
+    {
+      "name": "test_chat_palette",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": ["--case", "chat-palette", "--build-dir", "{build}", "--output-dir", "{out}"],
+      "fixtures": ["Telegram/SourceFiles/purple/tests/chat_palette_cases.cpp"]
+    },
+    {
+      "name": "test_sync_merge",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": ["--case", "sync-merge", "--build-dir", "{build}", "--output-dir", "{out}"],
+      "fixtures": ["Telegram/SourceFiles/purple/tests/sync_merge_cases.cpp"]
+    },
     {
       "name": "test_modal_keys_routes",
       "driver": "purple/test_modal_keys_routes.py",

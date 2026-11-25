@@ -138,11 +138,15 @@ ordered(collection_edit, "FindSettingDescriptor(item.address)", "if (_config.nam
 assert not re.search(r"FindSettingDescriptor\([^\n]+\)->", collections)
 ordered(collections, "void showOtherReferences", "_config.otherReferences(object)", "Other accounts’ files are not checked")
 ordered(collection_edit, "showOtherReferences(item.address)", "_accept = button")
-ordered(collections, 'u"Add"_q, [this] { add()', 'u"Enter ID"_q, [this] { edit(Op::Insert)',
-        'u"Duplicate"_q, [this] { edit(Op::Duplicate)',
-        'u"Delete"_q, [this] { edit(Op::Erase)', 'u"Move up"_q, [this] { move(-1)',
+ordered(collections, 'u"Add"_q, ModalKeysEnabled() ? u"a"_q', 'u"Enter ID"_q',
+        'u"Duplicate"_q', 'u"Delete"_q', 'u"Move up"_q',
         "&QAbstractItemModel::rowsMoved", "moveTo(from, to)",
         "code == Qt::Key_D", "edit(Op::Duplicate)", "code == Qt::Key_A", "add()", "edit(Op::Erase)")
+look = read("purple/purple_settings_customize_look.h")
+ordered(collections, "ConfigureCollectionList(list)", "void resizeEvent", "CollectionListDirection(width(), fontMetrics())")
+ordered(look, "void ConfigureCollectionList", "setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff)", "Qt::ElideRight")
+ordered(look, "CollectionListDirection(", "QBoxLayout::TopToBottom", "QBoxLayout::LeftToRight")
+ordered(customize, "void activateRow()", "if (row->listCaseFix)", "stage(std::move(fixed), SettingScalar(*row->listCaseFix))", "showForm")
 ordered(collections, "void add()", "_config.peerField", "addPeer()", "edit(Op::Insert)")
 # Verify new native UI surfaces reuse stock Ui::KeysLegend & Ui::LayerWidget, not Toasts/ASCII TextBox.
 assert "Ui::Toast::Show" not in keys, "Modal UI must not fall back to plain Toast popups"
@@ -181,8 +185,8 @@ for layer, last in (("UnreadBufferLayer", "TopicRowsWidget"), ("TopicPickerLayer
     ordered(body, "void keyPressEvent", "ClearListFilterOrClose(this, _filter)", "ListFilter::Enter(*e, key)")
 help_layer = between(keys_ui, "class ModalHelpLayer", "class DescribeLayer")
 ordered(help_layer, "InstallListFilter(this, _filter", "ListFilter::Exit", "AllowModalLayerKey",
-        "setFocus()", "closeLayer()", "FilterResult::Cancel")
-assert "_filter->setText(QString())" not in help_layer
+        "setFocus()", "FilterResult::Cancel")
+assert "setText(" not in between(help_layer, "InstallListFilter(this, _filter", "\n\t\t});")
 ordered(help_layer, "void keyPressEvent", "ClearListFilterOrClose(this, _filter)", "ListFilter::Enter(*e, key)")
 ordered(keys, "void Keys::showPalette", "EffectiveBindings(true, target.contextMap)",
         "ChordsForAction(cmd.action, effective)", "fromInsert", "origin->setFocus",
@@ -323,7 +327,7 @@ ordered(keys, "void Keys::clearPrefix", "_motion.cancel(keepMotion)", "_layerMot
 ordered(keys, "owner->activeChatEntryChanges()", "RepeatPolicy::ChatNavigation",
         "owner->activeChatsFilter()", "contextChanged(folderMotion())", "contextChanged(RepeatPolicy::Never)")
 actions = between(keys, "const Command kCommands[]", "using Chord")
-armed = re.findall(r"\{ Action::(\w+),[^\n]*\n[^\n]*RepeatPolicy::(SameTarget|ChatNavigation|FolderNavigation)", actions)
+armed = re.findall(r"\{ Action::(\w+),[^\n]*\n[^\n]*\n[^\n]*RepeatPolicy::(SameTarget|ChatNavigation|FolderNavigation)", actions)
 assert set(armed) == {
     ("MoveUp", "SameTarget"), ("MoveDown", "SameTarget"),
     ("PreviousChat", "ChatNavigation"), ("NextChat", "ChatNavigation"),
@@ -504,7 +508,7 @@ for action, chord in (
     ("Run", "SPC SPC"),
     ("ChatPalette", "SPC ,"),
     ("ChatPalette", "SPC RET"),
-    ("ChatPalette", "SPC b b"),
+    ("RecentChatPalette", "SPC b b"),
     ("Backgrounds", "SPC t b"),
     ("ToggleNightMode", "SPC t n"),
     ("OpenChatInfo", "SPC b i"),
@@ -548,6 +552,7 @@ for action, chord in (
     ("UnreadBuffer", "SPC b I"),
     ("ToggleZenMode", "SPC t z"),
     ("ToggleZenMode", "SPC w m"),
+    ("ToggleZenChats", "SPC w z"),
     ("TogglePrivacyScreen", "SPC t p"),
     ("TogglePrivacyScreen", "SPC z"),
     ("TopicPalette", "SPC b t"),
@@ -597,11 +602,19 @@ for action, key in (
     bound(action, key, chat_body)
 
 # Phase 2 routes: unread status counts, avatars, iBuffer read-receipt confirm,
-# real fullscreen Zen mode with transient status bar, app-wide privacy screen, and topics.
+# fullscreen with a persistent status bar, app-wide privacy screen, and topics.
 ordered(keys, "ComputeUnreadSummary", "HasUnmutedUnreadNotification", "BucketForPeer")
 ordered(keys, "void Keys::setZenMode", "setPurpleZenHidden(true)", "showFullScreen()",
         "setPurpleZenHidden(false)", "PlanWindowRestore", "showNormal()")
-ordered(keys, "bool Keys::zenNeedsTransientBar", "int Keys::statusBarHeight", "!_zenMode")
+ordered(keys, "int Keys::statusBarHeight", "chromeVisible() ?", "ModalStatusBar::PreferredHeight()")
+ordered(classify, "KeyUse::Cancel", "KeyUse::ExitInsertOrBackOut",
+        "_window->isFullScreen()", "KeyUse::FullscreenBack")
+ordered(keys, "case KeyUse::FullscreenBack:", "target.history->escape()",
+        "target.messages.section->delegate()->listCancelRequest()")
+ordered(read("window/window_adaptive.cpp"), "void Adaptive::setPurpleFullscreen",
+        "fullscreen ? ChatLayout::Normal : _measuredChatLayout.current()")
+ordered(keys, "case Action::ToggleZenChats:", "ToggleZenChatList(current)")
+ordered(keys, "void ToggleZenChatList(", "clearSectionStack()", "setPurpleZenHidden(true, hide)")
 ordered(keys, "void Keys::showUnreadBuffer", "CreateUnreadBufferLayer", "MarkAsReadMenu::MarkAsReadThread")
 ordered(keys, "void Keys::showTopicPicker", "CreateTopicPickerLayer", "onRefresh",
         "onLoadMore", "requestTopics()", "onReload", "reloadTopics()", "pageUpdates",
@@ -729,7 +742,9 @@ last_seen_cpp = read("purple/purple_last_seen.cpp")
 ordered(last_seen_cpp, "ShowPurpleNotice", "lastseen:empty:", ".background = true")
 
 privacy = read("purple/purple_privacy_screen.cpp")
-ordered(privacy, "ShouldFetchWeather", "Accept-Language")
+ordered(privacy, "void ensureFresh()", "PrivacyScreenActiveAny()", "WeatherPermitted()",
+        'source != "off"', "resolveLocation(false)", "Accept-Language")
+ordered(privacy, 'u"Use approximate location"_q', 'ChangeWeatherSource("current")', "resolveLocation(true)")
 ordered(privacy, "Lock with passcode", "hasLocalPasscode()", "lockByPasscode()", "DismissPrivacyScreen()")
 ordered(privacy, "QEvent::WindowActivate", "QEvent::FocusIn", "QEvent::InputMethod", "QEvent::Drop")
 ordered(privacy, "class PrivacyAppFilter final", "passcodeLockValue()", "QEvent::Show",
@@ -761,6 +776,16 @@ ordered(mac_menu, "Purple::PrivacyScreenActiveAny()")
 main_w = read("mainwidget.cpp")
 ordered(main_w, "syncZenHide", "_zenThirdSectionHide", "_zenThirdShadowHide")
 ordered(main_w, "void MainWidget::destroyThirdSection()", "_zenThirdSectionHide.onWidgetDestroyed()")
+
+hints = read("purple/purple_message_hints.cpp")
+ordered(hints, "VisibleBodyLinks(", "purpleRichLinkLayout()", "forEachVisibleLinkText(",
+        "CollectVisibleBodyLinks", "else if (text")
+ordered(hints, "MessageHints::Input MessageHints::applyBodyLink",
+        "canUseBodyLink", "BodyLinkState", "MatchesUrl(state.link, link.url)",
+        "copyToClipboardText()", "ActivateClickHandler")
+article = read("iv/markdown/iv_markdown_article.cpp")
+ordered(article, "void MarkdownArticle::Impl::forEachVisibleLinkText",
+        "VisibleTextSegmentRect", "visit(*segment.leaf")
 
 # Existing attachment, playback, account, calendar, background, hints, menu, and music checks.
 attachment = between(keys, "class KeyboardAttachment final", "constexpr auto kEnabledPref")

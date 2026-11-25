@@ -30,8 +30,8 @@ the numbers.
   panels.
 - `mainwindow.cpp` and `window/main_window.cpp`: attaches Purple's modal status
   line and docked which-key drawer in `finishFirstShow()`, reserves the
-  status-bar height beneath `_main` in `updateControlsGeometry()`, and gives
-  full-height layers precedence over the modal chrome. It raises the
+  status-bar height beneath `_main` in `updateControlsGeometry()`, forwards OS
+  fullscreen changes, and gives full-height layers precedence over the modal chrome. It raises the
   privacy overlay last when active and unlocked (covering layers and media
   preview while keeping passcode/setup-email locks and their boxes on top),
   blocks `handleStartFiles()` while active, and replaces the window title with
@@ -39,12 +39,16 @@ the numbers.
 - `platform/mac/main_window_mac.mm`: consumes already claimed single-shot
   repeats before Cocoa can reinterpret them as text after a focus or mode change.
 - `mainwidget.h`, `mainwidget.cpp`, `window/window_filters_menu.h`, and
-  `window/window_session_controller.*`: hides the folder strip, dialogs column,
-  side shadows, and third column while Zen fullscreen chat mode is active,
-  restoring only widgets Zen itself hid. After each `MainWidget` layout pass,
-  Purple refreshes the modal status segments from the live widget bounds
-  and divider positions, including during dialog-width animation. The status
-  text uses the stock avatar padding and live composer field and icon positions.
+  `window/window_session_controller.*`: keeps the chat list and folder strip
+  available in Zen fullscreen and hides the third column. The Zen chat-list
+  toggle also hides the folder strip and its side shadow. Its resized width
+  is temporary. Each layout pass refreshes the modal status segments from
+  the live widget bounds and divider positions.
+- `history/view/history_view_top_bar_widget.cpp`: adds the Zen chat list action
+  to the chat header menu.
+- `window/window_adaptive.*`: uses normal bubble and date alignment in
+  fullscreen. The measured layout still controls the availability of the
+  saved adaptive setting.
 - `window/notifications_manager.cpp`, `media/view/media_view_overlay_widget.cpp`,
   `media/system_media_controls_manager.cpp`, `tray.cpp`,
   `tray_accounts_menu.cpp`, and `platform/mac/global_menu_mac.mm`: suppresses
@@ -52,6 +56,13 @@ the numbers.
   clears OS Now Playing metadata without stopping playback, hides tray account
   actions, and disables macOS global menu actions while Purple's privacy screen
   is active.
+- `platform/platform_current_geo_location.h`,
+  `platform/mac/current_geo_location_mac.mm`, and `Telegram.plist`: expose
+  a current-location lookup that cannot prompt, a separate explicit address
+  lookup, and the macOS location-use explanation.
+- `window/window_session_controller.cpp`: records chat visits for the local
+  recency palette. `boxes/peer_list_box.*` allows the palette to sort search
+  results while preserving the selected row.
 - `core/shortcuts.h`: declares the existing pause-aware dispatch overload so
   modal commands can use Telegram's contextual shortcut handlers.
 - `dialogs/dialogs_widget.*` and `history/history_widget.*`: focus eligibility
@@ -77,8 +88,9 @@ the numbers.
   access also locates the composer anchors for the status text.
 - `history/view/history_view_list_widget.*`: visible enumeration, layout
   cancellation and focus preservation for hint selection.
-- `history/view/history_view_message.*`: exposes rendered body text and its
-  bounds so Purple can place a hint on each visible link.
+- `history/view/history_view_message.*` and `iv/markdown/iv_markdown_article*`:
+  expose the rendered text geometry for plain and rich message link hints,
+  including clipping by collapsed details and scrollable article blocks.
 - `history/history_inner_widget.cpp` and `history/view/history_view_list_widget.cpp`:
   accept an explicit hinted item in the native keyboard context menu path.
 - `history/history_inner_widget.cpp` and `history/view/history_view_context_menu.*`:

@@ -435,14 +435,13 @@ void WhichKeyOverlay::updateBounds(QRect availableAboveStatusBar) {
 		hide();
 		return;
 	}
-	const auto drawerW = std::min(availableAboveStatusBar.width(), 1120);
+	const auto drawerW = availableAboveStatusBar.width();
 	const auto maxH = std::max(140, int(availableAboveStatusBar.height() * 0.44));
 	const auto drawerH = computeHeight(drawerW, maxH);
 	_columns = computeColumns(drawerW);
 	_columnWidth = std::max(1, (drawerW - 36 - (_columns - 1) * 18) / _columns);
 
-	const auto left = availableAboveStatusBar.x()
-		+ (availableAboveStatusBar.width() - drawerW) / 2;
+	const auto left = availableAboveStatusBar.x();
 	const auto top = availableAboveStatusBar.y()
 		+ availableAboveStatusBar.height() - drawerH;
 	setGeometry(left, top, drawerW, drawerH);
@@ -459,20 +458,21 @@ void WhichKeyOverlay::paintEvent(QPaintEvent *) {
 	const auto sepFm = QFontMetrics(st::normalFont);
 	const auto rtl = IsRtl(this);
 
-	// Elevated rounded-top drawer surface.
-	constexpr auto kRadius = 10.0;
-	auto path = QPainterPath();
-	path.moveTo(0, r.height());
-	path.lineTo(0, kRadius);
-	path.quadTo(0, 0, kRadius, 0);
-	path.lineTo(r.width() - kRadius, 0);
-	path.quadTo(r.width(), 0, r.width(), kRadius);
-	path.lineTo(r.width(), r.height());
-	path.closeSubpath();
+	const auto line = qreal(st::lineWidth);
+	const auto radius = std::min(qreal(st::boxRadius), r.width() / 2.);
+	const auto bounds = QRectF(r).adjusted(line / 2, line / 2, -line / 2, 0);
+	auto edge = QPainterPath();
+	edge.moveTo(bounds.bottomLeft());
+	edge.lineTo(bounds.left(), bounds.top() + radius);
+	edge.quadTo(bounds.topLeft(), QPointF(bounds.left() + radius, bounds.top()));
+	edge.lineTo(bounds.right() - radius, bounds.top());
+	edge.quadTo(bounds.topRight(), QPointF(bounds.right(), bounds.top() + radius));
+	edge.lineTo(bounds.bottomRight());
 
-	p.setPen(QPen(st::boxDividerBg->c, 1));
-	p.setBrush(st::windowBg->c);
-	p.drawPath(path);
+	const auto fill = st::windowBg->c;
+	const auto contrast = ReadableText(st::windowSubTextFg->c, fill);
+	p.fillPath(edge, fill);
+	p.strokePath(edge, QPen(BlendColor(fill, contrast, .82), line));
 
 	// Header strip.
 	constexpr auto kHeaderH = 38;
@@ -905,13 +905,7 @@ public:
 				return base::EventFilterResult::Cancel;
 			}
 			if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
-				if (AllowModalLayerKey(*k, this)) {
-					if (ModalKeysEnabled()) {
-						setFocus();
-					} else {
-						closeLayer();
-					}
-				}
+				if (AllowModalLayerKey(*k, this)) setFocus();
 				return base::EventFilterResult::Cancel;
 			} else if (k->key() == Qt::Key_Tab || k->key() == Qt::Key_Backtab) {
 				if (AllowModalLayerKey(*k, this)) toggleTab();
@@ -975,7 +969,7 @@ protected:
 		if (!AllowModalLayerKey(*e, this, step != 0)) {
 			return;
 		}
-		if (modal && ListFilter::Exit(key, mods) && _showAll) {
+		if (ListFilter::Exit(key, mods, modal) && _showAll) {
 			ClearListFilterOrClose(this, _filter);
 			return;
 		} else if (ListFilter::Exit(key, mods, modal) || (modal && key == Qt::Key_Q && !mods)) {
@@ -1079,11 +1073,13 @@ protected:
 
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
-		const auto leftHint = !ModalKeysEnabled()
-			? u"TAB switch view · ↑/↓ scroll · Esc close"_q
-			: (_showAll && _filter->hasFocus())
+		const auto leftHint = (_showAll && _filter->hasFocus())
 			? u"TAB cheatsheet · C-n/C-p scroll · Esc list"_q
-			: u"TAB switch view · j/k scroll · i or / filter · q close"_q;
+			: _showAll && !_filter->getLastText().isEmpty()
+			? u"TAB cheatsheet · ↑/↓ scroll · Esc clear"_q
+			: !ModalKeysEnabled()
+			? u"TAB switch view · ↑/↓ scroll · Esc close"_q
+			: u"TAB switch view · j/k scroll · i or / filter · Esc close"_q;
 		const auto hintWidth = width() / 2 - 20;
 		p.drawText(
 			QRect(rtl ? (width() / 2) : 20, height() - kFooterH, hintWidth, kFooterH),
@@ -1445,7 +1441,9 @@ public:
 	void setResults(
 			std::vector<int> filtered,
 			std::vector<ModalMx::OrderlessToken> tokens,
+			std::vector<QString> aliasReasons,
 			int selected) {
+		_aliasReasons = std::move(aliasReasons);
 		_filtered = std::move(filtered);
 		_tokens = std::move(tokens);
 		_selected = selected;
@@ -1596,7 +1594,10 @@ protected:
 				labelColor,
 				st::windowActiveTextFg->c);
 
-			const auto sub = item.category.isEmpty()
+			const auto &aliases = _aliasReasons[_filtered[row]];
+			const auto sub = !aliases.isEmpty()
+				? (aliases + u"  ·  :"_q + item.id)
+				: item.category.isEmpty()
 				? (u":"_q + item.id)
 				: (item.category + u"  ·  :"_q + item.id);
 			const auto subSpans = ModalMx::SubtitleMatchSpans(sub, _tokens);
@@ -1618,6 +1619,7 @@ private:
 	Fn<void(int)> _onClick;
 	std::vector<int> _filtered;
 	std::vector<ModalMx::OrderlessToken> _tokens;
+	std::vector<QString> _aliasReasons;
 	int _selected = 0;
 	int _hovered = -1;
 };
@@ -1649,6 +1651,7 @@ public:
 				.category = it.category,
 				.keysText = keysJoined.join(u' '),
 				.available = it.available,
+				.aliases = it.aliases,
 			});
 		}
 		auto rows = object_ptr<PaletteRowsWidget>(
@@ -1815,10 +1818,8 @@ protected:
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
 		const auto activate = _config.describeMode ? u"RET describe"_q : u"RET run"_q;
-		const auto footer = !ModalKeysEnabled()
+		const auto footer = (!ModalKeysEnabled() || _input->hasFocus())
 			? u"C-n/C-p move · %1 · F6 search/list · Esc close"_q.arg(activate)
-			: _input->hasFocus()
-			? u"C-n/C-p move · %1 · Esc close"_q.arg(activate)
 			: u"j/k move · %1 · i or / filter · Esc close"_q.arg(activate);
 		p.drawText(
 			footerRect.adjusted(14, 0, -14, 0),
@@ -1838,7 +1839,26 @@ private:
 		const auto query = _input->getLastText();
 		_filtered = ModalMx::RankAndFilter(_candidates, _config.history, query);
 		_selected = 0;
-		_rows->setResults(_filtered, ModalMx::ParseTokens(query), _selected);
+		auto tokens = ModalMx::ParseTokens(query);
+		auto aliasReasons = std::vector<QString>(_candidates.size());
+		if (!tokens.empty()) {
+			for (const auto index : _filtered) {
+				const auto &candidate = _candidates[index];
+				if (ModalMx::CandidateMatchTier(candidate, tokens) != 0) {
+					continue;
+				}
+				auto matched = QStringList();
+				for (const auto &word : candidate.aliases.split(u' ', Qt::SkipEmptyParts)) {
+					if (ranges::any_of(tokens, [&](const auto &token) {
+						return ModalMx::MatchToken(token, word.toCaseFolded(), {});
+					})) {
+						matched.push_back(word);
+					}
+				}
+				aliasReasons[index] = matched.join(u' ');
+			}
+		}
+		_rows->setResults(_filtered, std::move(tokens), std::move(aliasReasons), _selected);
 		_scroll->scrollToY(0);
 		if (parentWidget()) {
 			parentResized();

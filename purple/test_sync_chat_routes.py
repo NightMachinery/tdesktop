@@ -12,7 +12,8 @@ files = {name: (purple / name).read_text() for name in [
     'purple_sync_account_inventory.cpp', 'purple_sync_local_store.cpp',
     'purple_sync_auto_transport.cpp', 'purple_sync_chat_write.cpp',
     'purple_sync_config_upload.cpp', 'purple_sync_config_post.cpp', 'purple_sync_config_publish.cpp', 'purple_sync_config_publish_flow.cpp', 'purple_account_config.cpp',
-    'purple_sync_magic_service.cpp', 'purple_sync_magic_box.cpp', 'purple_sync_magic_telegram.cpp', 'purple_archive_service.cpp', 'purple_sync_config_review.cpp', 'purple_settings_section.cpp']}
+    'purple_sync_magic_service.cpp', 'purple_sync_magic_box.cpp', 'purple_sync_magic_telegram.cpp', 'purple_archive_service.cpp', 'purple_sync_config_review.cpp', 'purple_settings_section.cpp',
+    'purple_sync_config_apply.cpp', 'purple_sync_review_box.cpp']}
 
 RouteNames = set()
 
@@ -40,7 +41,7 @@ def inspect(values):
     require('chat-pickup-own-filter', 'SyncAutoPickupNeeded' in pickup and 'SyncAutoEvent::ChatUpdated' in pickup)
     require('chat-pickup-debounce', 'if (!_pickup.isActive())' in auto and '_pickup.callOnce(500)' in auto)
     magic = values['purple_sync_magic_service.cpp']
-    notice = values['purple_sync_magic_box.cpp'].split('void ToastSyncMagicProblem(', 1)[1].split('void SyncMagicChatBox(', 1)[0]
+    notice = values['purple_sync_magic_box.cpp'].split('void ToastSyncMagicProblem(', 1)[1].split('void NoticeUnlinkedSyncSettings(', 1)[0]
     require('magic-problem-notice', 'last.kind == SyncMagicResult::Kind::Problem && last.show' in magic
         and 'ToastSyncMagicProblem(session);' in magic
         and all(marker in notice for marker in ('chat->shown();', 'ShowPurpleNotice({',
@@ -134,8 +135,9 @@ def inspect(values):
     box = values['purple_sync_setup_box.cpp']
     joins = box.split('bool JoinsTypedChat(', 1)[1].split('bool UnboundTypedChoice(', 1)[0]
     require('typed-join-route', 'state.route->peer.chat != PeerToken{}' in joins and '!state.review->bound' in joins
-        and 'ConfigSyncVerdict::Empty' in joins and 'if (JoinsTypedChat(state)) {' in box
-        and '|| JoinsTypedChat(*state))) {' in box and '(action == Action::Join && JoinsTypedChat(*state))' in box)
+        and 'ConfigSyncVerdict::Empty' in joins and 'if (JoinsTypedChat(state) || empty) {' in box
+        and '|| JoinsTypedChat(*state) || JoinsEmptyChat(*state))) {' in box
+        and '(action == Action::Join && JoinsTypedChat(*state))' in box)
     def guarded(start, guard):
         # The guard sits in the function, before its call that applies settings.
         body = box.split(start, 1)[1] if start in box else ''
@@ -223,7 +225,7 @@ def inspect(values):
         and 'next.request.expectedParents = applied.expectedParents;' in joined
         and 'FirstUsePublish(inventory, std::move(next), true);' in joined)
     first = box.split('void RunFirstUse(', 1)[-1].split('void OnInventory(', 1)[0]
-    require('first-use-box', 'if (followup == CheckFollowup::None && FirstUse(box, state, result)) {' in box
+    require('first-use-box', 'if (followup == CheckFollowup::None && !state->explicitJoin && FirstUse(box, state, result)) {' in box
         and box.index('FirstUse(box, state, result)') < box.index('auto recovery = InspectSyncAccountRecovery(*session, &result);')
         and 'RunFirstUse(box, state, SyncFirstUseChoice::Synced);' in box
         and 'RunFirstUse(box, state, SyncFirstUseChoice::ThisDevice);' in box
@@ -231,8 +233,9 @@ def inspect(values):
         and all(marker not in first for marker in ['ConfirmAction(', 'showBox(', 'Ui::show(', 'uiShow(']))
     require('first-use-auto-status', 'first->outcome == SyncFirstUseOutcome::Asking) { return tr::lng_purple_auto_first_ask(tr::now); }' in auto
         and 'first->outcome == SyncFirstUseOutcome::Waiting) { return tr::lng_purple_auto_first_wait(tr::now); }' in auto)
-    settings = values['purple_settings_section.cpp'].split('void BuildPurpleAccountsSettings(', 1)[1]
-    account, row = settings.split('.id = u"advanced/purple_sync_setup"_q,', 1)
+    settings = values['purple_settings_section.cpp']
+    accounts = settings.split('void BuildPurpleAccountsSettings(', 1)[1].split('void BuildPurpleDiagnosticsSettings(', 1)[0]
+    account, row = accounts.split('.id = u"advanced/purple_sync_setup"_q,', 1)
     row = row.split('.keywords =', 1)[0]
     require('advanced-sync-enabled', '.label = rpl::single(rpl::empty)' in row
         and '| rpl::then(AutomaticSettingsSyncChanges())' in row
@@ -241,10 +244,32 @@ def inspect(values):
         and 'session && AutomaticSettingsSyncEnabled(session)' in row
         and '? tr::lng_settings_cloud_password_on(tr::now)' in row
         and ': tr::lng_settings_cloud_password_off(tr::now)' in row)
+    join_row = accounts.split('.id = u"advanced/purple_sync_join"_q,', 1)[-1]
+    require('unlinked-join-row', 'Not linked to sync' in join_row
+        and 'Box(SyncSetupBoxForAccount, &own->session())' in join_row
+        and 'AccountSyncBindingChanges()' in join_row
+        and 'SyncMagicSettingsUnlinked(session)' in join_row)
+    notice = values['purple_sync_magic_box.cpp'].split('void NoticeUnlinkedSyncSettings(', 1)[-1].split('void SyncMagicChatBox(', 1)[0]
+    require('unlinked-launch-notice', 'static auto shown = false;' in notice
+        and 'if (shown || !controller' in notice and 'shown = true;' in notice
+        and 'SyncMagicSettingsUnlinked(session)' in notice
+        and 'NoticeUnlinkedSyncSettings(session);' in discovery)
+    merge = values['purple_sync_review_box.cpp'].split('void ConfirmSettingsMerge(', 1)[-1].split('void SyncConfigHistoryEntryBox(', 1)[0]
+    require('merge-explicit-confirmation', 'u"Apply merge"_q' in merge
+        and 'showBox(Box(ConfirmSettingsMerge,' in merge
+        and 'WriteSettingsWithHistory' not in merge)
+    apply = values['purple_sync_config_apply.cpp'].split('if (merging) {', 1)[-1].split('const auto anticipated', 1)[0]
+    require('merge-guarded-local-write', 'if (!plan.source || plan.source->newerSchema)' in apply
+        and 'WriteSettingsWithHistory' in apply
+        and 'NoteSettingsImported' in apply and 'return Stop(result, write.status);' in apply)
     return failures
 
 assert not inspect(files), inspect(files)
 negative = [
+    ('purple_settings_section.cpp', 'AccountSyncBindingChanges()', 'rpl::never<>()', 'unlinked-join-row'),
+    ('purple_sync_magic_box.cpp', 'if (shown || !controller', 'if (!controller', 'unlinked-launch-notice'),
+    ('purple_sync_review_box.cpp', 'showBox(Box(ConfirmSettingsMerge,', 'showBox(Box(SettingsMergeBox,', 'merge-explicit-confirmation'),
+    ('purple_sync_config_apply.cpp', 'if (!plan.source || plan.source->newerSchema)', 'if (!plan.source)', 'merge-guarded-local-write'),
     ('purple_settings_section.cpp', 'session && AutomaticSettingsSyncEnabled(session)', 'false', 'advanced-sync-enabled'),
     ('purple_settings_section.cpp', '| rpl::then(AutomaticSettingsSyncChanges())', '| rpl::then(rpl::never<>())', 'advanced-sync-enabled'),
     ('purple_sync_account_inventory.cpp', '_readStarted = DesktopSyncChatReadStamp::Begin();', '', 'inventory-read-start'),
@@ -290,7 +315,7 @@ negative = [
     ('purple_sync_setup_box.cpp', "this account's selected ", "this account's Saved ", 'typed-settings-confirmation'),
     ('purple_sync_config_publish_flow.cpp', 'record.status == SyncCandidateStatus::Valid', 'true', 'unbound-join-admission'),
     ('purple_sync_config_publish_flow.cpp', 'record.header->space == *space', 'true', 'unbound-join-admission'),
-    ('purple_sync_setup_box.cpp', '|| JoinsTypedChat(*state))) {', ')) {', 'typed-join-route'),
+    ('purple_sync_setup_box.cpp', '|| JoinsTypedChat(*state) || JoinsEmptyChat(*state))) {', '|| JoinsEmptyChat(*state))) {', 'typed-join-route'),
     ('purple_sync_setup_box.cpp', 'state.route->peer.chat != PeerToken{}\n', 'true\n', 'typed-join-route'),
     ('purple_sync_setup_box.cpp', 'if (UnboundTypedChoice(*state, *state->review)) {', 'if (false) {', 'unbound-typed-choice-guard'),
     ('purple_sync_setup_box.cpp', 'if (UnboundTypedChoice(*state, review)) {', 'if (false) {', 'unbound-typed-choice-guard'),
@@ -324,7 +349,7 @@ negative = [
     ('purple_sync_auto_service.cpp', '(action == SyncFirstUseAction::JoinSilently && !review.sameBytes)', '(action == SyncFirstUseAction::JoinSilently)', 'first-use-actions'),
     ('purple_sync_auto_service.cpp', 'next.request.expectedParents = applied.expectedParents;', 'next.request.expectedParents = std::vector<QString>();', 'first-use-local-choice'),
     ('purple_sync_auto_service.cpp', 'self->FirstUseJoined(inventory, review);', 'self->FirstUseFinish(SyncFirstUseOutcome::Joined);', 'first-use-actions'),
-    ('purple_sync_setup_box.cpp', 'if (followup == CheckFollowup::None && FirstUse(box, state, result)) {', 'if (false) {', 'first-use-box'),
+    ('purple_sync_setup_box.cpp', 'if (followup == CheckFollowup::None && !state->explicitJoin && FirstUse(box, state, result)) {', 'if (false) {', 'first-use-box'),
     ('purple_sync_setup_box.cpp', 'RunFirstUse(box, state, SyncFirstUseChoice::Synced);', 'RunFirstUse(box, state, SyncFirstUseChoice::None);', 'first-use-box'),
     ('purple_sync_setup_box.cpp', 'if (*first.action == SyncFirstUseAction::Ask) {\n\t\tstate->asking = true;', 'if (*first.action == SyncFirstUseAction::Ask) {\n\t\tConfirmAction(box, state, Action::Join);', 'first-use-box'),
     ('purple_sync_auto_service.cpp', 'first->outcome == SyncFirstUseOutcome::Asking) { return tr::lng_purple_auto_first_ask(tr::now); }', 'first->outcome == SyncFirstUseOutcome::Asking) { return tr::lng_purple_auto_review(tr::now); }', 'first-use-auto-status'),

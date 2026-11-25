@@ -14,6 +14,7 @@
 #include <QtGui/QKeyEvent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
+#include <QtCore/QTimeZone>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
@@ -45,6 +46,7 @@ public:
 	, _members(_config.members)
 	, _parts(new QStackedWidget(this))
 	, _main(new QWidget(_parts))
+	, _lists(new QBoxLayout(QBoxLayout::LeftToRight))
 	, _form(new QWidget(_parts))
 	, _formLayout(new QVBoxLayout(_form))
 	, _list(new QListWidget(_main))
@@ -65,7 +67,9 @@ public:
 		_formLayout->setSpacing(gap / 3);
 		_formLayout->setAlignment(Qt::AlignTop);
 		_effects->setProperty("secondary", true);
-		auto lists = new QHBoxLayout();
+		for (const auto list : { _list, _peerList }) {
+			CustomizeLook::ConfigureCollectionList(list);
+		}
 		_list->setAccessibleName(u"Selected ordered entries"_q);
 		_peerList->setAccessibleName(u"Available chats for this settings source"_q);
 		_search->setPlaceholderText(ModalKeysEnabled()
@@ -77,9 +81,20 @@ public:
 			_search->hide();
 			_peerList->hide();
 		}
-		lists->addWidget(_list);
-		if (_config.peerField) lists->addWidget(_peerList);
-		main->addLayout(lists);
+		if (_config.members && _config.peerField) {
+			const auto column = [&](QListWidget *list, const QString &title) {
+				const auto layout = new QVBoxLayout();
+				layout->addWidget(new QLabel(title, _main));
+				layout->addWidget(list);
+				_lists->addLayout(layout);
+			};
+			column(_list, u"Members"_q);
+			column(_peerList, u"Available chats"_q);
+		} else {
+			_lists->addWidget(_list);
+			if (_config.peerField) _lists->addWidget(_peerList);
+		}
+		main->addLayout(_lists);
 		for (const auto label : { _effects, _status }) {
 			label->setWordWrap(true);
 			label->setTextFormat(Qt::PlainText);
@@ -92,28 +107,25 @@ public:
 		main->addWidget(operations);
 		main->addWidget(ordering);
 		main->addWidget(footer);
-		button(operations, u"Add"_q, [this] { add(); });
+		button(operations, u"Add"_q, ModalKeysEnabled() ? u"a"_q : QString(), [this] { add(); });
 		if (_config.peerField) {
-			button(operations, u"Enter ID"_q, [this] { edit(Op::Insert); });
+			button(operations, u"Enter ID"_q, ModalKeysEnabled() ? u"i"_q : QString(), [this] { edit(Op::Insert); });
 		}
 		button(operations, u"Edit"_q, [this] { activate(); });
 		if (!_config.members) {
-			button(operations, u"Duplicate"_q, [this] { edit(Op::Duplicate); });
+			button(operations, u"Duplicate"_q, ModalKeysEnabled() ? u"Shift+D"_q : QString(), [this] { edit(Op::Duplicate); });
 		}
-		if (_config.named) button(operations, u"Rename"_q, [this] { edit(Op::Rename); });
-		button(operations, u"Delete"_q, [this] { edit(Op::Erase); });
-		button(ordering, u"Move up"_q, [this] { move(-1); });
-		button(ordering, u"Move down"_q, [this] { move(1); });
-		button(ordering, u"Undo"_q, [this] { undo(); });
+		if (_config.named) button(operations, u"Rename"_q, ModalKeysEnabled() ? u"Shift+R"_q : QString(), [this] { edit(Op::Rename); });
+		button(operations, u"Delete"_q, ModalKeysEnabled() ? u"x"_q : QString(), [this] { edit(Op::Erase); });
+		button(ordering, u"Move up"_q, ModalKeysEnabled() ? u"Shift+K"_q : QString(), [this] { move(-1); });
+		button(ordering, u"Move down"_q, ModalKeysEnabled() ? u"Shift+J"_q : QString(), [this] { move(1); });
+		button(ordering, u"Undo"_q, ModalKeysEnabled() ? u"u"_q : QString(), [this] { undo(); });
 		if (_config.members) {
-			button(ordering, u"Reset members"_q, [this] {
-				auto value = _members.value();
-				value.members = std::nullopt;
-				commit(std::move(value));
-			});
+			button(ordering, u"Reset members"_q, ModalKeysEnabled() ? u"r"_q : QString(),
+				[this] { resetMembers(); });
 		}
-		button(footer, u"Stage collection"_q, [this] { stage(); });
-		button(footer, u"Back"_q, [this] { back(); });
+		button(footer, u"Stage collection"_q, u"C-Enter"_q, [this] { stage(); });
+		button(footer, u"Back"_q, u"Esc"_q, [this] { back(); });
 		for (const auto widget : { static_cast<QWidget*>(_list), static_cast<QWidget*>(_peerList),
 				static_cast<QWidget*>(_search) }) {
 			widget->installEventFilter(this);
@@ -201,6 +213,11 @@ public:
 	}
 
 protected:
+	void resizeEvent(QResizeEvent *event) override {
+		QWidget::resizeEvent(event);
+		_lists->setDirection(CustomizeLook::CollectionListDirection(width(), fontMetrics()));
+	}
+
 	bool eventFilter(QObject *object, QEvent *event) override {
 		if (event->type() == QEvent::InputMethod) {
 			const auto input = static_cast<QInputMethodEvent*>(event);
@@ -248,14 +265,17 @@ protected:
 			else _peerList->setFocus();
 			return true;
 		}
-		if (object != _list && object != _peerList && object != _search) return false;
-		const auto list = (object == _list) ? _list : _peerList;
+		const auto list = object == _search ? _peerList : qobject_cast<QListWidget*>(object);
+		if (!list && (!qobject_cast<QPushButton*>(object)
+			|| _parts->currentWidget() != _main)) {
+			return false;
+		}
 		const auto plainMotion = modal && object != _search;
 		const auto down = (!mods && (code == Qt::Key_Down || (plainMotion && code == Qt::Key_J)))
 			|| (mods == kCtrlMod && code == Qt::Key_N);
 		const auto up = (!mods && (code == Qt::Key_Up || (plainMotion && code == Qt::Key_K)))
 			|| (mods == kCtrlMod && code == Qt::Key_P);
-		if (down || up) {
+		if (list && (down || up)) {
 			if (AllowModalLayerKey(*key, this, true)) {
 				list->setCurrentRow(std::clamp(list->currentRow() + (down ? 1 : -1),
 					0, std::max(0, list->count() - 1)));
@@ -264,12 +284,15 @@ protected:
 		}
 		if (!modal || object == _search) return false;
 		if ((code == Qt::Key_J || code == Qt::Key_K)
-			&& mods == Qt::ShiftModifier && list == _list) {
+			&& mods == Qt::ShiftModifier && list != _peerList) {
 			if (AllowModalLayerKey(*key, this)) move(code == Qt::Key_J ? 1 : -1);
 			return true;
 		}
 		const auto once = [&] { return AllowModalLayerKey(*key, this); };
-		if (code == Qt::Key_D && mods == Qt::ShiftModifier) { if (once()) edit(Op::Duplicate); }
+		if (code == Qt::Key_D && mods == Qt::ShiftModifier && !_config.members) { if (once()) edit(Op::Duplicate); }
+		else if (code == Qt::Key_R && mods == Qt::ShiftModifier && _config.named) { if (once()) edit(Op::Rename); }
+		else if (code == Qt::Key_I && !mods && _config.peerField) { if (once()) edit(Op::Insert); }
+		else if (code == Qt::Key_R && !mods && _config.members) { if (once()) resetMembers(); }
 		else if (code == Qt::Key_A && !mods) { if (once()) add(); }
 		else if (code == Qt::Key_X && !mods) { if (once()) edit(Op::Erase); }
 		else if (code == Qt::Key_U && !mods) { if (once()) undo(); }
@@ -281,9 +304,24 @@ protected:
 	}
 
 private:
+	void resetMembers() {
+		auto value = _members.value();
+		value.members = std::nullopt;
+		commit(std::move(value));
+	}
+
 	template <typename Layout>
 	QPushButton *button(Layout *layout, const QString &label, Fn<void()> run) {
-		const auto result = new CustomizeLook::Action(label, this);
+		return button(layout, label, QString(), std::move(run));
+	}
+
+	template <typename Layout>
+	QPushButton *button(
+			Layout *layout,
+			const QString &label,
+			QString shortcut,
+			Fn<void()> run) {
+		const auto result = new CustomizeLook::Action(label, this, std::move(shortcut));
 		if constexpr (std::is_same_v<Layout, CustomizeLook::Actions>) {
 			layout->append(result);
 		} else {
@@ -359,6 +397,7 @@ private:
 				})) continue;
 			const auto entry = new QListWidgetItem(choice.avatar, choice.label, _peerList);
 			entry->setData(Qt::UserRole, choice.literal);
+			entry->setToolTip(choice.label);
 			if (choice.literal == selected) _peerList->setCurrentItem(entry);
 		}
 		if (!_peerList->currentItem() && _peerList->count()) _peerList->setCurrentRow(0);
@@ -384,7 +423,7 @@ private:
 				: item.label;
 			const auto entry = new QListWidgetItem(choice ? choice->avatar : QIcon(),
 				item.recognized ? name : u"Skipped value · "_q + name, _list);
-			entry->setToolTip(item.line ? u"Source line %1"_q.arg(item.line) : QString());
+			entry->setToolTip(item.line ? u"%1\nSource line %2"_q.arg(entry->text()).arg(item.line) : entry->text());
 		}
 		if (!_items.empty()) _list->setCurrentRow(std::clamp(selection, 0, int(_items.size()) - 1));
 		effect();
@@ -521,10 +560,19 @@ private:
 				return values.join(u',');
 			};
 		}
-		if (spec.kind == Kind::Choice) {
+		if (spec.kind == Kind::Choice || spec.kind == Kind::TimeZone) {
 			const auto choices = new QComboBox(_form);
 			choices->setAccessibleName(spec.label);
-			choices->addItems(spec.choices);
+			if (spec.kind == Kind::TimeZone) {
+				choices->setEditable(true);
+				choices->setInsertPolicy(QComboBox::NoInsert);
+				choices->lineEdit()->installEventFilter(this);
+				for (const auto &zone : QTimeZone::availableTimeZoneIds()) {
+					choices->addItem(QString::fromUtf8(zone));
+				}
+			} else {
+				choices->addItems(spec.choices);
+			}
 			choices->setCurrentText(spec.initial);
 			field(choices);
 			return [choices] { return choices->currentText(); };
@@ -617,10 +665,24 @@ private:
 			field(name);
 		}
 		auto readers = std::vector<Fn<QString()>>();
-		if (insert && !_config.peerField) {
-			for (const auto &spec : Structures::RecordFields(id)) readers.push_back(recordField(spec));
+		const auto editingClock = id == SettingId::WorldClocks && op == Op::Replace;
+		if ((insert && !_config.peerField) || editingClock) {
+			auto fields = Structures::RecordFields(id);
+			if (editingClock) {
+				const auto parsed = ParseSettings(
+					u"privacy_screen.world_clocks = [%1]"_q.arg(QString::fromUtf8(item.literal)),
+					QString());
+				if (!parsed.settings.worldClocks.empty()) {
+					fields[0].initial = parsed.settings.worldClocks.front().zone;
+					fields[1].initial = parsed.settings.worldClocks.front().label;
+				}
+			}
+			for (const auto &spec : fields) {
+				readers.push_back(recordField(spec));
+			}
 		}
-		if ((insert && !_config.peerField && readers.empty()) || op == Op::Replace) {
+		if ((insert && !_config.peerField && readers.empty())
+			|| (op == Op::Replace && !editingClock)) {
 			literal = new QPlainTextEdit(QString::fromUtf8(insert
 				? Structures::RecordTemplate(id) : item.literal), _form);
 			literal->setAccessibleName(u"One TOML value or inline record"_q);
@@ -642,9 +704,9 @@ private:
 			return values;
 		};
 		_formBaseline = _formInput();
-		const auto cancel = button(_formLayout, u"Cancel"_q, [this] { back(); });
+		const auto cancel = button(_formLayout, u"Cancel"_q, u"Esc"_q, [this] { back(); });
 		_accept = button(_formLayout, op == Op::Erase ? u"Remove from draft"_q : u"Keep change"_q,
-			[this, op, at, item, name, literal, error, insert, id, objectId, liveFields] {
+			u"C-Enter"_q, [this, op, at, item, name, literal, error, insert, id, objectId, liveFields] {
 				if (!_config.current()) return;
 				const auto contents = name ? name->text().trimmed() : QString();
 				if (insert && _config.peerField) {
@@ -761,6 +823,7 @@ private:
 	std::optional<SettingsEditorMembers> _members;
 	QStackedWidget *_parts;
 	QWidget *_main;
+	QBoxLayout *_lists;
 	QWidget *_form;
 	QVBoxLayout *_formLayout;
 	QListWidget *_list;

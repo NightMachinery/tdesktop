@@ -36,6 +36,7 @@ struct Row {
 	QString defaultValue;
 	QString resetLabel;
 	std::vector<PhysicalValue> physical;
+	std::optional<QString> listCaseFix;
 	SettingScope scope = SettingScope::Unknown;
 	bool branch = false;
 	bool editable = false;

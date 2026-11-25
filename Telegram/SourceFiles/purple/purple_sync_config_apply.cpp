@@ -142,7 +142,8 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 		const SyncConfigReview &review,
 		const std::optional<QString> &chosenRemoteKey,
 		const AccountTransferReview *replacement,
-		SyncLocalStore *lockedStore) {
+		SyncLocalStore *lockedStore,
+		SyncConfigChoiceMode mode) {
 	auto result = SyncConfigApplyResult();
 	const auto recovery = InspectSyncAccountRecovery(session, &inventory);
 	if (!recovery || recovery->journalPresent || recovery->plan.status != (review.bound
@@ -155,8 +156,18 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 		|| review.accountUserId != inventory.accountUserId) {
 		return Stop(result, SyncConfigApplyStatus::AccountUnavailable);
 	}
-	if (!replacement && (review.plan.verdict == ConfigSyncVerdict::Choose
-		|| review.plan.verdict == ConfigSyncVerdict::Conflict
+	const auto merging = (mode == SyncConfigChoiceMode::Merge);
+	const auto choosing = (review.plan.verdict == ConfigSyncVerdict::Choose)
+		|| (review.plan.verdict == ConfigSyncVerdict::Conflict);
+	if (merging && (!replacement || !chosenRemoteKey || !choosing
+		|| review.local.status != SyncSettingsFileStatus::Present
+		|| review.local.usingLastGood
+		|| replacement->impact.status != ConfigImpactStatus::Ready
+		|| replacement->impact.proposedText.size() > kSyncSettingsMaximumBytes
+		|| !SyncSettingsTextWritable(replacement->impact.proposedText))) {
+		return Stop(result, SyncConfigApplyStatus::NeedsReview);
+	}
+	if (!replacement && (choosing
 		|| review.plan.verdict == ConfigSyncVerdict::UpdateReady)) {
 		return Stop(result, SyncConfigApplyStatus::NeedsReview);
 	}
@@ -255,6 +266,30 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 			(plan.join
 				? SyncConfigApplyStatus::NeedsRecheck
 				: StatusOf(plan.status)));
+	}
+
+	if (merging) {
+		if (!plan.source || plan.source->newerSchema) {
+			return Stop(result, SyncConfigApplyStatus::NeedsReview);
+		}
+		const auto &text = replacement->impact.proposedText;
+		result.fingerprint = local.fingerprint;
+		if (text == local.text) {
+			return Stop(result, SyncConfigApplyStatus::Applied);
+		}
+		const auto write = WriteSettingsWithHistory(
+			session, *target, local, text, SettingsFingerprint(text),
+			SyncConfigHistoryReason::BeforeChoice,
+			u"Before merging settings from %1"_q.arg(SyncDeviceName(*plan.source)).left(kMaximumLabelLength),
+			plan.versionKey, QString(), replacement);
+		result.historyId = write.historyId;
+		result.wroteFile = write.wrote;
+		result.undoAvailable = write.wrote && write.restorable;
+		if (write.status == SyncConfigApplyStatus::Applied) {
+			NoteSettingsImported(&session, write.readBack.text);
+			result.fingerprint = write.readBack.fingerprint;
+		}
+		return Stop(result, write.status);
 	}
 
 	const auto anticipated = CompleteSyncConfigApply(plan, plan.choice.writeRemote

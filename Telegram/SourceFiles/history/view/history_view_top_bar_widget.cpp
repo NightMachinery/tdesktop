@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_top_bar_widget.h"
+#include "purple/purple_keys.h"
 #include "purple/purple_last_seen_ui.h"
 
 #include "history/history.h"
@@ -406,6 +407,10 @@ void TopBarWidget::showPeerMenu() {
 		return;
 	}
 	const auto addAction = Ui::Menu::CreateAddActionCallback(_menu);
+	if (const auto label = Purple::ZenChatListToggleLabel(_controller)
+		; !label.isEmpty() && !rootChatsListBar()) {
+		_menu->addAction(label, [=] { Purple::ToggleZenChatList(_controller); });
+	}
 	Window::FillDialogsEntryMenu(_controller, _activeChat, addAction);
 	if (_menu->empty()) {
 		closeMenu();

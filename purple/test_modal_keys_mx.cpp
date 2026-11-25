@@ -57,6 +57,21 @@ int main() {
 	};
 
 	{
+		auto commands = std::vector<Candidate>{
+			{ 0, Q("playback-toggle"), Q("Play / Pause"), Q("playback"),
+				Q("SPC p p"), true, Q("music audio resume") },
+			{ 1, Q("test-play"), Q("Play music"), Q("test"), {}, true },
+		};
+		History history;
+		history.record(Q("playback-toggle"), Q("music play"));
+		const auto result = RankAndFilter(commands, history, Q("music play"));
+		Expect(result == std::vector<int>({ 1, 0 }),
+			"names rank before alias-only tokens even for recent commands");
+		Expect(RankAndFilter(commands, history, Q("resume music")) == std::vector<int>({ 0 }),
+			"aliases combine orderlessly");
+	}
+
+	{
 		const auto actions = std::vector<Candidate>{
 			{ 0, Q("describe-command"), Q("Describe command"), Q("help"), Q("SPC h v"), true },
 			{ 1, Q("cafe"), Q("Café"), Q("fixture"), Q("SPC z"), true },
