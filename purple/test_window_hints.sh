@@ -10,8 +10,9 @@ fi
 work="$(mktemp -d "${TMPDIR:-/tmp}/purple-window-hints.XXXXXX")"
 trap 'rm -rf "${work}"' EXIT
 flags=(-std=c++20 -Wall -Wextra -Werror -I"${root}/Telegram/SourceFiles")
-for test in test_hint_labels test_hint_mnemonics; do
-  "${CXX:-c++}" "${flags[@]}" "${root}/purple/${test}.cpp" -o "${work}/${test}"
+for fixture in test_hint_labels.cpp test_hint_mnemonics.cpp; do
+  test="${fixture%.cpp}"
+  "${CXX:-c++}" "${flags[@]}" "${root}/purple/${fixture}" -o "${work}/${test}"
   "${work}/${test}"
 done
 "${CXX:-c++}" "${flags[@]}" -F"${frameworks}" -framework QtCore "-Wl,-rpath,${frameworks}" \

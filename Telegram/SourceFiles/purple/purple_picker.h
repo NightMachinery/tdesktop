@@ -42,16 +42,17 @@ namespace Payments { struct InvoiceId; }
 
 namespace Purple {
 
-void ClosePickerOnEscape(not_null<PeerListBox*> box);
 void InstallPickerFilter(
 	not_null<PeerListBox*> box,
 	not_null<Ui::MultiSelect*> filter,
-	not_null<PeerListContent*> list);
+	not_null<PeerListContent*> list,
+	bool closeOnEscape);
 [[nodiscard]] bool HandlePickerFilter(
 	not_null<PeerListBox*> box,
 	Ui::MultiSelect *filter,
 	not_null<PeerListContent*> list,
-	QKeyEvent *event);
+	QKeyEvent *event,
+	bool closeOnEscape);
 
 [[nodiscard]] std::shared_ptr<ChatHelpers::Show> PickerGiftShow(
 	std::shared_ptr<ChatHelpers::Show> show, not_null<PeerData*> peer);

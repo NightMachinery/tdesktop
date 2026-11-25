@@ -237,7 +237,7 @@ void ClearListFilterOrClose(
 		not_null<Ui::LayerWidget*> layer,
 		not_null<Ui::InputField*> field) {
 	if (field->getLastText().isEmpty()) {
-		layer->closeLayer();
+		CloseModalFilterLayer(layer);
 	} else {
 		field->setText(QString());
 	}
@@ -973,7 +973,7 @@ protected:
 			ClearListFilterOrClose(this, _filter);
 			return;
 		} else if (ListFilter::Exit(key, mods, modal) || (modal && key == Qt::Key_Q && !mods)) {
-			closeLayer();
+			CloseModalFilterLayer(this);
 			return;
 		} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
 			toggleTab();
@@ -2393,6 +2393,7 @@ protected:
 		}
 
 		if (ListFilter::Exit(key, mods)) {
+			if (_selected >= 0) _selection.keepCurrentOnClear();
 			ClearListFilterOrClose(this, _filter);
 			return;
 		} else if (ListFilter::Enter(*e, key)) {
@@ -3138,6 +3139,7 @@ protected:
 			}
 		}
 		if (ListFilter::Exit(key, mods)) {
+			if (_selected >= 0) _selection.keepCurrentOnClear();
 			ClearListFilterOrClose(this, _filter);
 			return;
 		} else if (ListFilter::Enter(*e, key)) {
@@ -3322,9 +3324,9 @@ private:
 	}
 
 	void refilter(bool preserveScroll, MsgId keepRootId) {
-		const auto tokens = ModalMx::ParseTokens(_filter->getLastText());
+		const auto query = _filter->getLastText();
+		const auto tokens = ModalMx::ParseTokens(query);
 		_visible.clear();
-		auto restoredSelected = -1;
 		for (auto i = 0; i < int(_config.items.size()); ++i) {
 			const auto &it = _config.items[i];
 			if (_unreadOnly && it.unreadCount <= 0 && it.mentions <= 0) {
@@ -3340,21 +3342,22 @@ private:
 					continue;
 				}
 			}
-			if (keepRootId != 0 && it.rootId == keepRootId) {
-				restoredSelected = int(_visible.size());
-			}
 			_visible.push_back(i);
 		}
-		if (restoredSelected >= 0) {
-			_selected = restoredSelected;
-		} else {
-			_selected = std::clamp(_selected, 0, std::max(0, int(_visible.size()) - 1));
-		}
+		_selected = _selection.refilter(
+			_visible,
+			(keepRootId != 0) ? std::make_optional(keepRootId) : std::nullopt,
+			_selected,
+			!query.isEmpty(),
+			[&](int index) { return _config.items[index].rootId; });
 		if (_rows) {
 			_rows->setData(_config.items, _visible, _selected);
 			_rows->setStatus(_hasMore, _loadTimeout.isActive());
 		}
-		if (!preserveScroll) {
+		if (!preserveScroll && !_visible.empty()) {
+			const auto top = 4 + _selected * TopicRowsWidget::kRowHeight;
+			_scroll->scrollToY(top, top + TopicRowsWidget::kRowHeight);
+		} else if (!preserveScroll) {
 			_scroll->scrollToY(0);
 		}
 		update();
@@ -3393,6 +3396,7 @@ private:
 	}
 
 	TopicPickerConfig _config;
+	ListSelection<MsgId> _selection;
 	bool _unreadOnly = false;
 	bool _hasMore = false;
 	QTimer _loadTimeout;
@@ -4297,6 +4301,7 @@ protected:
 			}
 		}
 		if (ListFilter::Exit(key, mods)) {
+			if (_selected >= 0) _selection.keepCurrentOnClear();
 			ClearListFilterOrClose(this, _filter);
 			return;
 		} else if (ListFilter::Enter(*e, key)) {

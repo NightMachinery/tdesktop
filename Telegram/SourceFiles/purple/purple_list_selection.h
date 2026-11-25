@@ -9,6 +9,10 @@ namespace Purple {
 template <typename Id>
 class ListSelection final {
 public:
+	void keepCurrentOnClear() {
+		_anchor.reset();
+	}
+
 	[[nodiscard]] int refilter(
 			const std::vector<int> &visible,
 			std::optional<Id> selected,

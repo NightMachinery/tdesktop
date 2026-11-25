@@ -115,6 +115,11 @@ int main() {
 			"zero matches have no actionable row");
 		Check(selection.refilter(all, {}, -1, false, peerAt) == 3,
 			"clearing zero matches restores the same anchor");
+		const auto forumRow = selection.refilter(forum, fourthPeer, 3, true, peerAt);
+		selection.keepCurrentOnClear();
+		const auto restoredForum = selection.refilter(all, uint64_t(20), forumRow, false, peerAt);
+		Check(SelectedPeer(items, all, restoredForum) == 20,
+			"Escape from the list keeps the highlighted peer when clearing its query");
 		std::swap(items[1].lastTimestamp, items[3].lastTimestamp);
 		const auto refreshed = FilterBufferItems(items, QString());
 		Check(selection.refilter(refreshed, selected, 1, false, peerAt) == 0,
