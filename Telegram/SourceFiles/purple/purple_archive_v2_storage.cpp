@@ -230,8 +230,11 @@ std::optional<int64> Store::pendingBytes() const {
 }
 
 std::optional<StorageSummary> Store::storageSummary() {
-	const auto active = usage();
-	if (!active) return std::nullopt;
+	auto active = usage();
+	const auto budget = totals(true);
+	if (!active || !budget) return std::nullopt;
+	active->ordinary = budget->first;
+	active->timed = budget->second;
 	const auto ordinary = int64(_options.policy.totalMiB) * 1024 * 1024;
 	const auto timed = int64(_options.policy.timedMiB) * 1024 * 1024;
 	const auto overhead = kWalHeadroom + kMetadataHeadroom;

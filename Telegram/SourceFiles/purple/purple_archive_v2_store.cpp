@@ -109,10 +109,10 @@ QString Store::openDatabase(const QByteArray &dataKey) {
 		if (!header) return u"key_unavailable"_q;
 		auto init = Schema();
 		init.statements.insert(init.statements.end() - 1,
-			{ u"INSERT INTO meta VALUES(2,?,?,0,0,0)"_q, { _pointer.id, *header }, kOne });
+			{ u"INSERT INTO meta VALUES(2,?,?,0,0,0,0,0)"_q, { _pointer.id, *header }, kOne });
 		if (!_db.Execute(init, [this] { return _options.lease->live.load(); }).committed) return u"store_unreadable"_q;
 	}
-	if (!captureSerial() || !totals()) return u"schema_unknown"_q;
+	if (!captureSerial() || !totals(true)) return u"schema_unknown"_q;
 	auto sweep = Program();
 	sweep.statements.push_back({ u"DELETE FROM blobs WHERE sealed_manifest IS NULL"_q, {}, ArchiveSqlExpectation::AnyChanges });
 	sweep.statements.push_back({ u"COMMIT"_q });
@@ -201,14 +201,11 @@ std::vector<StoreEffect> Store::captureBatch(std::span<const CapturedEvent> even
 	if (events.empty()) return effects;
 	auto bytes = int64(0);
 	for (const auto &event : events) {
+		if (event.storeId != id()) continue;
 		bytes += event.body.size() + event.preimage.size() + 4096;
 		for (const auto &entry : event.attachments) bytes += entry.description.size() + 512;
 	}
-	auto failure = current() ? physicalLimit(bytes) : u"scope_retired"_q;
-	while (failure == u"quota_unreclaimable"_q && maintenancePending() && bytes < kWalHeadroom / 2) {
-		const auto maintained = maintain();
-		failure = maintained ? physicalLimit(bytes) : maintained.reason;
-	}
+	const auto failure = current() && bytes ? reservePages(bytes, false) : u"scope_retired"_q;
 	if (!failure.isEmpty()) return std::vector<StoreEffect>(events.size(), StoreEffect{ failure });
 	const auto result = _db.ExecuteV2([&](const DesktopArchiveSqlite::Write &put) {
 		_batch = &put;
@@ -470,6 +467,7 @@ StoreEffect Store::writeBlob(const BlobInput &input, const std::function<void()>
 	if (saved && (!binding || unseal(u"body", reference, *binding) != *saved)) return { u"store_unreadable"_q };
 	if (saved && *saved != blob) return { u"scope_retired"_q };
 	const auto parts = (input.size - 1) / kPartSize + 1;
+	const auto framing = parts * 3072 + 384;
 	const auto manifest = Number(input.size) + Number(parts) + input.digest;
 	const auto previous = _db.Read({ u"SELECT size,sealed_manifest,timed FROM blobs WHERE blob_key=?"_q, { blob }, kRows });
 	if (!previous.ok) return { u"store_unreadable"_q };
@@ -487,7 +485,7 @@ StoreEffect Store::writeBlob(const BlobInput &input, const std::function<void()>
 	}
 	if (saved) return previous.rows.empty() ? StoreEffect{ u"store_unreadable"_q } : StoreEffect{};
 	const auto fresh = previous.rows.empty();
-	if (const auto failure = reserve(charge, *timed, key, blob, betweenParts); !failure.isEmpty()) return describe(failure);
+	if (const auto failure = reserve(charge, charge ? framing : 0, *timed, key, blob, betweenParts); !failure.isEmpty()) return describe(failure);
 	const auto sealedReference = seal(u"body", reference, blob);
 	const auto sealedManifest = fresh ? seal(u"body", associated("blob", blob), manifest) : std::nullopt;
 	if (!sealedReference || (fresh && !sealedManifest)) return { u"key_unavailable"_q };
@@ -507,10 +505,10 @@ StoreEffect Store::writeBlob(const BlobInput &input, const std::function<void()>
 		auto remaining = input.size;
 		for (auto part = int64(0); part < parts;) {
 			const auto count = std::min<int64>(4, parts - part);
-			if (const auto failure = physicalLimit(std::min<int64>(remaining, count * kPartSize) + 128 * 1024);
+			if (const auto failure = reservePages(std::min<int64>(remaining, count * kPartSize) + 128 * 1024, *timed, key, blob);
 					!failure.isEmpty()) return describe(failure);
 			auto program = Program();
-			if (!part) program.statements.push_back({ u"INSERT INTO blobs VALUES(?,?,NULL,?)"_q, { blob, input.size, *timed }, kOne });
+			if (!part) program.statements.push_back({ u"INSERT INTO blobs VALUES(?,?,NULL,?,?)"_q, { blob, input.size, *timed, framing }, kOne });
 			for (auto i = int64(0); i != count; ++i, ++part) {
 				if (!live() || !step(Phase::BlobPart)) return { u"scope_retired"_q };
 				const auto length = std::min<int64>(remaining, kPartSize);
@@ -534,7 +532,7 @@ StoreEffect Store::writeBlob(const BlobInput &input, const std::function<void()>
 	if (!live()) return { u"scope_retired"_q };
 	const auto allowed = int64(*timed ? _options.policy.timedMiB : _options.policy.ordinaryFileMiB) * kMiB;
 	if (input.size > allowed) return describe(*timed ? u"over_allowance"_q : u"over_file_limit"_q);
-	if (const auto failure = physicalLimit(128 * 1024); !failure.isEmpty()) return describe(failure);
+	if (const auto failure = reservePages(128 * 1024, *timed, key, blob); !failure.isEmpty()) return describe(failure);
 	auto program = Program();
 	if (fresh) program.statements.push_back({ u"UPDATE blobs SET sealed_manifest=? WHERE blob_key=? AND sealed_manifest IS NULL"_q,
 		{ *sealedManifest, blob }, kOne });

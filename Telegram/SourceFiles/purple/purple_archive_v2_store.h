@@ -163,7 +163,8 @@ struct Usage {
 
 // A bounded SQLite write plus its checkpoint, and page/index/encryption overhead.
 inline constexpr auto kWalHeadroom = int64(16 * 1024 * 1024);
-inline constexpr auto kMetadataHeadroom = int64(384 * 1024 * 1024);
+inline constexpr auto kMetadataHeadroom = int64(48 * 1024 * 1024);
+inline constexpr auto kBlobFramingCredit = int64(4 * 1024 * 1024);
 
 struct StorageSummary {
 	Usage active;
@@ -277,12 +278,14 @@ private:
 	[[nodiscard]] QString openDatabase(const QByteArray &dataKey);
 	[[nodiscard]] StoreEffect write(ArchiveSqlProgram program);
 	[[nodiscard]] StoreEffect captureOne(const CapturedEvent &event);
-	[[nodiscard]] std::optional<std::pair<int64, int64>> totals();
-	[[nodiscard]] QString reserve(int64 logical, bool timed, const QByteArray &keep,
+	[[nodiscard]] std::optional<std::pair<int64, int64>> totals(bool budget = false);
+	[[nodiscard]] QString reserve(int64 logical, int64 framing, bool timed, const QByteArray &keep,
 		const QByteArray &keepBlob, const std::function<void()> &betweenParts);
 	[[nodiscard]] QString expire(int64 day, const QByteArray &keep = {});
-	[[nodiscard]] QString trim(int64 bytes, bool timed, const QByteArray &keep, const QByteArray &keepBlob = {});
-	[[nodiscard]] QString physicalLimit(int64 extra, bool reclaiming = false);
+	[[nodiscard]] QString trim(int64 bytes, bool timed, const QByteArray &keep, const QByteArray &keepBlob = {},
+		int64 framing = 0, int64 freePages = 0);
+	[[nodiscard]] QString physicalLimit(int64 extra, bool reclaiming = false, int64 *freePages = nullptr);
+	[[nodiscard]] QString reservePages(int64 bytes, bool timed, const QByteArray &keep = {}, const QByteArray &blob = {});
 	[[nodiscard]] std::optional<int64> pragma(const QString &query);
 	[[nodiscard]] int64 availableBytes() const;
 	[[nodiscard]] int64 today() const;

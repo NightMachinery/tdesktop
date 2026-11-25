@@ -55,12 +55,14 @@ A blob referenced by both is charged once to timed media. SQLite updates both
 totals alongside changes to their records. A lower limit schedules bounded
 trim batches, while text can still use physical room already available.
 
-The physical ceiling combines both allowances with fixed SQLite headroom of
-400 MiB. This includes 16 MiB for WAL frames and 384 MiB for page layout,
-indexes, encryption and sidecars, sized for the supported large limits. The app
-allocates these bytes only as needed. The Storage view gives the total,
-allowances, pending deletion and overhead. Diagnostics records the individual
-file sizes.
+The physical ceiling combines both allowances with 64 MiB of headroom. It
+includes 16 MiB for WAL frames and 48 MiB for framing, fragmentation,
+SQLite's page layout and sidecars. Both buckets charge for payload and record
+layout. Up to 4 MiB of measured file framing per bucket counts toward the
+shared headroom so a file can use its full default payload allowance. When
+fragmented pages leave too little space for a write, reclaim from that
+write's bucket. Storage shows actual physical usage alongside the allowance
+charges and overhead. Diagnostics records the individual file sizes.
 
 ## Stream retirement wakeups
 

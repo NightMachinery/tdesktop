@@ -49,8 +49,11 @@ int64 Store::today() const {
 	return std::max<int64>(0, _options.now ? _options.now() : QDateTime::currentSecsSinceEpoch()) / 86400;
 }
 
-std::optional<std::pair<int64, int64>> Store::totals() {
-	const auto read = _db.Read({ u"SELECT ordinary,timed FROM meta WHERE format=2"_q, {}, kRow });
+std::optional<std::pair<int64, int64>> Store::totals(bool budget) {
+	const auto read = _db.Read(budget ? ArchiveSqlStatement{
+		u"SELECT ordinary-min(ordinary_framing,?),timed-min(timed_framing,?) FROM meta"_q,
+		{ kBlobFramingCredit, kBlobFramingCredit }, kRow
+	} : ArchiveSqlStatement{ u"SELECT ordinary,timed FROM meta"_q, {}, kRow });
 	const auto ordinary = Integer(read);
 	const auto timed = Integer(read, 1);
 	return ordinary && timed ? std::optional(std::pair(*ordinary, *timed)) : std::nullopt;
@@ -66,7 +69,7 @@ std::optional<Usage> Store::usage() {
 			+ QFileInfo(_root + u"/live.lock"_q).size(), size->first, size->second };
 }
 
-QString Store::physicalLimit(int64 extra, bool reclaiming) {
+QString Store::physicalLimit(int64 extra, bool reclaiming, int64 *freePages) {
 	const auto &policy = _options.policy;
 	if (!Valid(policy)) return u"policy_invalid"_q;
 	const auto page = pragma(u"PRAGMA page_size"_q);
@@ -85,13 +88,27 @@ QString Store::physicalLimit(int64 extra, bool reclaiming) {
 	const auto desired = ((int64(policy.totalMiB) + policy.timedMiB) * kMiB + kMetadataHeadroom - kMiB) / *page;
 	// A reduction may leave the existing database above the new ceiling until vacuum runs.
 	const auto maximum = std::max(desired, *count);
-	if (!reclaiming && *count - *free + frames > maximum) return u"quota_unreclaimable"_q;
+	if (!reclaiming && *count - *free + frames > maximum) {
+		if (freePages) *freePages = frames - (maximum - *count);
+		return u"quota_unreclaimable"_q;
+	}
 	if (_pageLimit != maximum) {
 		const auto limit = pragma(u"PRAGMA max_page_count=%1"_q.arg(maximum));
 		if (limit != maximum) return u"quota_unreclaimable"_q;
 		_pageLimit = maximum;
 	}
 	return {};
+}
+
+QString Store::reservePages(int64 bytes, bool timed, const QByteArray &keep, const QByteArray &blob) {
+	auto freePages = int64(0);
+	const auto failure = physicalLimit(bytes, false, &freePages);
+	if (!freePages) return failure;
+	auto trimmed = QString();
+	do {
+		trimmed = trim(0, timed, keep, blob, 0, freePages);
+	} while (trimmed == u"trim_pending"_q && current());
+	return trimmed.isEmpty() ? physicalLimit(bytes) : trimmed;
 }
 
 QString Store::expire(int64 day, const QByteArray &keep) {
@@ -116,21 +133,30 @@ QString Store::expire(int64 day, const QByteArray &keep) {
 	return {};
 }
 
-QString Store::trim(int64 bytes, bool timed, const QByteArray &keep, const QByteArray &keepBlob) {
+QString Store::trim(int64 bytes, bool timed, const QByteArray &keep, const QByteArray &keepBlob,
+		int64 framing, int64 freePages) {
 	const auto cap = int64(timed ? _options.policy.timedMiB : _options.policy.totalMiB) * kMiB;
 	if (bytes > cap) return u"over_allowance"_q;
-	const auto initial = totals();
+	const auto bucket = timed ? u"timed"_q : u"ordinary"_q;
+	const auto query = ArchiveSqlStatement{
+		u"SELECT %1+?+?-min(%1_framing+?,?) FROM meta"_q.arg(bucket), { bytes, framing, framing, kBlobFramingCredit }, kRow
+	};
+	const auto fits = [&]() -> std::optional<bool> {
+		const auto charge = Integer(_db.Read(query));
+		const auto free = freePages ? pragma(u"PRAGMA freelist_count"_q) : std::optional<int64>(0);
+		return charge && free ? std::optional(*charge <= cap && *free >= freePages) : std::nullopt;
+	};
+	const auto initial = fits();
 	if (!initial) return u"store_unreadable"_q;
-	const auto fits = [&](const auto &size) { return (timed ? size.second : size.first) <= cap - bytes; };
-	if (fits(*initial)) return {};
+	if (*initial) return {};
 	if (const auto failure = physicalLimit(2 * kMiB, true); !failure.isEmpty()) return failure;
 	auto failure = QString();
 	auto removed = false;
 	const auto result = _db.ExecuteV2([&](const DesktopArchiveSqlite::Write &put) {
 		for (auto i = int64(0); i <= kBatch; ++i) {
-			const auto size = totals();
-			if (!size) return false;
-			if (fits(*size)) return true;
+			const auto fitsNow = fits();
+			if (!fitsNow) return false;
+			if (*fitsNow) return true;
 			if (i == kBatch) { failure = u"trim_pending"_q; return true; }
 			const auto oldest = _db.Read({ u"SELECT b.blob_key FROM blobs b JOIN media r USING(blob_key) "
 				"JOIN messages m USING(message_key) WHERE b.timed=? AND b.sealed_manifest IS NOT NULL AND b.blob_key<>? "
@@ -165,7 +191,7 @@ QString Store::trim(int64 bytes, bool timed, const QByteArray &keep, const QByte
 	return failure;
 }
 
-QString Store::reserve(int64 logical, bool timed, const QByteArray &keep,
+QString Store::reserve(int64 logical, int64 framing, bool timed, const QByteArray &keep,
 		const QByteArray &keepBlob, const std::function<void()> &betweenParts) {
 	const auto day = today();
 	while (current() && _lastTrimDay != day) {
@@ -174,7 +200,7 @@ QString Store::reserve(int64 logical, bool timed, const QByteArray &keep,
 		if (betweenParts) betweenParts();
 	}
 	while (current()) {
-		const auto result = trim(logical, timed, keep, keepBlob);
+		const auto result = trim(logical, timed, keep, keepBlob, framing);
 		if (result != u"trim_pending"_q) return result;
 		if (betweenParts) betweenParts();
 	}

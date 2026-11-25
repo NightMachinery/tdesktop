@@ -2477,19 +2477,19 @@ void ArchiveV2Schema() {
 	};
 	CHECK(scalar(u"PRAGMA auto_vacuum"_q) == ArchiveSqlValue(int64(2)));
 	CHECK(apply({
-		{u"INSERT INTO meta VALUES(2,?,?,0,0,0)"_q, {QByteArray("store"), QByteArray("header")}},
+		{u"INSERT INTO meta VALUES(2,?,?,0,0,0,0,0)"_q, {QByteArray("store"), QByteArray("header")}},
 		{u"INSERT INTO messages VALUES(x'01',x'02',x'03',0,0,25,3,x'FF',4,0)"_q},
 		{u"INSERT INTO versions VALUES(x'01',1,x'A1',25,x'A0',x'AA',1)"_q},
 		{u"INSERT INTO versions VALUES(x'01',2,x'A2',25,x'B0',x'BB',2)"_q},
 		{u"INSERT INTO versions VALUES(x'01',3,x'A3',25,x'A0',x'AA',1)"_q},
-		{u"INSERT INTO blobs VALUES(x'04',1000,x'FE',1)"_q},
+		{u"INSERT INTO blobs VALUES(x'04',1000,x'FE',1,3456)"_q},
 		{u"INSERT INTO blob_parts VALUES(x'04',0,x'FD')"_q},
 		{u"INSERT INTO media VALUES(x'01',1,0,x'50',1,1,1,0,x'FC',x'04',x'FA')"_q},
 		{u"INSERT INTO media VALUES(x'01',3,0,x'50',1,0,1,0,x'FC',x'04',x'FA')"_q},
 	}));
 	CHECK(!apply({ {u"INSERT INTO versions VALUES(x'01',4,x'A3',25,x'A0',x'AA',1)"_q} }));
 	CHECK(!apply({ {u"INSERT INTO media VALUES(x'01',4,0,x'50',1,0,1,0,x'FC',x'04',x'FA')"_q} }));
-	CHECK(!apply({ {u"INSERT INTO meta VALUES(1,x'01',x'02',0,0,0)"_q} }));
+	CHECK(!apply({ {u"INSERT INTO meta VALUES(1,x'01',x'02',0,0,0,0,0)"_q} }));
 	CHECK(scalar(u"SELECT group_concat(seq) FROM (SELECT seq FROM versions ORDER BY seq)"_q)
 		== ArchiveSqlValue(u"1,2,3"_q));
 	CHECK(scalar(u"SELECT count(*) FROM sqlite_schema WHERE type='index' AND name IN "
@@ -2536,6 +2536,9 @@ int main(int argc, char** argv) {
 		std::printf("Archive v2 default allowances: %d checks, %d failures\n", Checks, Failures);
 		return Failures ? 1 : 0;
 	}
+	if (argc == 3 && QByteArray(argv[1]) == "archive-v2-charge-calibration") {
+		return V2Fixtures::MeasureChurn(QString::fromUtf8(argv[2]));
+	}
 	if (argc == 2 && QByteArray(argv[1]) == "archive-v2-review-benchmark") {
 		return V2Fixtures::ReviewBenchmark();
 	}
@@ -2566,6 +2569,7 @@ int main(int argc, char** argv) {
 	V2Fixtures::MediaGate();
 	V2Fixtures::SeparatePressure();
 	V2Fixtures::BothAllowances();
+	V2Fixtures::FragmentationEvictsOnlyTheGrowingBucket();
 	V2Fixtures::OverlappingAdmissions();
 	V2Fixtures::ReadyMediaPriority();
 	V2Fixtures::IncomingDuringBlob();

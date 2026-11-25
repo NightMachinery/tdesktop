@@ -108,7 +108,7 @@ void SeparatePressure() {
 	CHECK(Count(path, u"SELECT count(*) FROM media WHERE timed=1 AND blob_key IS NOT NULL"_q) == 2);
 	CHECK(Count(path, u"SELECT min(last_activity) FROM media JOIN messages USING(message_key) "
 		"WHERE timed=1 AND blob_key IS NOT NULL"_q) == (at - 2 * 86400) / 86400);
-	CHECK(store.usage() && store.usage()->timed == 2 * kMiB);
+	CHECK(store.usage() && store.usage()->timed == 2 * (kMiB + 3456));
 	for (auto i = 4; i <= 7; ++i) {
 		const auto event = MediaRow(id, i, false, at);
 		CHECK(store.capture(event).committed);
@@ -161,7 +161,7 @@ void QuotaDiskAndAge() {
 	CHECK(store.capture(timed).committed);
 	CHECK(store.writeBlob(MediaFile(timed, source)).committed);
 	const auto shared = store.usage();
-	CHECK(shared && shared->ordinary < kMiB && shared->timed == kMiB);
+	CHECK(shared && shared->ordinary < kMiB && shared->timed == kMiB + 3456);
 	CHECK(Count(path, u"SELECT count(*) FROM blobs"_q) == 1);
 	CHECK(store.maintain());
 	auto reader = DesktopArchiveSqlite();
@@ -256,11 +256,60 @@ void BothAllowances(int ordinaryMiB = 16, int timedMiB = 8) {
 		save(ordinary, ordinaryCap - initial->ordinary, 'O');
 		if (!timedFirst) save(timed, timedCap, 'T');
 		const auto final = store.usage();
-		CHECK(final && final->ordinary == ordinaryCap && final->timed == timedCap);
+		const auto budget = store.storageSummary();
+		CHECK(budget && budget->active.ordinary == ordinaryCap && budget->active.timed == timedCap);
+		CHECK(final && final->ordinary > ordinaryCap && final->timed > timedCap && budget && !budget->overLimit);
 		CHECK(wal > 0 && wal <= kWalHeadroom);
 		CHECK(peak > ordinaryCap + timedCap && peak <= ordinaryCap + timedCap + kMetadataHeadroom + kWalHeadroom);
 		std::printf("V2 %d + %d MiB (%s first): peak=%lld WAL=%lld bytes\n",
 			ordinaryMiB, timedMiB, timedFirst ? "timed" : "ordinary", static_cast<long long>(peak), static_cast<long long>(wal));
+	}
+}
+
+void FragmentationEvictsOnlyTheGrowingBucket() {
+	Section = "v2 physical pressure reclaims pages exclusively from the growing bucket";
+	for (const auto timedGrowth : { false, true }) {
+		const auto temp = QTemporaryDir();
+		auto options = Options(temp.path());
+		options.policy.totalMiB = 16;
+		options.policy.timedMiB = 8;
+		auto id = QByteArray();
+		{
+			auto store = V2Store(options);
+			CHECK(store.open());
+			id = store.id();
+			for (auto i = 1; i <= 3; ++i) {
+				const auto event = MediaRow(id, i, i == 3 ? timedGrowth : i == 2, 1700000000);
+				CHECK(store.capture(event).committed);
+				if (i != 3) CHECK(store.writeBlob(MediaFile(event, QByteArray(2 * kMiB, char('A' + i)))).committed);
+			}
+		}
+		const auto dbPath = ActivePath(options, id) + u"/archive.sqlite"_q;
+		{
+			// Occupied, uncharged pages stand in for unusable space inside fragmented B-trees.
+			auto probe = DesktopArchiveSqlite();
+			CHECK(probe.Open(dbPath, false).ok);
+			CHECK(probe.Read({ u"CREATE TABLE page_pressure (payload BLOB NOT NULL)"_q }).ok);
+			const auto fill = 71 * kMiB - QFileInfo(dbPath).size() - 512 * 1024;
+			CHECK(probe.Read({ u"INSERT INTO page_pressure VALUES(zeroblob(?))"_q,
+				{ int64(fill) }, ArchiveSqlExpectation::OneChange }).ok);
+		}
+		CHECK(QFileInfo(dbPath).size() > 70 * kMiB && QFileInfo(dbPath).size() <= 71 * kMiB);
+		auto store = V2Store(Options(temp.path()));
+		auto lower = options.policy;
+		CHECK(store.open() && store.updatePolicy(lower));
+		auto stale = MediaRow(QByteArray(16, 'q'), 4, false, 1700000000);
+		stale.body = QByteArray(kMiB, 'X');
+		CHECK(store.capture(stale).reason == u"scope_retired"_q);
+		const auto original = store.media(MediaRow(id, 1, false, 0).identity, 1);
+		CHECK(original && original->front().savedBytes == 2 * kMiB);
+		const auto target = MediaRow(id, 3, timedGrowth, 1700000000);
+		CHECK(store.writeBlob(MediaFile(target, QByteArray(kMiB, 'N'))).committed);
+		const auto other = store.media(MediaRow(id, timedGrowth ? 1 : 2, !timedGrowth, 0).identity, 1);
+		const auto evicted = store.media(MediaRow(id, timedGrowth ? 2 : 1, timedGrowth, 0).identity, 1);
+		CHECK(other && other->front().savedBytes == 2 * kMiB);
+		CHECK(evicted && evicted->front().savedBytes == 0);
+		CHECK(store.usage() && store.usage()->physical() <= 24 * kMiB + kMetadataHeadroom + kWalHeadroom);
 	}
 }
 
@@ -419,13 +468,13 @@ void IncomingDuringBlob() {
 
 void CheckTotals(V2Store &store, const QString &path) {
 	const auto usage = store.usage();
-	const auto ordinary = Count(path, u"SELECT coalesce((SELECT sum(length(sealed_identity)+160) FROM messages),0)+"
-		"coalesce((SELECT sum(length(sealed_body)+144) FROM versions),0)+"
-		"coalesce((SELECT sum(length(sealed_descriptor)+144) FROM media),0)+"
-		"coalesce((SELECT count(*)*128 FROM purged_edits),0)+"
-		"coalesce((SELECT sum(size) FROM blobs b WHERE NOT EXISTS("
+	const auto ordinary = Count(path, u"SELECT coalesce((SELECT sum(length(sealed_identity)+768) FROM messages),0)+"
+		"coalesce((SELECT sum(length(sealed_body)*5/4+384) FROM versions),0)+"
+		"coalesce((SELECT sum(length(sealed_descriptor)+400) FROM media),0)+"
+		"coalesce((SELECT count(*)*256 FROM purged_edits),0)+"
+		"coalesce((SELECT sum(size+384+3072*((size-1)/1048576+1)) FROM blobs b WHERE NOT EXISTS("
 		"SELECT 1 FROM media r WHERE r.blob_key=b.blob_key AND r.timed=1)),0)"_q);
-	const auto timed = Count(path, u"SELECT coalesce(sum(size),0) FROM blobs b "
+	const auto timed = Count(path, u"SELECT coalesce(sum(size+384+3072*((size-1)/1048576+1)),0) FROM blobs b "
 		"WHERE EXISTS(SELECT 1 FROM media r WHERE r.blob_key=b.blob_key AND r.timed=1)"_q);
 	CHECK(usage && usage->ordinary == ordinary && usage->timed == timed);
 }
@@ -455,6 +504,83 @@ void TotalsMatchAfterMixedWrites() {
 	CHECK(cleaned && store.cleanupPage(*cleaned).effect);
 	CheckTotals(store, path);
 	CHECK(store.usage() && store.usage()->timed == 0 && store.usage()->ordinary > kMiB);
+}
+
+int MeasureChurn(const QString &scratch) {
+	Section = "v2 charge calibration after insertion, eviction and insertion";
+	for (const auto mix : { 0, 1, 2 }) {
+		auto temp = QTemporaryDir(scratch + u"/mix-%1-XXXXXX"_q.arg(mix));
+		CHECK(temp.isValid());
+		temp.setAutoRemove(false);
+		auto options = Options(temp.path());
+		options.policy.totalMiB = 96;
+		options.policy.timedMiB = mix ? 32 : 0;
+		auto path = QString();
+		auto usage = std::optional<Usage>();
+		{
+			auto store = V2Store(options);
+			CHECK(store.open());
+			const auto id = store.id();
+			path = ActivePath(options, id) + u"/archive.sqlite"_q;
+			const auto text = [&](int start, int count) {
+				for (auto n = start; n < start + count; n += 48) {
+					auto batch = std::vector<CapturedEvent>();
+					for (auto i = n; i < std::min(n + 48, start + count); ++i) {
+						auto row = MediaRow(id, 1000 + i / 6, false, 1700000000);
+						row.event = i % 6 ? Observation::Edit : Observation::Baseline;
+						row.eventId = QByteArray::number(i);
+						const auto lengths = std::array{ 48, 360, 950, 1200, 1900, 2600, 3920, 6000 };
+						row.body = row.eventId + QByteArray(lengths[(i / 6 + i) % lengths.size()], 'X');
+						row.attachments.clear();
+						batch.push_back(std::move(row));
+					}
+					for (const auto &effect : store.captureBatch(batch)) CHECK(effect.committed);
+					CHECK(store.maintain());
+				}
+			};
+			const auto files = [&](int start, int count) {
+				for (auto n = start; n < start + count; ++n) {
+					const auto row = MediaRow(id, n + 1, n % 2, 1700000000);
+					CHECK(store.capture(row).committed);
+					const auto lengths = std::array{ 220, 2300, 28000, 120000, 620000, 1000000, 1250000, 2100000 };
+					auto source = MediaFile(row, QByteArray(lengths[n % lengths.size()], char(1 + n)));
+					source.revision = options.lease->mediaRevision.load();
+					const auto outcome = store.writeBlob(source);
+					if (!outcome) std::printf("Churn rejected copy: %s\n", qPrintable(outcome.reason));
+					CHECK(outcome.committed);
+					CHECK(store.maintain());
+				}
+			};
+			if (mix != 1) text(0, mix == 0 ? 14400 : 7200);
+			if (mix != 0) files(0, mix == 1 ? 96 : 48);
+			auto lower = options.policy;
+			lower.totalMiB = 16;
+			lower.timedMiB = mix ? 8 : 0;
+			CHECK(store.updatePolicy(lower));
+			for (auto i = 0; i != 1024 && store.maintenancePending(); ++i) CHECK(store.maintain());
+			CHECK(!store.maintenancePending());
+			if (mix != 1) {
+				const auto ticket = store.prepareCleanup(CleanupKind::EditHistory);
+				CHECK(ticket && store.cleanupPage(*ticket).effect);
+				text(14400, mix == 0 ? 7200 : 3600);
+			}
+			if (mix != 0) files(112, mix == 1 ? 48 : 32);
+			for (auto i = 0; i != 1024 && store.maintenancePending(); ++i) CHECK(store.maintain());
+			usage = store.usage();
+		}
+		const auto physical = QFileInfo(path).size();
+		const auto page = Count(path, u"PRAGMA page_size"_q);
+		const auto free = Count(path, u"PRAGMA freelist_count"_q) * page;
+		const auto charged = usage ? usage->ordinary + usage->timed : 0;
+		CHECK(usage && charged && physical > 0 && free >= 0);
+		if (charged) {
+			std::printf("Churn mix=%d db=%lld free=%lld charged=%lld ratio=%.4f active_ratio=%.4f %s\n", mix,
+				(long long)physical, (long long)free, (long long)charged, double(physical) / charged,
+				double(physical - free) / charged, qPrintable(path));
+		}
+	}
+	std::printf("Archive v2 churn: %d checks, %d failures\n", Checks, Failures);
+	return Failures ? 1 : 0;
 }
 
 int ReviewBenchmark() {
