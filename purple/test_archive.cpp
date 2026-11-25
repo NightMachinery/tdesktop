@@ -620,10 +620,16 @@ void DiscardAfterLogout() {
 		auto retry = false;
 		CHECK(DesktopArchiveStore::Recover(other, &retry));
 		CHECK(retry == lockAtLogout);
+		auto signedOutProfile = DesktopArchiveOptions();
+		signedOutProfile.archiveRoot = other.archiveRoot;
+		signedOutProfile.profileRoot = other.profileRoot;
+		signedOutProfile.profileNamespace = other.profileNamespace;
+		signedOutProfile.account = AccountKey{0, 1};
+		CHECK(DesktopArchiveStore::RetryConfirmedDiscards(signedOutProfile) == lockAtLogout);
 		if (lockAtLogout) {
 			CHECK(QFileInfo::exists(marker));
 			held.unlock();
-			CHECK(!DesktopArchiveStore::RetryConfirmedDiscards(other));
+			CHECK(!DesktopArchiveStore::RetryConfirmedDiscards(signedOutProfile));
 		}
 		CHECK(!QFileInfo::exists(marker) && !QFileInfo::exists(detached) && !QFileInfo::exists(root));
 		CHECK(survivor.Open(other) == DesktopArchiveStatus::Ready);

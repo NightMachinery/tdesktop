@@ -151,10 +151,11 @@ and waits for transient account and catalogue locks. A changed login cannot
 detach an archive that was still in place. Once detached, cleanup requires the
 original directory identity and the recorded metadata. Logout closes the
 session immediately and its background removal can finish the confirmed
-job without the login key. On restart the profile worker can finish a
-recorded job for a logged-out account, even if logout did not get the
-account lock. It follows that job's recorded identities. Failures give a
-specific reason in Settings and the log.
+job without the login key. On restart a profile worker can finish a
+recorded job for a logged-out account, including at the sign-in screen with
+no active account. It retries held locks in the background and follows only
+the job's recorded identities. Failures give a specific reason in Settings
+and the log.
 A corrupt or oversized per-account file can be discarded. Unsafe paths or an
 unreadable shared profile catalogue still refuse, so other accounts keep their
 existing binding and data.

@@ -731,7 +731,8 @@ DesktopArchiveDiscardResult FinishDiscard(const Layout &layout,
 		? DesktopArchiveDiscardResult{} : DesktopArchiveDiscardResult{u"discard-marker-remove-failed"_q};
 }
 
-bool RecoverConfirmedDiscards(const Layout &profile, const DesktopArchiveOptions &options) {
+bool RecoverConfirmedDiscards(const Layout &profile, const DesktopArchiveOptions &options,
+		std::optional<AccountKey> skipAccount) {
 	const auto suffix = u".discard.json"_q;
 	auto entries = QDirIterator(profile.profileDirectory + u"/accounts"_q,
 		QStringList{u"*"_q + suffix}, QDir::Files | QDir::Hidden | QDir::System | QDir::NoSymLinks);
@@ -741,7 +742,7 @@ bool RecoverConfirmedDiscards(const Layout &profile, const DesktopArchiveOptions
 		const auto name = entries.fileName().chopped(suffix.size());
 		const auto account = ParseAccountKey(name);
 		if (!account || AccountKeyText(account->environment, account->userId) != name
-			|| *account == options.account) {
+			|| account == skipAccount) {
 			continue;
 		}
 		auto layout = profile;
@@ -1922,12 +1923,13 @@ bool DesktopArchiveStore::RemoveAccount(
 	return removal && RunRemoval(layout, *removal, nullptr, maximumActions, 0, options.maintenanceAllowed);
 }
 
-bool DesktopArchiveStore::RetryConfirmedDiscards(const DesktopArchiveOptions &options) {
+bool DesktopArchiveStore::RetryConfirmedDiscards(const DesktopArchiveOptions &options,
+		std::optional<AccountKey> skipAccount) {
 	if (NoProfileBinding(options)) {
 		return false;
 	}
 	const auto profile = Profile(options, false);
-	return !profile || RecoverConfirmedDiscards(*profile, options);
+	return profile && RecoverConfirmedDiscards(*profile, options, skipAccount);
 }
 
 bool DesktopArchiveStore::Recover(const DesktopArchiveOptions &options, bool *retryDiscards) {
@@ -1941,7 +1943,7 @@ bool DesktopArchiveStore::Recover(const DesktopArchiveOptions &options, bool *re
 	if (!profile) {
 		return !Exists(options.archiveRoot);
 	}
-	const auto retry = RecoverConfirmedDiscards(*profile, options);
+	const auto retry = RecoverConfirmedDiscards(*profile, options, options.account);
 	if (retryDiscards) {
 		*retryDiscards = retry;
 	}

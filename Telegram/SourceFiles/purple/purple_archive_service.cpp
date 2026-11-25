@@ -7,6 +7,7 @@
 #include "config.h"
 #include "core/application.h"
 #include "core/version.h"
+#include "crl/crl_async.h"
 #include "crl/crl_on_main.h"
 #include "lang/lang_keys.h"
 #include "logs.h"
@@ -35,6 +36,7 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QLocale>
 #include <QtCore/QThread>
+#include <QtCore/QTimer>
 #include <QtCore/QUuid>
 #include <algorithm>
 #include <array>
@@ -63,15 +65,20 @@ QString Slot(Main::Account &account) {
 	return {};
 }
 
-DesktopArchiveOptions Options(Main::Account &account) {
+DesktopArchiveOptions ProfileOptions() {
 	auto result = DesktopArchiveOptions();
 	result.archiveRoot = ConfigDirectory() + u"/content-archive"_q;
 	result.profileRoot = cWorkingDir() + u"tdata"_q;
 	result.profileNamespace = cDataFile();
+	result.account = AccountKey{0, 1};
+	return result;
+}
+
+DesktopArchiveOptions Options(Main::Account &account) {
+	auto result = ProfileOptions();
 	result.slot = Slot(account);
-	result.account = account.maybeSession() ? SessionAccountKey(account.maybeSession())
-											: AccountKey{0, 1};
-	if (account.maybeSession()) {
+	if (const auto session = account.maybeSession()) {
+		result.account = SessionAccountKey(session);
 		const auto &mtp = account.mtp();
 		auto keys = std::set<QByteArray>();
 		for (const auto &key : mtp.getKeysForWrite()) {
@@ -738,7 +745,7 @@ class ArchiveWorker final {
 			}
 			if (idle) {
 				if (retryDiscards) {
-					retryDiscards = DesktopArchiveStore::RetryConfirmedDiscards(removalOptions);
+					retryDiscards = DesktopArchiveStore::RetryConfirmedDiscards(removalOptions, removalOptions.account);
 				}
 				renewJournal();
 				drainJournal();
@@ -1000,6 +1007,28 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 	return value;
 }
 
+void RecoverLoggedOutDiscards() {
+	static auto running = false;
+	const auto &domain = Core::App().domain();
+	if (running || Core::Quitting() || !domain.started() || domain.accountsAuthedCount()) {
+		return;
+	}
+	running = true;
+	crl::async([options = ProfileOptions(), app = QPointer<Core::Application>(&Core::App())] {
+		const auto retry = DesktopArchiveStore::RetryConfirmedDiscards(options);
+		crl::on_main([app, retry] {
+			if (app && retry) {
+				QTimer::singleShot(5000, app.data(), [] {
+					running = false;
+					RecoverLoggedOutDiscards();
+				});
+			} else {
+				running = false;
+			}
+		});
+	});
+}
+
 }
 
 void StartArchiveServices() {
@@ -1020,6 +1049,7 @@ void StartArchiveServices() {
 			entry.account->sessionChanges() | rpl::on_next(ready, accounts);
 			ready(entry.account->maybeSession());
 		}
+		RecoverLoggedOutDiscards();
 	};
 	Core::App().domain().accountsChanges() | rpl::on_next(refresh, lifetime);
 	// WHY: app services start before the domain, and upstream adds stored accounts without
