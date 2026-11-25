@@ -214,7 +214,7 @@ void Action(not_null<Ui::GenericBox*> box, QString label, const ViewCurrent &cur
 
 QString ArchiveSize(int64 bytes) {
 	const auto value = Ui::FormatSizeText(bytes);
-	return st::rtl() ? u'⁦' + value + u'⁩' : value;
+	return st::rtl() ? u'\u2066' + value + u'\u2069' : value;
 }
 
 QString ArchiveCleanupText(QString result, int64 reclaimed) {

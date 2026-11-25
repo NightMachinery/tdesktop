@@ -227,7 +227,7 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 						const auto guard = std::lock_guard(state->mutex);
 						return state->logout;
 					}();
-					if (logout) (void)store->logout({});
+					if (logout) effect = store->logout({});
 					store.reset();
 					report(std::move(effect), id, IncidentStage::Cleanup);
 					return;
