@@ -1,6 +1,7 @@
 #pragma once
 
 #include "purple/purple_config_diff.h"
+#include "purple/purple_keys_colors.h"
 
 #include <QtCore/QStringList>
 #include <QtGui/QColor>
@@ -15,6 +16,18 @@ struct Values {
 	std::optional<QString> before;
 	std::optional<QString> after;
 };
+
+struct DiffInk {
+	QColor removed;
+	QColor added;
+};
+
+inline DiffInk InkFor(QColor surface) {
+	return {
+		ModalUi::ReadableText(QColor(0xb9, 0x3a, 0x42), surface),
+		ModalUi::ReadableText(QColor(0x31, 0x81, 0x52), surface),
+	};
+}
 
 struct Address {
 	QString table;

@@ -1147,10 +1147,9 @@ private:
 			}
 		}
 		const auto color = CustomizeLook::Tone(this, "customizeSurface", QPalette::Base);
+		const auto ink = SettingsReviewDisplay::InkFor(color);
 		const auto changes = SettingsReviewDisplay::Flatten(preview.summary);
-		auto html = SettingsReviewDisplay::Effects(changes, renames,
-			ModalUi::ReadableText(QColor(0xb9, 0x3a, 0x42), color),
-			ModalUi::ReadableText(QColor(0x31, 0x81, 0x52), color), effective);
+		auto html = SettingsReviewDisplay::Effects(changes, renames, ink.removed, ink.added, effective);
 		auto lines = QStringList();
 		for (const auto &finding : preview.impact.findings) {
 			if ((finding.dangerous || finding.kind != ConfigImpactKind::ValueChanged)

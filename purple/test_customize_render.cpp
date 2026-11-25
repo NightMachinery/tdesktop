@@ -424,8 +424,13 @@ void ReviewRender(const QDir &output, bool conflict, bool dark, int width) {
 			AppendAction(layout, new Action(QString::fromLatin1(text), &root));
 		}
 	} else {
+		const auto background = Tone(pane, "customizeSurface", QPalette::Base);
+		const auto ink = Review::InkFor(background);
+		Check(ModalUi::TextContrast(ink.removed, background) >= 4.5
+			&& ModalUi::TextContrast(ink.added, background) >= 4.5, "review ink meets contrast in each palette");
 		const auto page = Review::Effects(Review::Flatten(draft), { { QStringLiteral("lists.fixture"), QStringLiteral("lists.renamed"),
-			QStringLiteral("fixture"), QStringLiteral("renamed"), { QStringLiteral("presets.work.list_order") } } }, QColor(0xff8d92), QColor(0x81d6a3));
+			QStringLiteral("fixture"), QStringLiteral("renamed"), { QStringLiteral("presets.work.list_order") } } },
+			ink.removed, ink.added);
 		Check(!page.contains(QStringLiteral("lists.fixture.title")) && !page.contains(QStringLiteral("lists.renamed.title")),
 			"one rename block replaces paired descendants");
 		Check(page.contains(QStringLiteral("Renamed fixture to renamed")) && page.contains(QStringLiteral("Added, empty"))
@@ -483,7 +488,6 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 		refs->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 		layout->addWidget(refs);
 		layout->addWidget(new QLineEdit(QStringLiteral("fixture-renamed"), page));
-		layout->addStretch();
 	} else if (kind == QStringLiteral("confirm")) {
 		auto body = new QTextEdit(page);
 		body->setPlainText(QStringLiteral("Renamed fixture to fixture-renamed\nReferences updated in the destination file."));
@@ -506,6 +510,7 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 		AppendAction(layout, button);
 		if (!firstAction) firstAction = button;
 	}
+	if (kind == QStringLiteral("rename")) layout->addStretch();
 	Theme(&host, !dark);
 	Theme(stack, !dark);
 	host.resize(width, 460);
