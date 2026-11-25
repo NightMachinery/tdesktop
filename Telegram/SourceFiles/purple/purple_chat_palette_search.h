@@ -120,11 +120,13 @@ inline std::optional<int> Rank(
 		for (const auto &converted : term.alternatives) {
 			tier = std::min(tier, NameTier(foldedName, converted, true));
 		}
-		if (tier == 8 && (!term.literal.isEmpty() && foldedAddress.contains(term.literal)
+		if (tier == 8 && ((!term.literal.isEmpty()
+				&& foldedAddress.contains(term.literal))
 			|| originalAddress.contains(term.original))) {
 			tier = 6;
 		}
-		if (tier == 8 && (!term.literal.isEmpty() && foldedNote.contains(term.literal)
+		if (tier == 8 && ((!term.literal.isEmpty()
+				&& foldedNote.contains(term.literal))
 			|| original.contains(term.original))) {
 			tier = 7;
 		}

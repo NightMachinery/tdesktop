@@ -24,11 +24,12 @@
 #include "purple/purple_picker.h"
 #include "storage/storage_account.h"
 #include "ui/painter.h"
-#include "ui/text/text_utilities.h"
+#include "ui/text/text_options.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
 #include "styles/style_boxes.h"
+#include "styles/style_layers.h"
 #include "styles/style_purple_chat_palette.h"
 #include "styles/style_widgets.h"
 
