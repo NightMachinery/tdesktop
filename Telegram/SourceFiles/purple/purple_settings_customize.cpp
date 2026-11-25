@@ -980,10 +980,10 @@ private:
 				if (key == Qt::Key_Down || key == Qt::Key_Up
 					|| (modal && (key == Qt::Key_J || key == Qt::Key_K))) {
 					if (moving()) {
-						_reviewBody->verticalScrollBar()->triggerAction(
-							(key == Qt::Key_Down || key == Qt::Key_J)
-								? QAbstractSlider::SliderSingleStepAdd
-								: QAbstractSlider::SliderSingleStepSub);
+						const auto direction = (key == Qt::Key_Down || key == Qt::Key_J)
+							? 1 : -1;
+						ScrollModalLayer(*event, this, _reviewBody,
+							direction * _reviewBody->verticalScrollBar()->singleStep());
 					}
 					return true;
 				}

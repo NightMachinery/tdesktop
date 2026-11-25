@@ -11,8 +11,14 @@ never covers messages or the composer).
   Switching chats, folders, or panes stays in Normal mode while clearing any
   in-flight prefix or count.
 - Hold a single-key motion such as `j`, `k`, `J`, `K`, `C-d`, or `C-u`
-  to repeat it. A numeric count applies to the first press. Each repeat moves
-  one step and ends with key release or when its context changes.
+  to repeat it. A numeric count applies to the first press. Changing focus
+  or leaving Normal mode ends the motion.
+- In history and topics, a tap of `j` or `k` eases one step. The first repeat
+  starts continuous pixel scrolling, and release stops it with a short ease-out.
+  The cheatsheet, notice bodies, and Customize review scroll the same way.
+  Repeated half-page and page motions retarget the current scroll animation.
+  Lists and pickers still move one row at a time. Turning off Animations
+  restores discrete scroll steps.
 - **Insert** (blue badge): press `i` or `a`, start a reply or edit hint, open
   search, or click directly inside the message composer to type. Ordinary
   typing, IME composition, and Telegram shortcuts work normally. Press `Esc`,

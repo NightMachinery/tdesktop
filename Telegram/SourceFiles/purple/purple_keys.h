@@ -11,6 +11,7 @@ class MainWindow;
 class QEvent;
 class QKeyEvent;
 class QObject;
+class QAbstractScrollArea;
 class QWidget;
 
 namespace Ui {
@@ -33,6 +34,11 @@ namespace Purple {
 	const QKeyEvent &event,
 	not_null<QWidget*> layer,
 	bool motion = false);
+void ScrollModalLayer(
+	const QKeyEvent &event,
+	not_null<QWidget*> layer,
+	not_null<QAbstractScrollArea*> scroll,
+	int delta);
 #ifdef Q_OS_MAC
 [[nodiscard]] bool SwallowModalNativeRepeat(QWidget *window, int nativeKey);
 #endif // Q_OS_MAC

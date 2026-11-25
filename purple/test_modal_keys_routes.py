@@ -237,10 +237,26 @@ stroke = between(keys, "void Keys::stroke", "void Keys::dispatch")
 ordered(stroke, "_frozenEffective = EffectiveBindings", "IsExactLocalleader(_prefix)",
         "_swallowNext = true", "const auto action = b.action", "const auto inspect = _inspect",
         "KeyRepeat::CanArm", "clearPrefix()", "if (inspect)", "showDescribeKeyResult",
-        "CommandAvailable(action, target)", "_motion.start", "dispatch(action, target, count)")
+        "CommandAvailable(action, target)", "_motion.start", "dispatch(action, target, count,")
 repeat_path = between(keys, "void Keys::repeat", "bool Keys::layerKey")
 ordered(repeat_path, "Enabled()", "_normal", "_preeditInput", "_prefix.empty()", "_count",
-        "currentTarget(receiver)", "Available(*action, target)", "_motion.next", "dispatch(*action, target, 1)")
+        "currentTarget(receiver)", "Available(*action, target)", "_motion.next",
+        "dispatch(*action, target, 1, { PhysicalIdentity(event), true })")
+scroll_key = between(keys, "void Keys::scrollKey", "bool Keys::advanceScroll")
+ordered(scroll_key, "readScroll(view, layer)", "anim::Disabled()", "ScrollTo(view, current->top + delta)",
+        "_pixel.expectedTop", "press.repeat && style == ScrollStyle::Continuous",
+        "_pixel.motion.startHold", "_pixel.motion.step", "_scrollFrame.start()")
+ordered(keys, "Keys::readScroll", "owner()", "HistoryScroll(target)",
+        "scroll->movement()", "KeyboardAttachment::ScrollAnimating", "animatedScrolling()")
+ordered(keys, "void ScrollTo(", "elastic->scrollToY", "scroll->scrollToY",
+        "QAbstractScrollArea*>(view)->verticalScrollBar()->setValue(top)")
+ordered(keys, "bool Keys::advanceScroll", "current->top != _pixel.expectedTop",
+        "_pixel.motion.advance", "_pixel.expectedTop = next", "ScrollTo(_pixel.view, next)")
+ordered(routing, "_motion.release(physical)", "_pixel.motion.release", "_pixel.physical = 0")
+ordered(keys, "type == QEvent::Wheel", "cancelScroll()")
+for surface in ("ModalHelpLayer", "NoticeLayer"):
+    assert "ScrollModalLayer" in keys_ui.split(f"class {surface} final", 1)[1].split("\nclass ", 1)[0]
+ordered(customize, "if (_reviewBody && object == _reviewBody", "ScrollModalLayer", "singleStep()")
 ordered(keys, "QEvent::InputMethodQuery", "watched == _normalComposer",
         "Enabled() && _normal && owner()", "setValue(Qt::ImEnabled, false)")
 ordered(keys, "void Keys::clearPrefix", "_motion.cancel(keepChatNavigation)", "_layerMotion.cancel()")

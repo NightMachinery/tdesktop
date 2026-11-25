@@ -28,6 +28,7 @@
 #include "history/history_widget.h"
 #include "history/view/controls/history_view_compose_controls.h"
 #include "history/view/history_view_chat_section.h"
+#include "history/view/history_view_list_widget.h"
 #include "history/view/history_view_pinned_section.h"
 #include "history/view/history_view_scheduled_section.h"
 #include "info/downloads/info_downloads_widget.h"
@@ -48,6 +49,7 @@
 #include "purple/purple_diagnostics_ui.h"
 #include "purple/purple_exact_search.h"
 #include "purple/purple_key_repeat.h"
+#include "purple/purple_key_scroll.h"
 #include "purple/purple_keys_mx.h"
 #include "purple/purple_keys_ui.h"
 #include "purple/purple_keys_unread.h"
@@ -72,6 +74,7 @@
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/scroll_area.h"
 #include "ui/wrap/slide_wrap.h"
 #include "window/themes/window_theme.h"
 #include "window/window_controller.h"
@@ -97,6 +100,8 @@
 #include <QtGui/QTextBlock>
 #include <QtGui/QTextLayout>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QAbstractScrollArea>
+#include <QtWidgets/QScrollBar>
 #include <QtWidgets/QTextEdit>
 
 #include <algorithm>
@@ -114,6 +119,10 @@ namespace Purple {
 
 class KeyboardAttachment final {
 public:
+	static bool ScrollAnimating(const HistoryWidget *history) {
+		return history && (history->_scrollToAnimation.animating() || history->_itemsRevealHeight);
+	}
+
 	static QTextEdit *Composer(QWidget *widget) {
 		for (auto parent = widget; parent; parent = parent->parentWidget()) {
 			auto field = static_cast<Ui::InputField*>(nullptr);
@@ -180,6 +189,28 @@ constexpr auto kWhichKeyDelay = 280;
 constexpr auto kFeedbackDurationMs = 3500;
 constexpr auto kMaxCount = 200;
 constexpr auto kLineScrollPx = 84;
+
+struct ScrollReadout {
+	int top = 0;
+	int maximum = 0;
+};
+
+struct ScrollPress {
+	int physical = 0;
+	bool repeat = false;
+};
+
+enum class ScrollStyle { Step, Continuous };
+
+void ScrollTo(QWidget *view, int top) {
+	if (const auto elastic = dynamic_cast<Ui::ElasticScroll*>(view)) {
+		elastic->scrollToY(top);
+	} else if (const auto scroll = dynamic_cast<Ui::ScrollArea*>(view)) {
+		scroll->scrollToY(top);
+	} else {
+		static_cast<QAbstractScrollArea*>(view)->verticalScrollBar()->setValue(top);
+	}
+}
 #ifdef Q_OS_MAC
 constexpr auto kCtrl = Qt::MetaModifier;
 constexpr auto kSuper = Qt::ControlModifier;
@@ -1771,6 +1802,12 @@ public:
 
 	bool handle(QObject *receiver, QEvent *event);
 	bool layerKey(const QKeyEvent &event, not_null<QWidget*> layer, bool motion);
+	void scrollKey(
+		not_null<QWidget*> view,
+		QWidget *layer,
+		int delta,
+		ScrollStyle style,
+		ScrollPress press);
 #ifdef Q_OS_MAC
 	[[nodiscard]] bool swallowNativeRepeat(int physical) const;
 #endif // Q_OS_MAC
@@ -1817,7 +1854,10 @@ private:
 	void hideWhichKey();
 	void stroke(KeyRepeat::Stroke press, const Target &target);
 	void repeat(const QKeyEvent &event, QObject *receiver);
-	void dispatch(Action action, const Target &target, int count);
+	void dispatch(Action action, const Target &target, int count, ScrollPress press = {});
+	[[nodiscard]] std::optional<ScrollReadout> readScroll(QWidget *view, QWidget *layer) const;
+	[[nodiscard]] bool advanceScroll(crl::time now);
+	void cancelScroll();
 	void showHelpLayer(bool startOnAllBindings, const Target &target);
 	void showDescribeKeyResult(const Chord &chord, const Target &target);
 	void showDescribeCommandResult(Action action, const Target &target);
@@ -1844,6 +1884,17 @@ private:
 	QSet<int> _held;
 	KeyRepeat::HeldMotion<Action> _motion;
 	KeyRepeat::HeldMotion<int> _layerMotion;
+	struct PixelScroll {
+		QPointer<QWidget> view;
+		QPointer<QWidget> layer;
+		QPointer<QWidget> focus;
+		KeyScroll::Motion motion;
+		int physical = 0;
+		int expectedTop = 0;
+	};
+	PixelScroll _pixel;
+	uint64 _scrollRevision = 0;
+	Ui::Animations::Basic _scrollFrame{ [this](crl::time now) { return advanceScroll(now); } };
 	bool _normal = true; // Starts in Normal mode when modal keys are enabled.
 	bool _inspect = false;
 	bool _swallowNext = false;
@@ -2012,7 +2063,14 @@ Keys::Keys(not_null<MainWindow*> window)
 	Purple::PeekCountdownChanges() | rpl::on_next([=] {
 		_motion.cancel();
 		_layerMotion.cancel();
+		cancelScroll();
 		schedulePendingNoticeFlush();
+	}, _lifetime);
+
+	anim::Disables() | rpl::filter([](bool disabled) {
+		return disabled;
+	}) | rpl::on_next([=] {
+		cancelScroll();
 	}, _lifetime);
 
 	Core::App().screenIsLockedValue() | rpl::filter([](bool locked) {
@@ -2220,12 +2278,15 @@ bool Keys::eventFilter(QObject *watched, QEvent *event) {
 				_held.remove(physical);
 				_motion.cancel();
 				_layerMotion.cancel();
+				cancelScroll();
 			} else if (ClaimedKeys.contains(physical) && handle(watched, event)) {
 				return true;
 			}
-		} else if (type == QEvent::MouseButtonPress) {
+		} else if (type == QEvent::MouseButtonPress
+			|| type == QEvent::Wheel || type == QEvent::TouchBegin) {
 			_motion.cancel();
 			_layerMotion.cancel();
+			cancelScroll();
 		}
 	}
 	// Clicking directly into a message composer enters Insert mode so mouse typing works immediately.
@@ -2842,6 +2903,7 @@ void Keys::hideWhichKey() {
 void Keys::clearPrefix(bool keepChatNavigation) {
 	_motion.cancel(keepChatNavigation);
 	_layerMotion.cancel();
+	cancelScroll();
 	const auto wasPending = !_prefix.empty() || _count > 0 || _inspect || _hints.active();
 	_hints.clear();
 	_prefix.clear();
@@ -3189,6 +3251,10 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		}
 		_motion.release(physical);
 		_layerMotion.release(physical);
+		if (_pixel.physical == physical) {
+			_pixel.motion.release(crl::now());
+			_pixel.physical = 0;
+		}
 		const auto held = _held.remove(physical);
 		const auto handled = ClaimedKeys.erase(physical);
 		if (held && _held.isEmpty()) {
@@ -3326,8 +3392,9 @@ void Keys::repeat(const QKeyEvent &event, QObject *receiver) {
 	const auto target = currentTarget(receiver);
 	if (!target.focus || !Available(*action, target)) {
 		_motion.cancel();
+		cancelScroll();
 	} else if (_motion.next(HoldStroke(event), MotionContext(target, *action))) {
-		dispatch(*action, target, 1);
+		dispatch(*action, target, 1, { PhysicalIdentity(event), true });
 	}
 }
 
@@ -3348,6 +3415,125 @@ bool Keys::layerKey(const QKeyEvent &event, not_null<QWidget*> layer, bool motio
 		stroke.chord,
 		(current && motion) ? RepeatPolicy::SameTarget : RepeatPolicy::Never);
 	return true;
+}
+
+std::optional<ScrollReadout> Keys::readScroll(QWidget *view, QWidget *layer) const {
+	const auto focus = QApplication::focusWidget();
+	if (!view || !view->isVisible() || !view->isEnabled()
+		|| !owner() || !focus || focus == _preeditInput) {
+		return std::nullopt;
+	}
+	if (layer) {
+		if (!layer->isVisible() || (focus != layer && !layer->isAncestorOf(focus))) {
+			return std::nullopt;
+		}
+		const auto bar = static_cast<QAbstractScrollArea*>(view)->verticalScrollBar();
+		return ScrollReadout{ bar->value(), bar->maximum() };
+	}
+	const auto target = currentTarget(focus);
+	const auto scroll = HistoryScroll(target);
+	if (!Enabled() || !_normal || scroll != view
+		|| scroll->movement() != Ui::ElasticScroll::Movement::None
+		|| KeyboardAttachment::ScrollAnimating(target.history)
+		|| (target.messages.section && target.messages.section->animatedScrolling())) {
+		return std::nullopt;
+	}
+	return ScrollReadout{ scroll->scrollTop(), scroll->scrollTopMax() };
+}
+
+void Keys::scrollKey(
+		not_null<QWidget*> view,
+		QWidget *layer,
+		int delta,
+		ScrollStyle style,
+		ScrollPress press) {
+	if (!press.physical) {
+		const auto scroll = static_cast<Ui::ElasticScroll*>(view.get());
+		scroll->scrollToY(scroll->scrollTop() + delta);
+		return;
+	}
+	const auto current = readScroll(view, layer);
+	if (!current) {
+		if (layer) {
+			_layerMotion.cancel();
+		} else {
+			_motion.cancel();
+		}
+		cancelScroll();
+		return;
+	} else if (anim::Disabled()) {
+		cancelScroll();
+		ScrollTo(view, current->top + delta);
+		return;
+	}
+	const auto atEnd = (delta < 0) ? (current->top <= 0) : (current->top >= current->maximum);
+	if (atEnd) {
+		cancelScroll();
+		return;
+	}
+	const auto focus = QApplication::focusWidget();
+	if (!press.repeat) {
+		cancelScroll();
+		_pixel.view = view.get();
+		_pixel.layer = layer;
+		_pixel.focus = focus;
+		_pixel.physical = press.physical;
+		_pixel.expectedTop = current->top;
+	} else if (_pixel.physical != press.physical || _pixel.view != view.get()
+		|| _pixel.focus != focus || _pixel.layer != layer || _pixel.expectedTop != current->top) {
+		cancelScroll();
+		return;
+	}
+	const auto now = crl::now();
+	if (press.repeat && style == ScrollStyle::Continuous) {
+		_pixel.motion.startHold(now, (delta < 0) ? -1 : 1);
+	} else {
+		_pixel.motion.step(now, current->top, current->maximum, delta);
+	}
+	if (!_scrollFrame.animating() && _pixel.motion.active()) {
+		_scrollFrame.start();
+	}
+}
+
+bool Keys::advanceScroll(crl::time now) {
+	const auto disabled = anim::Disabled();
+	const auto current = readScroll(_pixel.view, _pixel.layer);
+	if (disabled || _pixel.focus != QApplication::focusWidget()
+		|| !current || current->top != _pixel.expectedTop) {
+		if (!disabled) {
+			if (_pixel.layer) {
+				_layerMotion.cancel();
+			} else {
+				_motion.cancel();
+			}
+		}
+		cancelScroll();
+		return false;
+	}
+	const auto continuous = _pixel.motion.continuous();
+	const auto next = _pixel.motion.advance(now, current->top, current->maximum);
+	if (next != current->top) {
+		const auto guard = QPointer(this);
+		const auto revision = _scrollRevision;
+		_pixel.expectedTop = next;
+		ScrollTo(_pixel.view, next);
+		if (!guard || revision != _scrollRevision) {
+			return false;
+		}
+	}
+	if (continuous && !_pixel.motion.active()) {
+		cancelScroll();
+		return false;
+	}
+	return _pixel.motion.active();
+}
+
+void Keys::cancelScroll() {
+	if (_pixel.view || _pixel.physical || _scrollFrame.animating()) {
+		++_scrollRevision;
+		_pixel = {};
+		_scrollFrame.stop();
+	}
 }
 
 #ifdef Q_OS_MAC
@@ -3545,7 +3731,7 @@ void Keys::stroke(KeyRepeat::Stroke press, const Target &target) {
 			if (arm) {
 				_motion.start(press, MotionContext(target, action), action, policy);
 			}
-			dispatch(action, target, count);
+			dispatch(action, target, count, { .physical = arm ? press.physical : 0 });
 		} else {
 			const auto &cmd = FindCommand(action);
 			showFeedback((cmd.need && *cmd.need)
@@ -3575,7 +3761,7 @@ void Keys::stroke(KeyRepeat::Stroke press, const Target &target) {
 	}
 }
 
-void Keys::dispatch(Action action, const Target &target, int count) {
+void Keys::dispatch(Action action, const Target &target, int count, ScrollPress press) {
 	const auto current = owner();
 	if (!current || current != target.controller || !target.focus
 		|| !CommandAvailable(action, target)) {
@@ -3657,11 +3843,9 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		if (target.list) {
 			stepChatList(action == Action::MoveDown);
 		} else if (const auto scroll = HistoryScroll(target)) {
-			const auto delta = kLineScrollPx * repeat;
-			const auto top = scroll->scrollTop();
-			scroll->scrollToY((action == Action::MoveUp)
-				? std::max(0, top - delta)
-				: (top + delta));
+			const auto direction = (action == Action::MoveUp) ? -1 : 1;
+			scrollKey(scroll, nullptr, direction * kLineScrollPx * repeat,
+				ScrollStyle::Continuous, press);
 		}
 		break;
 	case Action::PreviousChat:
@@ -3883,21 +4067,17 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 	case Action::HistoryHalfUp:
 	case Action::HistoryHalfDown:
 		if (const auto scroll = HistoryScroll(target)) {
-			const auto delta = std::max(80, scroll->height() / 2) * repeat;
-			const auto top = scroll->scrollTop();
-			scroll->scrollToY((action == Action::HistoryHalfUp)
-				? std::max(0, top - delta)
-				: (top + delta));
+			const auto direction = (action == Action::HistoryHalfUp) ? -1 : 1;
+			scrollKey(scroll, nullptr, direction * std::max(80, scroll->height() / 2) * repeat,
+				ScrollStyle::Step, press);
 		}
 		break;
 	case Action::OlderMessagesPage:
 	case Action::NewerMessagesPage:
 		if (const auto scroll = HistoryScroll(target)) {
-			const auto delta = scroll->height() * repeat;
-			const auto top = scroll->scrollTop();
-			scroll->scrollToY((action == Action::OlderMessagesPage)
-				? std::max(0, top - delta)
-				: (top + delta));
+			const auto direction = (action == Action::OlderMessagesPage) ? -1 : 1;
+			scrollKey(scroll, nullptr, direction * scroll->height() * repeat,
+				ScrollStyle::Step, press);
 		}
 		break;
 	case Action::LatestMessages:
@@ -4676,6 +4856,22 @@ bool AllowModalLayerKey(const QKeyEvent &event, not_null<QWidget*> layer, bool m
 	const auto window = dynamic_cast<MainWindow*>(layer->window());
 	const auto keys = window ? FindKeys(window) : nullptr;
 	return keys ? keys->layerKey(event, layer, motion) : !event.isAutoRepeat();
+}
+
+void ScrollModalLayer(
+		const QKeyEvent &event,
+		not_null<QWidget*> layer,
+		not_null<QAbstractScrollArea*> scroll,
+		int delta) {
+	const auto window = dynamic_cast<MainWindow*>(layer->window());
+	if (const auto keys = window ? FindKeys(window) : nullptr) {
+		keys->scrollKey(scroll, layer, delta, ScrollStyle::Continuous, {
+			.physical = PhysicalIdentity(event),
+			.repeat = event.isAutoRepeat(),
+		});
+	} else {
+		ScrollTo(scroll, scroll->verticalScrollBar()->value() + delta);
+	}
 }
 
 #ifdef Q_OS_MAC
