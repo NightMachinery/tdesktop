@@ -377,6 +377,12 @@ bool CanReplay(const QByteArray &opened, const QByteArray &current, const std::v
 	return !edits.empty();
 }
 
+bool SourceMatches(const QByteArray &opened, const QByteArray &current, const SettingAddress &address) {
+	const auto first = MapSettingsSource(opened);
+	const auto second = MapSettingsSource(current);
+	return first.ok() && second.ok() && Sign(opened, first, address) == Sign(current, second, address);
+}
+
 std::optional<SettingsArrayValue> ParsePeerLiteral(PeerField field, const QString &text) {
 	const auto value = text.trimmed();
 	if (field == PeerField::Media) {

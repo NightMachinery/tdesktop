@@ -305,8 +305,18 @@ SettingsEditorPreparation ReprepareSettingsEditorEdit(
 		return conflict;
 	}
 	const auto group = std::get_if<std::vector<SettingsEdit>>(&review._intent);
-	if (!group || !SettingsStructures::CanReplay(old.file.input.bytes, current.file.input.bytes, *group)) {
-		return conflict;
+	if (group) {
+		if (!SettingsStructures::CanReplay(old.file.input.bytes, current.file.input.bytes, *group)) return conflict;
+	} else {
+		const auto &membership = std::get<SettingsEditorMembers>(review._intent);
+		const auto address = SettingAddress{ u"lists"_q, membership.list, u"members"_q };
+		const auto layers = InspectSettingsEditor(opening);
+		const auto before = review._preview.beforeLayers.effective.settings.list(membership.list);
+		const auto after = layers.effective.settings.list(membership.list);
+		if (!before || !after || before->members != after->members
+			|| !SettingsStructures::SourceMatches(old.file.input.bytes, current.file.input.bytes, address)) {
+			return conflict;
+		}
 	}
 	return PrepareSettingsEditorEdit(routing, opening, review._intent);
 }

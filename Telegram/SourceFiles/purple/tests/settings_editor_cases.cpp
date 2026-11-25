@@ -281,6 +281,17 @@ void CollectionAndConflictCases() {
 	}
 	CHECK(f.prepare(B, std::vector{ move, Scalar({ u"media_reply"_q, u"text"_q }, QString(u"Reply"_q)) }).status
 		== SettingsEditorStatus::Unsupported);
+
+	Put(f.root, original);
+	const auto members = f.prepare(A, SettingsEditorMembers{ u"work"_q, std::vector<PeerIdValue>{ 456, 123 } });
+	CHECK(members.review);
+	if (!members.review) return;
+	Put(f.root, original + "\n# independent membership-era edit\n");
+	const auto memberReplay = ReprepareSettingsEditorEdit(f.routing, CaptureSettingsEditorOpening(f.routing, A), *members.review);
+	CHECK(memberReplay.review && memberReplay.review->preview().after.contains("# independent membership-era edit"));
+	Put(f.root, QByteArray(original).replace("members=[123, 456]", "members=[123, 78]"));
+	CHECK(ReprepareSettingsEditorEdit(f.routing, CaptureSettingsEditorOpening(f.routing, A), *members.review).status
+		== SettingsEditorStatus::StaleRevision);
 }
 
 void SaveCases() {

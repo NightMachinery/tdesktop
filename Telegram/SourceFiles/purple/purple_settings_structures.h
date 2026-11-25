@@ -48,6 +48,7 @@ struct ReferenceChanges {
 	const QByteArray &bytes, const SettingAddress &object, const QString &replacement);
 [[nodiscard]] bool CanReplay(const QByteArray &opened, const QByteArray &current,
 	const std::vector<SettingsEdit> &edits);
+[[nodiscard]] bool SourceMatches(const QByteArray &opened, const QByteArray &current, const SettingAddress &address);
 
 enum class PeerField { Members, Pins, Notifications, Media, Budget };
 [[nodiscard]] std::optional<SettingsArrayValue> ParsePeerLiteral(
