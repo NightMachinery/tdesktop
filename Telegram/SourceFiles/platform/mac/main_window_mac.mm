@@ -275,6 +275,10 @@ bool MainWindow::nativeEvent(
 		qintptr *result) {
 	if (message && eventType == "NSEvent") {
 		const auto event = static_cast<NSEvent*>(message);
+		if ([event type] == NSEventTypeKeyDown && [event isARepeat]
+			&& Purple::SwallowModalNativeRepeat(this, [event keyCode])) {
+			return true;
+		}
 		if (PossiblyTextTypingEvent(event)
 			&& !Purple::ModalKeysOwnChatListFocus(this)) {
 			Core::Sandbox::Instance().customEnterFromEventLoop([&] {

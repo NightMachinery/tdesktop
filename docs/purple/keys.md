@@ -10,6 +10,9 @@ never covers messages or the composer).
 - **Normal** (green badge, default when enabled): keys dispatch commands.
   Switching chats, folders, or panes stays in Normal mode while clearing any
   in-flight prefix or count.
+- Hold a single-key motion such as `j`, `k`, `J`, `K`, `C-d`, or `C-u`
+  to repeat it. A numeric count applies to the first press. Each repeat moves
+  one step and ends with key release or when its context changes.
 - **Insert** (blue badge): press `i` or `a`, start a reply or edit hint, open
   search, or click directly inside the message composer to type. Ordinary
   typing, IME composition, and Telegram shortcuts work normally. Press `Esc`,
@@ -136,6 +139,9 @@ with at most four strokes per chord:
   messages), highlighting matches in both the title and the category/command-id
   subtitle alongside right-aligned live keycaps. Navigate with `C-n`/`C-p`,
   `C-j`/`C-k`, arrows, or `Tab`/`S-Tab`; step input history with `M-p`/`M-n`.
+  Hold the arrow, Control, or Alt motions to repeat them. `F6` switches between
+  the search field and results. With modal input enabled, hold `j` or `k` to
+  move through the focused results.
 
 With modal keyboard shortcuts off, **Option+X** on macOS (**Alt+X** elsewhere)
 still opens M-x in an active, unlocked account window. The palette includes

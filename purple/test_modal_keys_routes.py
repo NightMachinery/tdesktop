@@ -31,6 +31,8 @@ mac_native = between(read("platform/mac/main_window_mac.mm"),
                      "bool MainWindow::nativeEvent", "void MainWindow::hideAndDeactivate")
 ordered(mac_native, "PossiblyTextTypingEvent(event)",
         "!Purple::ModalKeysOwnChatListFocus(this)", "imeCompositionStartReceived()")
+ordered(mac_native, "[event isARepeat]", "Purple::SwallowModalNativeRepeat", "return true;",
+        "PossiblyTextTypingEvent(event)")
 win_native = read("platform/win/main_window_win.cpp")
 assert "ModalKeysOwnChatListFocus" not in win_native
 assert press.count("Purple::HandleModalKeys") == 1
@@ -148,8 +150,12 @@ for required_ui in (
     assert required_ui in (keys_ui + read("purple/purple_keys_ui.h")), required_ui
 
 # Verify IME safety in palette filter input.
-ordered(keys_ui, "preeditAreaText().isEmpty()", "Qt::Key_Escape", "Qt::Key_Down", "Qt::Key_Up",
+palette_ui = between(keys_ui, "class CommandPaletteLayer", "class UnreadBufferRowsWidget")
+ordered(palette_ui, "preeditAreaText().isEmpty()", "Qt::Key_Return", "AllowModalLayerKey",
+        "Qt::Key_Escape", "Qt::Key_F6", "ListStep(key, mods, false)",
         "Qt::AltModifier", "stepHistory(")
+ordered(palette_ui, "void keyPressEvent", "ListStep(key, mods, ModalKeysEnabled())",
+        "AllowModalLayerKey(*event, this, true)", "moveSelection(step)")
 
 # Verify amx + orderless helpers exist in purple_keys_mx.h (including title-first tiering and subtitle highlights).
 for sym in ("kRecentLimit = 7", "WordInitials", "ParseTokens", "MatchToken",
@@ -212,23 +218,42 @@ for protected in ("isSearching()", "isRecording()", "_purpleScreenTimeCover->vis
 # Key routing, physical keys (non-ASCII + macOS Option M-), counts, DEL step-back, localleader.
 assert "modifiers.testFlag(Qt::AltModifier)" in between(keys, "int ModalKey(", "enum class Action")
 routing = between(keys, "bool Keys::handle", "void Keys::showWhichKey")
-ordered(routing, "ModalKey(*keyEvent)", "QEvent::KeyRelease",
-        "isAutoRepeat() && _held.contains(key)", "if (!Enabled())",
+ordered(routing, "ModalKey(*keyEvent)", "PhysicalIdentity(*keyEvent)", "QEvent::KeyRelease",
+        "_motion.release(physical)", "ClaimedKeys.erase(physical)",
+        "if (keyEvent->isAutoRepeat())", "ClaimedKeys.find(physical)",
+        "_held.contains(physical)", "repeat(*keyEvent, receiver)", "if (!Enabled())",
         "StockModeShortcut", "MxShortcutInStockMode()", "receiver == _preeditInput",
         "currentTarget(receiver, true)", "event->accept()", "QEvent::KeyPress",
         "!keyEvent->isAutoRepeat()", "showPalette(false, target, false)",
         "const auto target = currentTarget(receiver)", "if (!target.focus)",
         "QEvent::ShortcutOverride", "event->accept()", "return true;",
-        "_held.insert(key)", "keyEvent->isAutoRepeat()",
+        "keyEvent->isAutoRepeat()", "_held.insert(physical)",
         "case KeyUse::CountDigit:", "case KeyUse::PrefixBackspace:",
-        "stroke(KeyStroke(*keyEvent, key), target)")
+        "stroke(HoldStroke(*keyEvent), target)")
 ordered(routing, "const auto result = _hints.type", "if (!guard)",
         "result == MessageHints::Input::LeaveNormal", "enterInsert(true)")
 
 stroke = between(keys, "void Keys::stroke", "void Keys::dispatch")
 ordered(stroke, "_frozenEffective = EffectiveBindings", "IsExactLocalleader(_prefix)",
-        "_swallowNext = true", "const auto inspect = _inspect", "clearPrefix()",
-        "if (inspect)", "showDescribeKeyResult", "else if (Available", "dispatch(")
+        "_swallowNext = true", "const auto action = b.action", "const auto inspect = _inspect",
+        "KeyRepeat::CanArm", "clearPrefix()", "if (inspect)", "showDescribeKeyResult",
+        "CommandAvailable(action, target)", "_motion.start", "dispatch(action, target, count)")
+repeat_path = between(keys, "void Keys::repeat", "bool Keys::layerKey")
+ordered(repeat_path, "Enabled()", "_normal", "_preeditInput", "_prefix.empty()", "_count",
+        "currentTarget(receiver)", "Available(*action, target)", "_motion.next", "dispatch(*action, target, 1)")
+ordered(keys, "QEvent::InputMethodQuery", "watched == _normalComposer",
+        "Enabled() && _normal && owner()", "setValue(Qt::ImEnabled, false)")
+ordered(keys, "void Keys::clearPrefix", "_motion.cancel(keepChatNavigation)", "_layerMotion.cancel()")
+ordered(keys, "owner->activeChatEntryChanges()", "contextChanged(true)", "contextChanged(false)")
+actions = between(keys, "const Command kCommands[]", "using Chord")
+armed = re.findall(r"\{ Action::(\w+),[^\n]*\n[^\n]*RepeatPolicy::(SameTarget|ChatNavigation)", actions)
+assert set(armed) == {
+    ("MoveUp", "SameTarget"), ("MoveDown", "SameTarget"),
+    ("PreviousChat", "ChatNavigation"), ("NextChat", "ChatNavigation"),
+    ("HistoryHalfUp", "SameTarget"), ("HistoryHalfDown", "SameTarget"),
+    ("OlderMessagesPage", "SameTarget"), ("NewerMessagesPage", "SameTarget"),
+    ("SeekBackward", "SameTarget"), ("SeekForward", "SameTarget"),
+}
 
 palette = between(keys, "void Keys::showPalette", "} // namespace")
 ordered(palette, "revision = _revision", "base::make_weak(current)",

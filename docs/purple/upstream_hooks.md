@@ -36,6 +36,8 @@ the numbers.
   preview while keeping passcode/setup-email locks and their boxes on top),
   blocks `handleStartFiles()` while active, and replaces the window title with
   `Clock`.
+- `platform/mac/main_window_mac.mm`: consumes already claimed single-shot
+  repeats before Cocoa can reinterpret them as text after a focus or mode change.
 - `mainwidget.h`, `mainwidget.cpp`, `window/window_filters_menu.h`, and
   `window/window_session_controller.*`: hides the folder strip, dialogs column,
   side shadows, and third column while Zen fullscreen chat mode is active,

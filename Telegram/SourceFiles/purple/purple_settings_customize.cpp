@@ -921,14 +921,16 @@ private:
 	bool handleKey(QObject *object, QKeyEvent *event) {
 		if (!visibleContent()) return true;
 		const auto mods = event->modifiers() & ~Qt::KeypadModifier;
-		const auto key = event->key();
+		const auto key = ModalPhysicalKey(*event);
 		const auto enter = key == Qt::Key_Return || key == Qt::Key_Enter;
 		const auto cancel = key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod);
 		const auto modal = ModalKeysEnabled();
+		const auto once = [&] { return AllowModalLayerKey(*event, this); };
+		const auto moving = [&] { return AllowModalLayerKey(*event, this, true); };
 		if (_capture && _pages->currentWidget() == _sheetPage && object == _record) {
 			if (key != Qt::Key_Shift && key != Qt::Key_Control && key != Qt::Key_Meta
 				&& key != Qt::Key_Alt && key != Qt::Key_AltGr && key != Qt::Key_unknown
-				&& !event->isAutoRepeat()) {
+				&& once()) {
 				const auto chord = QKeySequence(event->keyCombination());
 				_line->setText(chord.toString(QKeySequence::PortableText));
 				endCapture();
@@ -938,40 +940,51 @@ private:
 		if (_preedit.contains(object) || _preedit.contains(QApplication::focusWidget())
 			|| (_collection && SettingsCollectionHasPreedit(_collection))) return false;
 		if (const auto button = qobject_cast<QPushButton*>(object); button && enter && !mods) {
-			if (!event->isAutoRepeat()) button->click();
+			if (once()) button->click();
 			return true;
 		}
 		if (object == _filter) {
 			if (cancel) {
+				if (!once()) return true;
 				_filter->setText(_filterBeforeEdit);
 				_tree->setFocus();
 				return true;
 			}
 			if (enter && !mods) {
+				if (!once()) return true;
 				_filterBeforeEdit = _filter->text();
 				_tree->setFocus();
 				return true;
 			}
 			if ((key == Qt::Key_Down || key == Qt::Key_Up) && !mods) {
-				selectSibling(key == Qt::Key_Down ? 1 : -1);
+				if (moving()) selectSibling(key == Qt::Key_Down ? 1 : -1);
 				return true;
 			}
 		}
 		if (_pages->currentWidget() == _sheetPage) {
-			if (const auto list = qobject_cast<QListWidget*>(object); modal && list && !mods
-				&& (key == Qt::Key_J || key == Qt::Key_K)) {
-				list->setCurrentRow(std::clamp(list->currentRow() + (key == Qt::Key_J ? 1 : -1),
-					0, std::max(0, list->count() - 1)));
+			if (const auto list = qobject_cast<QListWidget*>(object); list && !mods
+				&& (key == Qt::Key_Down || key == Qt::Key_Up
+					|| (modal && (key == Qt::Key_J || key == Qt::Key_K)))) {
+				const auto down = (key == Qt::Key_Down || key == Qt::Key_J);
+				if (moving()) {
+					list->setCurrentRow(std::clamp(list->currentRow() + (down ? 1 : -1),
+						0, std::max(0, list->count() - 1)));
+				}
 				return true;
 			}
 			if (_reviewBody && object == _reviewBody && !mods) {
 				if (key == Qt::Key_BracketLeft || key == Qt::Key_BracketRight) {
-					showReviewPage(key == Qt::Key_BracketLeft ? -1 : 1);
+					if (once()) showReviewPage(key == Qt::Key_BracketLeft ? -1 : 1);
 					return true;
 				}
-				if (modal && (key == Qt::Key_J || key == Qt::Key_K)) {
-					_reviewBody->verticalScrollBar()->triggerAction(key == Qt::Key_J
-						? QAbstractSlider::SliderSingleStepAdd : QAbstractSlider::SliderSingleStepSub);
+				if (key == Qt::Key_Down || key == Qt::Key_Up
+					|| (modal && (key == Qt::Key_J || key == Qt::Key_K))) {
+					if (moving()) {
+						_reviewBody->verticalScrollBar()->triggerAction(
+							(key == Qt::Key_Down || key == Qt::Key_J)
+								? QAbstractSlider::SliderSingleStepAdd
+								: QAbstractSlider::SliderSingleStepSub);
+					}
 					return true;
 				}
 			}
@@ -979,44 +992,45 @@ private:
 			const auto submit = enter && (mods == kCtrlMod || (!mods && object == _line));
 			switch (SettingsTree::ShouldHandleEditorKey(
 					_preedit.contains(object), submit, !_multi || mods == kCtrlMod, cancel)) {
-			case EditorKey::Stage: if (!event->isAutoRepeat() && !_editingKey.isEmpty()) stageForm(); return true;
-			case EditorKey::Back: back(); return true;
+			case EditorKey::Stage: if (once() && !_editingKey.isEmpty()) stageForm(); return true;
+			case EditorKey::Back: if (once()) back(); return true;
 			case EditorKey::Native: return false;
 			}
 		}
-		if (cancel) { back(); return true; }
-		if (key == Qt::Key_F6) { changePanel(mods.testFlag(Qt::ShiftModifier)); return true; }
+		if (cancel) { if (once()) back(); return true; }
+		if (key == Qt::Key_F6) { if (once()) changePanel(mods.testFlag(Qt::ShiftModifier)); return true; }
 		if (key == Qt::Key_Tab && !mods && object == _inspector) {
-			_tree->setFocus();
+			if (once()) _tree->setFocus();
 			return true;
 		}
 		if (object != _tree && object != this) return false;
 		if (((key == Qt::Key_Down || (modal && key == Qt::Key_J)) && !mods)
-			|| (key == Qt::Key_N && mods == kCtrlMod)) selectSibling(1);
+			|| (key == Qt::Key_N && mods == kCtrlMod)) { if (moving()) selectSibling(1); }
 		else if (((key == Qt::Key_Up || (modal && key == Qt::Key_K)) && !mods)
-			|| (key == Qt::Key_P && mods == kCtrlMod)) selectSibling(-1);
-		else if (modal && key == Qt::Key_H && !mods) traverse(false);
-		else if (modal && key == Qt::Key_L && !mods) traverse(true);
+			|| (key == Qt::Key_P && mods == kCtrlMod)) { if (moving()) selectSibling(-1); }
+		else if (modal && key == Qt::Key_H && !mods) { if (moving()) traverse(false); }
+		else if (modal && key == Qt::Key_L && !mods) { if (moving()) traverse(true); }
 		else if ((key == Qt::Key_Left || key == Qt::Key_Right) && !mods) {
-			traverse((key == Qt::Key_Right) == (layoutDirection() != Qt::RightToLeft));
+			if (moving()) traverse((key == Qt::Key_Right) == (layoutDirection() != Qt::RightToLeft));
 		} else if (key == Qt::Key_Tab && !mods) {
+			if (!once()) return true;
 			if (const auto item = _tree->currentItem(); item && item->childCount()) {
 				item->setExpanded(!item->isExpanded());
 			} else {
 				_inspector->setFocus();
 			}
-		} else if (enter && !mods && !event->isAutoRepeat()) activateRow();
+		} else if (enter && !mods) { if (once()) activateRow(); }
 		else if (!modal) return false;
-		else if (key == Qt::Key_Slash && !mods) startFilter();
-		else if (key == Qt::Key_Question) showHelp();
-		else if (key == Qt::Key_R && !mods && !event->isAutoRepeat()) resetSelected();
-		else if (key == Qt::Key_U && !mods && !event->isAutoRepeat()) undo();
-		else if (key == Qt::Key_D && !mods && !event->isAutoRepeat()) showReview();
-		else if (key == Qt::Key_A && mods == Qt::ShiftModifier && !event->isAutoRepeat()) showAccounts();
-		else if (key == Qt::Key_Q && !mods) back();
+		else if (key == Qt::Key_Slash && !mods) { if (once()) startFilter(); }
+		else if (key == Qt::Key_Question) { if (once()) showHelp(); }
+		else if (key == Qt::Key_R && !mods) { if (once()) resetSelected(); }
+		else if (key == Qt::Key_U && !mods) { if (once()) undo(); }
+		else if (key == Qt::Key_D && !mods) { if (once()) showReview(); }
+		else if (key == Qt::Key_A && mods == Qt::ShiftModifier) { if (once()) showAccounts(); }
+		else if (key == Qt::Key_Q && !mods) { if (once()) back(); }
 		else if (((key == Qt::Key_Y || key == Qt::Key_T || key == Qt::Key_Minus) && !mods)
 			|| (key == Qt::Key_Plus && (!mods || mods == Qt::ShiftModifier))) {
-			if (!event->isAutoRepeat()) editShortcut(key);
+			if (once()) editShortcut(key);
 		} else return false;
 		return true;
 	}

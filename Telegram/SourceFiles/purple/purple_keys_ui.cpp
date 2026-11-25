@@ -39,10 +39,6 @@
 #include <QtGui/QTextLayout>
 #include <QtWidgets/QTextEdit>
 
-#ifdef Q_OS_MAC
-#include <Carbon/Carbon.h>
-#endif // Q_OS_MAC
-
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -190,21 +186,21 @@ int PaintChords(
 	return cursor - x;
 }
 
-int PhysicalKeyForNav(const QKeyEvent &event) {
-	const auto logical = (event.key() == Qt::Key_Enter)
-		? Qt::Key_Return
-		: event.key();
-#ifdef Q_OS_MAC
-	if (event.timestamp() && event.modifiers().testFlag(Qt::AltModifier)) {
-		switch (event.nativeVirtualKey()) {
-		case kVK_ANSI_P: return Qt::Key_P;
-		case kVK_ANSI_N: return Qt::Key_N;
-		case kVK_ANSI_X: return Qt::Key_X;
-		default: break;
+int ListStep(int key, Qt::KeyboardModifiers mods, bool plainLetters) {
+	if (!mods) {
+		if (key == Qt::Key_Down || (plainLetters && key == Qt::Key_J)) {
+			return 1;
+		} else if (key == Qt::Key_Up || (plainLetters && key == Qt::Key_K)) {
+			return -1;
+		}
+	} else if (mods == kCtrlMod) {
+		if (key == Qt::Key_N || key == Qt::Key_J) {
+			return 1;
+		} else if (key == Qt::Key_P || key == Qt::Key_K) {
+			return -1;
 		}
 	}
-#endif // Q_OS_MAC
-	return logical;
+	return 0;
 }
 
 void PaintHighlightedLabel(
@@ -1031,12 +1027,19 @@ public:
 			}
 			const auto k = static_cast<QKeyEvent*>(e.get());
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
-			if (k->key() == Qt::Key_Escape
-				|| (k->key() == Qt::Key_G && mods == kCtrlMod)) {
-				closeLayer();
+			const auto key = ModalPhysicalKey(*k);
+			const auto step = ListStep(key, mods, false);
+			if (step) {
+				if (AllowModalLayerKey(*k, this, true)) {
+					_scroll->scrollToY(std::max(0, _scroll->scrollTop() + 48 * step));
+				}
+				return base::EventFilterResult::Cancel;
+			}
+			if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+				if (AllowModalLayerKey(*k, this)) closeLayer();
 				return base::EventFilterResult::Cancel;
 			} else if (k->key() == Qt::Key_Tab || k->key() == Qt::Key_Backtab) {
-				toggleTab();
+				if (AllowModalLayerKey(*k, this)) toggleTab();
 				return base::EventFilterResult::Cancel;
 			}
 			return base::EventFilterResult::Continue;
@@ -1091,8 +1094,12 @@ protected:
 
 	void keyPressEvent(QKeyEvent *e) override {
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
-		const auto key = e->key();
+		const auto key = ModalPhysicalKey(*e);
 		const auto modal = ModalKeysEnabled();
+		const auto step = ListStep(key, mods, modal);
+		if (!AllowModalLayerKey(*e, this, step != 0)) {
+			return;
+		}
 		if (key == Qt::Key_Escape
 			|| (modal && key == Qt::Key_Q && !mods)
 			|| (key == Qt::Key_G && mods == kCtrlMod)) {
@@ -1101,11 +1108,8 @@ protected:
 		} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
 			toggleTab();
 			return;
-		} else if ((key == Qt::Key_Down || (modal && key == Qt::Key_J)) && !mods) {
-			_scroll->scrollToY(_scroll->scrollTop() + 48);
-			return;
-		} else if ((key == Qt::Key_Up || (modal && key == Qt::Key_K)) && !mods) {
-			_scroll->scrollToY(std::max(0, _scroll->scrollTop() - 48));
+		} else if (step) {
+			_scroll->scrollToY(std::max(0, _scroll->scrollTop() + 48 * step));
 			return;
 		} else if (modal && key == Qt::Key_Slash && !mods) {
 			if (!_showAll) {
@@ -1356,7 +1360,10 @@ protected:
 
 	void keyPressEvent(QKeyEvent *e) override {
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
-		const auto key = e->key();
+		const auto key = ModalPhysicalKey(*e);
+		if (!AllowModalLayerKey(*e, this)) {
+			return;
+		}
 		if (key == Qt::Key_Escape
 			|| (ModalKeysEnabled() && key == Qt::Key_Q && !mods)
 			|| (key == Qt::Key_G && mods == kCtrlMod)) {
@@ -1748,6 +1755,7 @@ public:
 			? u"Type commands or initials (e.g. \"opm\")..."_q
 			: _config.placeholder)))
 	, _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll)) {
+		setFocusPolicy(Qt::StrongFocus);
 		_candidates.reserve(_config.items.size());
 		for (auto i = 0; i < int(_config.items.size()); ++i) {
 			const auto &it = _config.items[i];
@@ -1792,24 +1800,29 @@ public:
 				return base::EventFilterResult::Continue;
 			}
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
-			const auto key = PhysicalKeyForNav(*k);
-			if (key == Qt::Key_Escape
-				|| (key == Qt::Key_G && mods == kCtrlMod)) {
-				cancel();
+			const auto key = ModalPhysicalKey(*k);
+			if (key == Qt::Key_Return) {
+				return AllowModalLayerKey(*k, this)
+					? base::EventFilterResult::Continue
+					: base::EventFilterResult::Cancel;
+			} else if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+				if (AllowModalLayerKey(*k, this)) cancel();
 				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Down
-				|| (key == Qt::Key_Tab && !mods)
-				|| ((key == Qt::Key_N || key == Qt::Key_J) && mods == kCtrlMod)) {
-				moveSelection(1);
+			} else if (key == Qt::Key_F6 && !mods) {
+				if (AllowModalLayerKey(*k, this)) setFocus();
 				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Up
-				|| key == Qt::Key_Backtab
-				|| (key == Qt::Key_Tab && mods == Qt::ShiftModifier)
-				|| ((key == Qt::Key_P || key == Qt::Key_K) && mods == kCtrlMod)) {
-				moveSelection(-1);
+			} else if (const auto step = ListStep(key, mods, false)) {
+				if (AllowModalLayerKey(*k, this, true)) moveSelection(step);
+				return base::EventFilterResult::Cancel;
+			} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
+				if (AllowModalLayerKey(*k, this)) {
+					moveSelection((key == Qt::Key_Backtab || mods == Qt::ShiftModifier) ? -1 : 1);
+				}
 				return base::EventFilterResult::Cancel;
 			} else if (mods == Qt::AltModifier && (key == Qt::Key_P || key == Qt::Key_N)) {
-				stepHistory(key == Qt::Key_P ? 1 : -1);
+				if (AllowModalLayerKey(*k, this, true)) {
+					stepHistory(key == Qt::Key_P ? 1 : -1);
+				}
 				return base::EventFilterResult::Cancel;
 			}
 			return base::EventFilterResult::Continue;
@@ -1819,6 +1832,22 @@ public:
 	}
 
 protected:
+	void keyPressEvent(QKeyEvent *event) override {
+		const auto mods = event->modifiers() & ~Qt::KeypadModifier;
+		const auto key = ModalPhysicalKey(*event);
+		if (const auto step = ListStep(key, mods, ModalKeysEnabled())) {
+			if (AllowModalLayerKey(*event, this, true)) moveSelection(step);
+		} else if (key == Qt::Key_Return) {
+			if (AllowModalLayerKey(*event, this)) activateRow(_selected);
+		} else if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+			if (AllowModalLayerKey(*event, this)) cancel();
+		} else if (key == Qt::Key_F6 && !mods) {
+			if (AllowModalLayerKey(*event, this)) _input->setFocusFast();
+		} else {
+			LayerWidget::keyPressEvent(event);
+		}
+	}
+
 	void doSetInnerFocus() override {
 		_input->setFocusFast();
 	}
@@ -1914,7 +1943,7 @@ protected:
 		p.drawText(
 			footerRect.adjusted(14, 0, -14, 0),
 			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
-			u"C-n/p move  ·  RET run  ·  M-p/n history  ·  ESC close"_q);
+			u"C-n/p move  ·  RET run  ·  F6 search/list  ·  ESC close"_q);
 	}
 
 private:
@@ -2353,8 +2382,15 @@ public:
 				return base::EventFilterResult::Continue;
 			}
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
-			const auto key = PhysicalKeyForNav(*k);
-			if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+			const auto key = ModalPhysicalKey(*k);
+			if (key == Qt::Key_Return) {
+				return AllowModalLayerKey(*k, this)
+					? base::EventFilterResult::Continue
+					: base::EventFilterResult::Cancel;
+			} else if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+				if (!AllowModalLayerKey(*k, this)) {
+					return base::EventFilterResult::Cancel;
+				}
 				if (!_filter->getLastText().isEmpty()) {
 					_filter->setText(QString());
 					setFocus();
@@ -2362,11 +2398,10 @@ public:
 					setFocus();
 				}
 				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Down || ((key == Qt::Key_N || key == Qt::Key_J) && mods == kCtrlMod)) {
-				moveSelection(1);
-				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Up || ((key == Qt::Key_P || key == Qt::Key_K) && mods == kCtrlMod)) {
-				moveSelection(-1);
+			} else if (const auto step = ListStep(key, mods, false)) {
+				if (AllowModalLayerKey(*k, this, true)) {
+					moveSelection(step);
+				}
 				return base::EventFilterResult::Cancel;
 			}
 			return base::EventFilterResult::Continue;
@@ -2412,7 +2447,12 @@ protected:
 			return;
 		}
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
-		const auto key = PhysicalKeyForNav(*e);
+		const auto key = ModalPhysicalKey(*e);
+		const auto step = ListStep(key, mods, true);
+		const auto motion = step && _pendingPrefix.isNull() && _pendingConfirmTargets.empty();
+		if (!AllowModalLayerKey(*e, this, motion)) {
+			return;
+		}
 
 		if (!_pendingConfirmTargets.empty()) {
 			if ((key == Qt::Key_Y && !mods) || key == Qt::Key_Return || key == Qt::Key_Enter) {
@@ -2468,17 +2508,8 @@ protected:
 		} else if (key == Qt::Key_Slash && !mods) {
 			_filter->setFocusFast();
 			return;
-		} else if (key == Qt::Key_J && !mods) {
-			moveSelection(1);
-			return;
-		} else if (key == Qt::Key_K && !mods) {
-			moveSelection(-1);
-			return;
-		} else if (key == Qt::Key_Down || (key == Qt::Key_N && mods == kCtrlMod)) {
-			moveSelection(1);
-			return;
-		} else if (key == Qt::Key_Up || (key == Qt::Key_P && mods == kCtrlMod)) {
-			moveSelection(-1);
+		} else if (step) {
+			moveSelection(step);
 			return;
 		} else if (key == Qt::Key_G && mods == Qt::ShiftModifier) {
 			jumpSelection(int(_visible.size()) - 1);
@@ -3095,18 +3126,24 @@ public:
 				return base::EventFilterResult::Continue;
 			}
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
-			const auto key = PhysicalKeyForNav(*k);
-			if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+			const auto key = ModalPhysicalKey(*k);
+			if (key == Qt::Key_Return) {
+				return AllowModalLayerKey(*k, this)
+					? base::EventFilterResult::Continue
+					: base::EventFilterResult::Cancel;
+			} else if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+				if (!AllowModalLayerKey(*k, this)) {
+					return base::EventFilterResult::Cancel;
+				}
 				if (!_filter->getLastText().isEmpty()) {
 					_filter->setText(QString());
 				}
 				setFocus();
 				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Down || ((key == Qt::Key_N || key == Qt::Key_J) && mods == kCtrlMod)) {
-				moveSelection(1);
-				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Up || ((key == Qt::Key_P || key == Qt::Key_K) && mods == kCtrlMod)) {
-				moveSelection(-1);
+			} else if (const auto step = ListStep(key, mods, false)) {
+				if (AllowModalLayerKey(*k, this, true)) {
+					moveSelection(step);
+				}
 				return base::EventFilterResult::Cancel;
 			}
 			return base::EventFilterResult::Continue;
@@ -3161,7 +3198,11 @@ protected:
 			return;
 		}
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
-		const auto key = PhysicalKeyForNav(*e);
+		const auto key = ModalPhysicalKey(*e);
+		const auto step = ListStep(key, mods, true);
+		if (!AllowModalLayerKey(*e, this, step != 0 && !_pendingG)) {
+			return;
+		}
 		if (_pendingG) {
 			_pendingG = false;
 			if (key == Qt::Key_G && !mods) {
@@ -3196,17 +3237,8 @@ protected:
 		} else if (key == Qt::Key_L && mods == Qt::ShiftModifier) {
 			requestMore();
 			return;
-		} else if (key == Qt::Key_J && !mods) {
-			moveSelection(1);
-			return;
-		} else if (key == Qt::Key_K && !mods) {
-			moveSelection(-1);
-			return;
-		} else if (key == Qt::Key_Down || (key == Qt::Key_N && mods == kCtrlMod)) {
-			moveSelection(1);
-			return;
-		} else if (key == Qt::Key_Up || (key == Qt::Key_P && mods == kCtrlMod)) {
-			moveSelection(-1);
+		} else if (step) {
+			moveSelection(step);
 			return;
 		} else if (key == Qt::Key_U && !mods) {
 			_unreadOnly = !_unreadOnly;
@@ -3746,7 +3778,7 @@ protected:
 		}
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
 		const auto modal = ModalKeysEnabled();
-		const auto key = modal ? PhysicalKeyForNav(*e) : e->key();
+		const auto key = modal ? ModalPhysicalKey(*e) : e->key();
 		if (!modal) {
 			_pendingG = false;
 			switch (key) {
@@ -3764,6 +3796,12 @@ protected:
 				e->ignore();
 				return;
 			}
+		}
+		const auto step = ListStep(key, mods, modal);
+		const auto horizontal = key == Qt::Key_Left || key == Qt::Key_Right
+			|| (modal && !mods && (key == Qt::Key_H || key == Qt::Key_L));
+		if (!AllowModalLayerKey(*e, this, !_pendingG && (step || horizontal))) {
+			return;
 		}
 		const auto isActionKey = (key == Qt::Key_Return
 			|| key == Qt::Key_Enter
@@ -3801,17 +3839,8 @@ protected:
 		} else if (key == Qt::Key_G && mods == Qt::ShiftModifier) {
 			_scroll->scrollToY(_scroll->scrollTopMax());
 			return;
-		} else if (key == Qt::Key_J && !mods) {
-			scrollBy(44);
-			return;
-		} else if (key == Qt::Key_K && !mods) {
-			scrollBy(-44);
-			return;
-		} else if (key == Qt::Key_Down || (key == Qt::Key_N && mods == kCtrlMod)) {
-			scrollBy(44);
-			return;
-		} else if (key == Qt::Key_Up || (key == Qt::Key_P && mods == kCtrlMod)) {
-			scrollBy(-44);
+		} else if (step) {
+			scrollBy(44 * step);
 			return;
 		} else if (key == Qt::Key_Tab && !mods) {
 			moveButton(1);
@@ -4262,18 +4291,24 @@ public:
 				return base::EventFilterResult::Continue;
 			}
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
-			const auto key = PhysicalKeyForNav(*k);
-			if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+			const auto key = ModalPhysicalKey(*k);
+			if (key == Qt::Key_Return) {
+				return AllowModalLayerKey(*k, this)
+					? base::EventFilterResult::Continue
+					: base::EventFilterResult::Cancel;
+			} else if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+				if (!AllowModalLayerKey(*k, this)) {
+					return base::EventFilterResult::Cancel;
+				}
 				if (!_filter->getLastText().isEmpty()) {
 					_filter->setText(QString());
 				}
 				setFocus();
 				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Down || ((key == Qt::Key_N || key == Qt::Key_J) && mods == kCtrlMod)) {
-				moveSelection(1);
-				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Up || ((key == Qt::Key_P || key == Qt::Key_K) && mods == kCtrlMod)) {
-				moveSelection(-1);
+			} else if (const auto step = ListStep(key, mods, false)) {
+				if (AllowModalLayerKey(*k, this, true)) {
+					moveSelection(step);
+				}
 				return base::EventFilterResult::Cancel;
 			}
 			return base::EventFilterResult::Continue;
@@ -4319,7 +4354,11 @@ protected:
 			return;
 		}
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
-		const auto key = PhysicalKeyForNav(*e);
+		const auto key = ModalPhysicalKey(*e);
+		const auto step = ListStep(key, mods, true);
+		if (!AllowModalLayerKey(*e, this, step != 0 && !_pendingG)) {
+			return;
+		}
 		if (_pendingG) {
 			_pendingG = false;
 			if (key == Qt::Key_G && !mods) {
@@ -4341,17 +4380,8 @@ protected:
 		} else if (key == Qt::Key_G && mods == Qt::ShiftModifier) {
 			moveSelection(int(_visible.size()));
 			return;
-		} else if (key == Qt::Key_J && !mods) {
-			moveSelection(1);
-			return;
-		} else if (key == Qt::Key_K && !mods) {
-			moveSelection(-1);
-			return;
-		} else if (key == Qt::Key_Down || (key == Qt::Key_N && mods == kCtrlMod)) {
-			moveSelection(1);
-			return;
-		} else if (key == Qt::Key_Up || (key == Qt::Key_P && mods == kCtrlMod)) {
-			moveSelection(-1);
+		} else if (step) {
+			moveSelection(step);
 			return;
 		} else if (key == Qt::Key_Y && !mods) {
 			if (_selected >= 0 && _selected < int(_visible.size()) && _config.onCopy) {

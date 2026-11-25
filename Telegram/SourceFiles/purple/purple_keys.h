@@ -28,6 +28,14 @@ class SectionBuilder;
 namespace Purple {
 
 [[nodiscard]] bool HandleModalKeys(QObject *receiver, QEvent *event);
+[[nodiscard]] int ModalPhysicalKey(const QKeyEvent &event);
+[[nodiscard]] bool AllowModalLayerKey(
+	const QKeyEvent &event,
+	not_null<QWidget*> layer,
+	bool motion = false);
+#ifdef Q_OS_MAC
+[[nodiscard]] bool SwallowModalNativeRepeat(QWidget *window, int nativeKey);
+#endif // Q_OS_MAC
 [[nodiscard]] bool ModalKeysOwnChatListFocus(QWidget *widget);
 [[nodiscard]] bool CalendarDayKeysEnabled();
 [[nodiscard]] int CalendarDayKeyOffset(const QKeyEvent &event);
