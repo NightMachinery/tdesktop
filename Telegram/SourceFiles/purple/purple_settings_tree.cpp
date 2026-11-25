@@ -333,7 +333,7 @@ std::vector<Row> Build(const LayerSettingsResult &layers, const std::vector<Sour
 			row.source = (source.recovery ? u"Last-good copy"_q
 				: inherited ? (isDefault ? u"Inherited · same value"_q : u"Inherited"_q)
 				: isDefault ? u"Explicit · default value"_q : u"Explicit"_q)
-				+ u" · "_q + source.name;
+				+ (source.name.isEmpty() ? QString() : u" · "_q + source.name);
 			const auto &report = active->path == global.path ? layers.global : layers.account;
 			const auto &parsed = report.usedGood && report.good ? report.good->parsed : report.current.parsed;
 			row.invalid = (!row.effective.isValid() && !active->raw.isEmpty())

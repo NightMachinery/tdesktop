@@ -61,6 +61,7 @@ public:
 		main->setSpacing(gap / 3);
 		_formLayout->setContentsMargins(0, gap / 3, 0, gap / 3);
 		_formLayout->setSpacing(gap / 3);
+		_formLayout->setAlignment(Qt::AlignTop);
 		_effects->setProperty("secondary", true);
 		auto lists = new QHBoxLayout();
 		_list->setAccessibleName(u"Selected ordered entries"_q);
@@ -78,12 +79,15 @@ public:
 		for (const auto label : { _effects, _status }) {
 			label->setWordWrap(true);
 			label->setTextFormat(Qt::PlainText);
+			label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 			main->addWidget(label);
 		}
-		auto operations = new QHBoxLayout();
-		auto ordering = new QHBoxLayout();
-		main->addLayout(operations);
-		main->addLayout(ordering);
+		const auto operations = new CustomizeLook::Actions(_main);
+		const auto ordering = new CustomizeLook::Actions(_main);
+		const auto footer = new CustomizeLook::Actions(_main);
+		main->addWidget(operations);
+		main->addWidget(ordering);
+		main->addWidget(footer);
 		button(operations, u"Add"_q, [this] { edit(Op::Insert); });
 		button(operations, u"Edit"_q, [this] { activate(); });
 		if (!_config.members) {
@@ -101,8 +105,8 @@ public:
 				commit(std::move(value));
 			});
 		}
-		button(main, u"Stage collection"_q, [this] { stage(); });
-		button(main, u"Back"_q, [this] { back(); });
+		button(footer, u"Stage collection"_q, [this] { stage(); });
+		button(footer, u"Back"_q, [this] { back(); });
 		for (const auto widget : { static_cast<QWidget*>(_list), static_cast<QWidget*>(_peerList),
 				static_cast<QWidget*>(_search) }) {
 			widget->installEventFilter(this);
@@ -148,7 +152,8 @@ public:
 			if (_formInput && _formInput() != _formBaseline && !_exitPrompt) {
 				_exitFocus = SettingsFocus(_formField ? _formField.data() : QApplication::focusWidget());
 				const auto prompt = new QWidget(_form);
-				const auto layout = new QHBoxLayout(prompt);
+				const auto layout = new QVBoxLayout(prompt);
+				layout->setContentsMargins({});
 				layout->addWidget(new QLabel(u"Discard unsubmitted input?"_q, prompt));
 				const auto keep = button(layout, u"Keep editing"_q, [this] { cancelExitPrompt(); });
 				button(layout, u"Discard input"_q, [this] { mainPage(); });
@@ -244,7 +249,11 @@ private:
 	template <typename Layout>
 	QPushButton *button(Layout *layout, const QString &label, Fn<void()> run) {
 		const auto result = new CustomizeLook::Action(label, this);
-		layout->addWidget(result);
+		if constexpr (std::is_same_v<Layout, CustomizeLook::Actions>) {
+			layout->append(result);
+		} else {
+			CustomizeLook::AppendAction(layout, result);
+		}
 		result->installEventFilter(this);
 		connect(result, &QPushButton::clicked, this, std::move(run));
 		return result;
@@ -259,6 +268,7 @@ private:
 		const auto result = new QLabel(text, _form);
 		result->setTextFormat(Qt::PlainText);
 		result->setWordWrap(true);
+		result->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 		_formLayout->addWidget(result);
 	}
 

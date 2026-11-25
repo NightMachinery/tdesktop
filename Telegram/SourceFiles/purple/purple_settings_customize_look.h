@@ -2,9 +2,12 @@
 
 #include "purple/purple_keys_colors.h"
 
+#include <QtCore/QEvent>
 #include <QtGui/QPainter>
+#include <QtWidgets/QBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QStyledItemDelegate>
 #include <QtWidgets/QTreeWidget>
 
 #include <utility>
@@ -19,6 +22,18 @@ inline QColor Tone(const QWidget *widget, const char *name, QPalette::ColorRole 
 	}
 	return widget->palette().color(fallback);
 }
+
+class Canvas final : public QWidget {
+public:
+	explicit Canvas(QWidget *parent = nullptr) : QWidget(parent) {
+		setAttribute(Qt::WA_OpaquePaintEvent);
+	}
+
+protected:
+	void paintEvent(QPaintEvent *) override {
+		QPainter(this).fillRect(rect(), Tone(this, "customizeBackground", QPalette::Window));
+	}
+};
 
 inline void Apply(QWidget *root, QColor bg, QColor surface, QColor ink, QColor muted,
 		QColor accent, QColor divider) {
@@ -88,6 +103,7 @@ public:
 	: QPushButton(text, parent), _shortcut(std::move(shortcut)) {
 		setAutoDefault(false);
 		setDefault(false);
+		setAttribute(Qt::WA_LayoutUsesWidgetRect);
 		setAccessibleName(text);
 		if (!_shortcut.isEmpty()) setAccessibleDescription(_shortcut);
 		setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
@@ -115,7 +131,8 @@ protected:
 		const auto active = isDown() || underMouse();
 		const auto surface = BlendColor(bg, accent, active && isEnabled() ? .21 : .09);
 		const auto border = hasFocus() ? accent : BlendColor(bg, ink, .20);
-		const auto bounds = QRectF(rect()).adjusted(.5, .5, -.5, -.5);
+		const auto inset = hasFocus() ? 1.5 : .5;
+		const auto bounds = QRectF(rect()).adjusted(inset, inset, -inset, -inset);
 		const auto fm = fontMetrics();
 		const auto pad = fm.height() / 2;
 		const auto radius = fm.height() / 3.;
@@ -178,6 +195,14 @@ public:
 	int heightForWidth(int width) const override { return place(width, false); }
 
 protected:
+	bool event(QEvent *event) override {
+		if (event->type() == QEvent::LayoutRequest) {
+			updateGeometry();
+			place(width(), true);
+		}
+		return QWidget::event(event);
+	}
+
 	void resizeEvent(QResizeEvent *event) override {
 		QWidget::resizeEvent(event);
 		place(width(), true);
@@ -191,6 +216,7 @@ private:
 		auto y = 0;
 		auto line = 0;
 		for (const auto button : _actions) {
+			if (button->isHidden()) continue;
 			const auto size = button->sizeHint();
 			if (x && x + size.width() > width) {
 				y += line + gap();
@@ -206,23 +232,41 @@ private:
 	std::vector<QPushButton*> _actions;
 };
 
+inline void AppendAction(QBoxLayout *layout, QPushButton *button) {
+	const auto last = layout->itemAt(layout->count() - 1);
+	auto row = last ? dynamic_cast<Actions*>(last->widget()) : nullptr;
+	if (!row) {
+		row = new Actions(layout->parentWidget());
+		layout->addWidget(row);
+	}
+	row->append(button);
+}
+
 class Chip final : public QLabel {
 public:
 	explicit Chip(QWidget *parent) : QLabel(parent) {
 		setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
 		setMinimumWidth(0);
+		setAttribute(Qt::WA_LayoutUsesWidgetRect);
 		setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 		setTextFormat(Qt::PlainText);
 	}
 
 	void setDetails(QString title, QString path = {}) {
-		_title = std::move(title);
+		_title = title.trimmed();
 		_path = std::move(path);
-		const auto details = _path.isEmpty() ? _title : _title + QStringLiteral(" · ") + _path;
+		const auto details = _path.isEmpty() ? _title : _title.isEmpty() ? _path
+			: _title + QStringLiteral(" · ") + _path;
 		setToolTip(details);
 		setAccessibleName(_title);
 		setAccessibleDescription(details);
 		refresh();
+	}
+
+	QSize sizeHint() const override {
+		const auto fm = fontMetrics();
+		return QSize(fm.horizontalAdvance(accessibleDescription()) + fm.height(),
+			fm.height() + 2 * (fm.height() / 4));
 	}
 
 protected:
@@ -245,14 +289,16 @@ protected:
 
 private:
 	void refresh() {
-		const auto padding = fontMetrics().height() / 2;
-		setIndent(padding);
 		const auto fm = fontMetrics();
-		const auto available = std::max(0, width() - 2 * padding);
+		const auto horizontal = fm.height() / 2;
+		const auto vertical = fm.height() / 4;
+		setContentsMargins(horizontal, vertical, horizontal, vertical);
+		const auto available = std::max(0, width() - 2 * horizontal);
 		if (_path.isEmpty()) {
 			setText(fm.elidedText(_title, Qt::ElideRight, available));
 		} else {
-			const auto prefix = fm.elidedText(_title, Qt::ElideRight, available / 2) + QStringLiteral(" · ");
+			const auto title = fm.elidedText(_title, Qt::ElideRight, available / 2);
+			const auto prefix = title.isEmpty() ? title : title + QStringLiteral(" · ");
 			setText(prefix + fm.elidedText(_path, Qt::ElideMiddle,
 				std::max(0, available - fm.horizontalAdvance(prefix))));
 		}
@@ -261,11 +307,28 @@ private:
 	QString _path;
 };
 
+class TreeRow final : public QStyledItemDelegate {
+public:
+	using QStyledItemDelegate::QStyledItemDelegate;
+
+	QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+		auto size = QStyledItemDelegate::sizeHint(option, index);
+		auto styled = option;
+		initStyleOption(&styled, index);
+		const auto fm = QFontMetrics(styled.font);
+		const auto lines = styled.text.count(u'\n') + 1;
+		size.setHeight(std::max(size.height(), int(lines * fm.lineSpacing()) + fm.height() / 2));
+		return size;
+	}
+};
+
 class Tree final : public QTreeWidget {
 public:
 	explicit Tree(QWidget *parent) : QTreeWidget(parent) {
 		setAlternatingRowColors(false);
 		setIndentation(fontMetrics().height());
+		setItemDelegate(new TreeRow(this));
+		setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
 	}
 
 protected:

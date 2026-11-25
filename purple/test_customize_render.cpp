@@ -5,6 +5,9 @@
 #include <QtCore/QDir>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QListWidget>
+#include <QtWidgets/QScrollArea>
+#include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QTextEdit>
 #include <QtWidgets/QVBoxLayout>
 
@@ -42,6 +45,7 @@ void Frame(QWidget *root, QVBoxLayout *layout, const QString &heading) {
 	layout->setContentsMargins(unit, unit, unit, unit);
 	layout->setSpacing(unit / 2);
 	auto title = new QLabel(heading, root);
+	title->setObjectName(QStringLiteral("fixtureHeading"));
 	auto font = root->font();
 	font.setBold(true);
 	font.setPointSizeF(font.pointSizeF() * 1.25);
@@ -63,12 +67,42 @@ void Render(QWidget &widget, const QDir &output, const QString &name, QSize size
 			<< size.width() << 'x' << size.height() << '\n';
 	}
 	Check(widget.size() == size, "preview fits requested dimensions");
-	Check(widget.grab().save(output.filePath(name)), "PNG exported");
+	const auto capture = widget.grab();
+	const auto bitmap = capture.toImage();
+	const auto dpr = capture.devicePixelRatio();
+	const auto pixel = [&](QPoint point) {
+		return bitmap.pixelColor(QPointF(point * dpr).toPoint());
+	};
+	const auto title = widget.findChild<QLabel*>(QStringLiteral("fixtureHeading"));
+	Check(title && title->isVisible(), "heading is visible");
+	const auto titleBounds = QRect(title->mapTo(&widget, QPoint()), title->size());
+	const auto background = pixel(QPoint(titleBounds.right() - 1, titleBounds.center().y()));
+	Check(background == Tone(title, "customizeBackground", QPalette::Window),
+		"pixels behind the heading use the Customize canvas");
+	auto contrast = 1.;
+	for (auto y = titleBounds.top(); y < titleBounds.bottom(); ++y) {
+		for (auto x = titleBounds.left(); x < titleBounds.right(); ++x) {
+			contrast = std::max(contrast, ModalUi::TextContrast(pixel(QPoint(x, y)), background));
+		}
+	}
+	Check(contrast >= 4.5, "painted heading pixels meet contrast");
+	const auto buttons = widget.findChildren<QPushButton*>();
+	auto occupied = QList<QRect>();
+	for (const auto button : buttons) {
+		if (!button->isVisible()) continue;
+		const auto bounds = QRect(button->mapTo(&widget, QPoint()), button->size());
+		Check(button->parentWidget()->rect().contains(button->geometry()), "action fits its existing row");
+		Check(std::none_of(occupied.begin(), occupied.end(), [&](const QRect &other) {
+			return other.intersects(bounds);
+		}), "action buttons do not overlap");
+		occupied.push_back(bounds);
+	}
+	Check(capture.save(output.filePath(name)), "PNG exported");
 	widget.hide();
 }
 
 void TreeRender(const QDir &output, bool dark, int width, bool large = false) {
-	auto root = QWidget();
+	auto root = Canvas();
 	if (large) {
 		auto font = root.font();
 		font.setPointSize(19);
@@ -89,6 +123,7 @@ void TreeRender(const QDir &output, bool dark, int width, bool large = false) {
 	new QTreeWidgetItem(tree, { QStringLiteral("Schedule & Focus") });
 	new QTreeWidgetItem(tree, { QStringLiteral("Peek") });
 	tree->setCurrentItem(scope->child(0));
+	const auto tail = new QTreeWidgetItem(tree, { QStringLiteral("Last setting\nSecond line remains visible") });
 	layout->addWidget(tree, 1);
 	auto help = new QLabel(QStringLiteral("Effective Off · Default Off\nReview changes before writing the chosen settings file."), &root);
 	help->setProperty("secondary", true);
@@ -104,15 +139,20 @@ void TreeRender(const QDir &output, bool dark, int width, bool large = false) {
 	layout->addWidget(actions);
 	Theme(&root, dark);
 	tree->setFocus();
-	Render(root, output, large ? QStringLiteral("tree-dark-large-640.png")
-		: dark ? QStringLiteral("tree-dark-1000.png") : QStringLiteral("tree-light-640.png"),
+	Render(root, output, QStringLiteral("tree-%1-%2%3.png").arg(dark ? QStringLiteral("dark") : QStringLiteral("light"))
+		.arg(width).arg(large ? QStringLiteral("-large") : QString()),
 		QSize(width, large ? 590 : 500));
+	root.show();
+	tree->scrollToBottom();
+	QApplication::processEvents();
+	Check(tree->viewport()->rect().contains(tree->visualItemRect(tail)), "last multiline item fits at scroll end");
+	root.hide();
 }
 
-void FormRender(const QDir &output) {
-	auto root = QWidget();
+void FormRender(const QDir &output, bool dark, int width) {
+	auto root = Canvas();
 	auto font = root.font();
-	font.setPointSize(19);
+	font.setPointSize(13);
 	root.setFont(font);
 	auto layout = new QVBoxLayout(&root);
 	Frame(&root, layout, QStringLiteral("Media reply"));
@@ -126,10 +166,12 @@ void FormRender(const QDir &output) {
 	edit->setMaximumHeight(root.fontMetrics().height() * 5);
 	layout->addWidget(edit);
 	auto keep = new Action(QStringLiteral("Keep editing"), &root, QStringLiteral("RET"));
-	layout->addWidget(keep, 0, Qt::AlignLeft);
+	AppendAction(layout, keep);
+	AppendAction(layout, new Action(QStringLiteral("Use built-in"), &root));
+	AppendAction(layout, new Action(QStringLiteral("Discard input"), &root));
 	layout->addStretch();
-	Theme(&root, true);
-	root.resize(640, 480);
+	Theme(&root, dark);
+	root.resize(width, 480);
 	root.show();
 	QApplication::processEvents();
 	line->setFocus();
@@ -152,7 +194,8 @@ void FormRender(const QDir &output) {
 	delete dead;
 	Check(!gone.restore(&root), "destroyed field is never refocused");
 	Check(lineFocus.restore(&root), "line restored after multiline test");
-	Render(root, output, QStringLiteral("form-dark-large-640.png"), QSize(640, 480));
+	Render(root, output, QStringLiteral("form-%1-%2.png")
+		.arg(dark ? QStringLiteral("dark") : QStringLiteral("light")).arg(width), QSize(width, 480));
 }
 
 ConfigChangeSummary ChangeFixture() {
@@ -270,8 +313,8 @@ void ReviewCollidingEntries() {
 	Check(conflict.contains(str("disk-original")), "Conflict keeps a distinct opening value at the same address");
 }
 
-void ReviewRender(const QDir &output, bool conflict) {
-	auto root = QWidget();
+void ReviewRender(const QDir &output, bool conflict, bool dark, int width) {
+	auto root = Canvas();
 	auto layout = new QVBoxLayout(&root);
 	Frame(&root, layout, conflict ? QStringLiteral("Settings changed since this draft")
 		: QStringLiteral("Review settings changes"));
@@ -280,7 +323,7 @@ void ReviewRender(const QDir &output, bool conflict) {
 	pane->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
 	pane->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	layout->addWidget(pane, 1);
-	Theme(&root, !conflict);
+	Theme(&root, dark);
 	const auto draft = ChangeFixture();
 	if (conflict) {
 		auto disk = ConfigChangeSummary{ .entries = { { .keys = { {
@@ -292,7 +335,9 @@ void ReviewRender(const QDir &output, bool conflict) {
 		Check(page.contains(QStringLiteral("<b>Yours</b>")) && page.contains(QStringLiteral("<b>On disk</b> · []"))
 			&& page.contains(QStringLiteral("<b>Original</b>")), "conflict has all three states");
 		pane->setHtml(page);
-		layout->addWidget(new Action(QStringLiteral("Show raw files"), &root), 0, Qt::AlignLeft);
+		for (const auto text : { "Keep draft for comparison", "Reload and review", "Discard draft", "Show raw files" }) {
+			AppendAction(layout, new Action(QString::fromLatin1(text), &root));
+		}
 	} else {
 		const auto page = Review::Effects(Review::Flatten(draft), { { QStringLiteral("lists.fixture"), QStringLiteral("lists.renamed"),
 			QStringLiteral("fixture"), QStringLiteral("renamed"), { QStringLiteral("presets.work.list_order") } } }, QColor(0xff8d92), QColor(0x81d6a3));
@@ -302,10 +347,69 @@ void ReviewRender(const QDir &output, bool conflict) {
 			&& page.contains(QStringLiteral("References updated")) && page.contains(QStringLiteral("presets.work.list_order")), "rename, empty add, and reference effects shown");
 		Check(Review::Escaped(QStringLiteral("<b>literal</b>")).contains(QStringLiteral("&lt;b&gt;")), "plain TOML is escaped");
 		pane->setHtml(page);
-		layout->addWidget(new Action(QStringLiteral("Apply changes"), &root), 0, Qt::AlignLeft);
+		for (const auto text : { "Back", "Effects", "Lines", "Previous page", "Next page", "Apply changes" }) {
+			AppendAction(layout, new Action(QString::fromLatin1(text), &root));
+		}
 	}
-	Render(root, output, conflict ? QStringLiteral("conflict-light-1200.png")
-		: QStringLiteral("effects-dark-640.png"), QSize(conflict ? 1200 : 640, 510));
+	Render(root, output, QStringLiteral("%1-%2-%3.png").arg(conflict ? QStringLiteral("conflict") : QStringLiteral("review"),
+		dark ? QStringLiteral("dark") : QStringLiteral("light")).arg(width), QSize(width, 510));
+}
+
+void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
+		const QString &heading, std::initializer_list<const char*> actions) {
+	auto host = QWidget();
+	host.setAutoFillBackground(true);
+	auto palette = host.palette();
+	palette.setColor(QPalette::Window, QColor(0xeaeaea));
+	host.setPalette(palette);
+	auto outer = new QVBoxLayout(&host);
+	outer->setContentsMargins({});
+	auto stack = new QStackedWidget(&host);
+	auto scroll = new QScrollArea(stack);
+	scroll->setFrameShape(QFrame::NoFrame);
+	scroll->setWidgetResizable(true);
+	scroll->setViewport(new Canvas(scroll));
+	auto page = new Canvas(scroll);
+	scroll->setWidget(page);
+	stack->addWidget(scroll);
+	outer->addWidget(stack);
+	auto layout = new QVBoxLayout(page);
+	Frame(page, layout, heading);
+	if (kind == QStringLiteral("collection")) {
+		auto search = new QLineEdit(page);
+		search->setPlaceholderText(QStringLiteral("Filter available chats"));
+		layout->addWidget(search);
+		auto lists = new QHBoxLayout();
+		for (const auto name : { "Selected chat", "Available chat" }) {
+			auto list = new QListWidget(page);
+			list->addItem(QString::fromLatin1(name));
+			lists->addWidget(list);
+		}
+		layout->addLayout(lists, 1);
+	} else if (kind == QStringLiteral("rename")) {
+		auto refs = new QLabel(QStringLiteral("Same-file references\npresets.example.list_order[0].list"), page);
+		refs->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+		layout->addWidget(refs);
+		layout->addWidget(new QLineEdit(QStringLiteral("fixture-renamed"), page));
+		layout->addStretch();
+	} else if (kind == QStringLiteral("confirm")) {
+		auto body = new QTextEdit(page);
+		body->setPlainText(QStringLiteral("Renamed fixture to fixture-renamed\nReferences updated in the destination file."));
+		body->setReadOnly(true);
+		layout->addWidget(body, 1);
+	} else {
+		auto body = new QLabel(QStringLiteral("Fixture settings and actions"), page);
+		body->setProperty("secondary", true);
+		layout->addWidget(body);
+		layout->addStretch();
+	}
+	for (const auto action : actions) {
+		AppendAction(layout, new Action(QString::fromLatin1(action), page));
+	}
+	Theme(&host, !dark);
+	Theme(stack, dark);
+	Render(host, output, QStringLiteral("%1-%2-%3.png").arg(kind,
+		dark ? QStringLiteral("dark") : QStringLiteral("light")).arg(width), QSize(width, 460));
 }
 
 } // namespace
@@ -319,11 +423,27 @@ int main(int argc, char **argv) {
 	Check(output.mkpath(QStringLiteral(".")), "create render directory");
 	ReviewRenameLosses();
 	ReviewCollidingEntries();
-	TreeRender(output, false, 640);
-	TreeRender(output, true, 1000);
+	for (const auto dark : { false, true }) {
+		for (const auto width : { 640, 800, 1200 }) {
+			TreeRender(output, dark, width);
+			FormRender(output, dark, width);
+			ReviewRender(output, false, dark, width);
+			ReviewRender(output, true, dark, width);
+			SheetRender(output, dark, width, QStringLiteral("collection"), QStringLiteral("Members"),
+				{ "Add", "Enter ID", "Edit", "Delete", "Move up", "Move down", "Undo",
+					"Reset members", "Stage collection", "Back" });
+			SheetRender(output, dark, width, QStringLiteral("rename"), QStringLiteral("Rename collection"),
+				{ "Cancel", "Keep change" });
+			SheetRender(output, dark, width, QStringLiteral("confirm"), QStringLiteral("Confirm settings change"),
+				{ "Cancel", "Confirm and apply" });
+			SheetRender(output, dark, width, QStringLiteral("recovery"), QStringLiteral("Settings need repair"),
+				{ "Retry after repair", "Copy location", "Browse effective values", "Close" });
+			SheetRender(output, dark, width, QStringLiteral("account"), QStringLiteral("Account to inspect"),
+				{ "Switch buffer", "Back" });
+			SheetRender(output, dark, width, QStringLiteral("discard"), QStringLiteral("Discard staged changes?"),
+				{ "Keep editing", "Review and apply", "Discard and close" });
+		}
+	}
 	TreeRender(output, true, 640, true);
-	FormRender(output);
-	ReviewRender(output, false);
-	ReviewRender(output, true);
 	std::cout << Checks << " checks, 0 failures\n";
 }

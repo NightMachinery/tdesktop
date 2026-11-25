@@ -186,6 +186,7 @@ QString PreviewPeerLiteral(const PreviewPeer &peer) {
 
 QLabel *Label(QWidget *parent, const QString &name = {}) {
 	const auto label = new QLabel(name, parent);
+	label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
 	label->setWordWrap(true);
 	label->setTextFormat(Qt::PlainText);
 	return label;
@@ -298,10 +299,10 @@ public:
 	, _session(base::make_weak(host->maybeSession()))
 	, _window(host->widget().get())
 	, _pages(new QStackedWidget(this))
-	, _browser(new QWidget(_pages))
+	, _browser(new CustomizeLook::Canvas(_pages))
 	, _sheetPage(new QScrollArea(_pages))
-	, _sheet(new QWidget(_sheetPage))
-	, _covered(new QWidget(_pages))
+	, _sheet(new CustomizeLook::Canvas(_sheetPage))
+	, _covered(new CustomizeLook::Canvas(_pages))
 	, _coverMessage(Label(_covered, u"Settings hidden while locked"_q))
 	, _coverClose(Button(_covered, u"Close"_q))
 	, _title(Label(_browser, u"Customize Purple settings"_q))
@@ -328,6 +329,7 @@ public:
 		auto outer = new QVBoxLayout(this);
 		outer->setContentsMargins({});
 		outer->addWidget(_pages);
+		_sheetPage->setViewport(new CustomizeLook::Canvas(_sheetPage));
 		_sheetPage->setWidgetResizable(true);
 		_sheetPage->setFrameShape(QFrame::NoFrame);
 		_sheetPage->setWidget(_sheet);
@@ -470,8 +472,6 @@ protected:
 
 private:
 	void setupBrowser() {
-		_browser->setAutoFillBackground(true);
-		_sheet->setAutoFillBackground(true);
 		_title->setFont(st::keysLegendHeaderStyle.font);
 		auto layout = new QVBoxLayout(_browser);
 		const auto gap = fontMetrics().height();
@@ -688,8 +688,8 @@ private:
 				if (!key.isEmpty()) _expanded.insert(key);
 			}
 		}
-		_subject->setDetails(AccountName(_opening.requester),
-			u"App-wide from %1"_q.arg(sourceName(_opening.globalSource)));
+		_subject->setDetails(u"%1 · App-wide from %2"_q.arg(
+			AccountName(_opening.requester), sourceName(_opening.globalSource)));
 		renderTree();
 	}
 
@@ -718,7 +718,8 @@ private:
 			const auto state = (row.invalid ? u" · Invalid"_q : QString())
 				+ (marked ? u" · Modified"_q : QString());
 			item->setText(0, row.label + state + (!row.branch && !value.isEmpty()
-				? u"\n"_q + Isolate(value) + u"  ·  "_q + row.source : QString()));
+				? u"\n"_q + Isolate(value) + (row.source.isEmpty() ? QString()
+					: u"  ·  "_q + row.source) : QString()));
 			item->setFont(0, row.branch ? QFont(st::semiboldFont) : QFont(st::normalFont));
 			if (row.branch && (filtering() || _expanded.contains(row.key))) item->setExpanded(true);
 			items[row.key] = item;
@@ -769,7 +770,7 @@ private:
 		const auto &source = row && row->scope == SettingScope::AppWide
 			? _opening.globalSource : _opening.ownSource;
 		_destination->setDetails(
-			row && !row->destination.isEmpty() ? row->destination : u"Destination"_q,
+			u"Destination"_q,
 			source ? source->file.path : u"Unavailable"_q);
 		if (!row) {
 			_inspector->clear();
@@ -980,7 +981,7 @@ private:
 
 	void addSheetWidget(QWidget *widget) {
 		widget->installEventFilter(this);
-		if (qobject_cast<QPushButton*>(widget)) _sheetLayout->addWidget(widget, 0, Qt::AlignLeft);
+		if (const auto button = qobject_cast<QPushButton*>(widget)) CustomizeLook::AppendAction(_sheetLayout, button);
 		else _sheetLayout->addWidget(widget);
 	}
 
@@ -1669,7 +1670,8 @@ private:
 		const auto title = Label(_sheet, row.label);
 		title->setFont(st::keysLegendTitleStyle.font);
 		addSheetWidget(title);
-		addSheetWidget(Label(_sheet, Isolate(SettingsTree::Address(row.address)) + u" · "_q + row.destination));
+		addSheetWidget(Label(_sheet, Isolate(SettingsTree::Address(row.address))
+			+ (row.destination.isEmpty() ? QString() : u" · "_q + row.destination)));
 		if (!row.help.isEmpty()) addSheetWidget(HelpLabel(_sheet, row.help));
 		const auto &descriptor = *row.descriptor;
 		auto focus = static_cast<QWidget*>(nullptr);
@@ -1778,11 +1780,12 @@ private:
 		_exitFocus = SettingsFocus(_lastField ? _lastField.data() : QApplication::focusWidget());
 		const auto panel = new QWidget(_sheet);
 		const auto layout = new QVBoxLayout(panel);
+		layout->setContentsMargins({});
 		layout->addWidget(Label(panel, u"Discard the text in this form?"_q));
 		const auto keep = Button(panel, u"Keep editing"_q);
 		const auto discard = Button(panel, u"Discard input"_q);
 		for (const auto button : { keep, discard }) {
-			layout->addWidget(button);
+			CustomizeLook::AppendAction(layout, button);
 			button->installEventFilter(this);
 		}
 		_formExit = panel;
@@ -1812,16 +1815,14 @@ private:
 	}
 
 	void addDurationControls(const SettingDescriptor &descriptor) {
-		const auto controls = new QWidget(_sheet);
-		const auto layout = new QHBoxLayout(controls);
-		layout->setContentsMargins({});
+		const auto controls = new CustomizeLook::Actions(_sheet);
 		for (const auto &[label, suffix, seconds] : {
 			std::tuple{ u"Seconds"_q, u"s"_q, 1 },
 			std::tuple{ u"Minutes"_q, u"m"_q, 60 },
 			std::tuple{ u"Hours"_q, u"h"_q, 3600 },
 		}) {
 			const auto button = Button(controls, label);
-			layout->addWidget(button);
+			controls->append(button);
 			button->installEventFilter(this);
 			connect(button, &QPushButton::clicked, this, [this, suffix, seconds] {
 				const auto current = _line->text().trimmed();
@@ -1837,7 +1838,7 @@ private:
 			});
 		}
 		const auto off = Button(controls, u"Off"_q);
-		layout->addWidget(off);
+		controls->append(off);
 		off->setEnabled(SettingsTree::Decode(descriptor, u"off"_q).has_value());
 		off->installEventFilter(this);
 		connect(off, &QPushButton::clicked, this, [this] { _line->setText(u"off"_q); });
