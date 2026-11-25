@@ -34,6 +34,7 @@ purpleMusicNowCover: 120px;
 purpleMusicNowCoverCompact: 72px;
 purpleMusicNowCompactWidth: 530px;
 purpleMusicNowPadding: 16px;
+purpleMusicNowTransportGap: 8px;
 purpleMusicNowMargin: margins(24px, 0px, 24px, 12px);
 purpleMusicNowTitle: font(27px semibold);
 purpleMusicNowEyebrow: font(12px semibold);

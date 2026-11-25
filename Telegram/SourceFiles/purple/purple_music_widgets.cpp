@@ -186,16 +186,17 @@ ChatMusicLayout AddChatMusicLayout(
 		not_null<Ui::GenericBox*> box,
 		ChatMusicLayoutArgs args,
 		const MusicShortcutHints &keys) {
-	box->addRow(std::move(args.player));
+	box->addRow(std::move(args.player), st::purpleMusicNowMargin);
 	auto tiles = rpl::duplicate(args.tiles);
 	box->addRow(MakeMusicViewControl(
-		box, std::move(tiles), std::move(args.selectView), keys.view));
-	const auto filter = box->addRow(MakeMusicFilter(box, keys.filter));
+		box, std::move(tiles), std::move(args.selectView), keys.view), st::purpleMusicActionMargin);
+	const auto filter = box->addRow(MakeMusicFilter(box, keys.filter), st::purpleMusicSearchMargin);
 	const auto status = box->addRow(object_ptr<Ui::FlatLabel>(
 		box, tr::lng_contacts_loading(tr::now), st::boxLabel));
 	const auto tracks = box->addRow(object_ptr<PlaylistSongList>(
 		box, std::vector<PlaylistSongListRow>(), 0, 0, std::move(args.play),
 		Fn<void(std::vector<uint64_t>)>(), PlaylistSongList::Mode::Library));
+	tracks->reserveTileScrollbarSpace();
 	std::move(args.tiles) | rpl::on_next([=](bool tiles) {
 		tracks->setTiles(tiles);
 	}, tracks->lifetime());

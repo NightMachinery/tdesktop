@@ -70,7 +70,9 @@ A track can show the cursor border, mark, and playback badge at the same
 time. In List, marks have a separate column and titles and artists sit
 beside the cover in the interface's direction. The text keeps its own
 reading order. Tiles keep the text direction and inset the title and cover
-inside the focused card.
+inside the focused card. In the chat dialog, the grid leaves room for the
+scrollbar. Moving the cursor into a partially visible tile scrolls its caption
+into view with the cover.
 The now-playing panel shows the current song, with a seek slider and
 previous, play or pause, and next controls. It takes the place of the
 regular song toolbar while the library is open. The library shows the

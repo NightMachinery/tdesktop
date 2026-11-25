@@ -199,6 +199,7 @@ public:
 	void setContextActions(Fn<void(not_null<Ui::PopupMenu*>, uint64_t)> actions);
 	void showActions();
 	void setArtworkSession(not_null<Main::Session*> session);
+	void reserveTileScrollbarSpace();
 	int setTiles(bool tiles);
 	bool cancelRangeMark();
 	[[nodiscard]] int contentHeight(int width) const;
@@ -250,6 +251,7 @@ private:
 	};
 
 	[[nodiscard]] int hit(QPoint position) const;
+	[[nodiscard]] int tileWidth(int width) const;
 	[[nodiscard]] int columns(int width) const;
 	[[nodiscard]] int sleeve(int width) const;
 	[[nodiscard]] int rowHeightForWidth(int width) const;
@@ -286,6 +288,7 @@ private:
 	std::map<uint64_t, Cover> _cover;
 	Main::Session *_artworkSession = nullptr;
 	Mode _mode = Mode::Playlist;
+	int _tileTrailingInset = 0;
 	base::Timer _autoscroll;
 	base::Timer _artworkUpdate;
 	base::Timer _playbackBadge;
@@ -359,8 +362,12 @@ int PlaylistSongList::Rows::rowHeightForWidth(int width) const {
 			* st::normalFont->height + layout.songPadding.bottom());
 }
 
+int PlaylistSongList::Rows::tileWidth(int width) const {
+	return std::max(1, width - _tileTrailingInset);
+}
+
 int PlaylistSongList::Rows::columns(int width) const {
-	return _tiles ? std::max(1, (width + st::purpleMusicTileGap)
+	return _tiles ? std::max(1, (tileWidth(width) + st::purpleMusicTileGap)
 		/ (st::purpleMusicTileMin + st::purpleMusicTileGap)) : 1;
 }
 
@@ -369,7 +376,7 @@ int PlaylistSongList::Rows::sleeve(int width) const {
 	const auto maximum = width <= st::purpleMusicTileNarrowWidth
 		? st::purpleMusicTileNarrowMax : st::purpleMusicTileMax;
 	return std::max(1, std::min(maximum,
-		(width - (count - 1) * st::purpleMusicTileGap) / count));
+		(tileWidth(width) - (count - 1) * st::purpleMusicTileGap) / count));
 }
 
 int PlaylistSongList::Rows::contentHeight(int width) const {
@@ -389,7 +396,7 @@ QRect PlaylistSongList::Rows::itemRect(int index) const {
 	const auto side = sleeve(width());
 	const auto gap = st::purpleMusicTileGap;
 	const auto leading = count > 1
-		? (index % count) * (width() - side) / (count - 1) : 0;
+		? (index % count) * (tileWidth(width()) - side) / (count - 1) : 0;
 	return style::rtlrect(
 		leading,
 		(index / count) * height,
@@ -1092,6 +1099,10 @@ void PlaylistSongList::Rows::setRows(
 	update();
 }
 
+void PlaylistSongList::Rows::reserveTileScrollbarSpace() {
+	_tileTrailingInset = st::mediaPlayerScroll.width;
+}
+
 int PlaylistSongList::Rows::setTiles(bool tiles) {
 	const auto current = _scroll->scrollTop();
 	if (_tiles == tiles || _mode != Mode::Library) return current;
@@ -1416,6 +1427,11 @@ void PlaylistSongList::showActions() {
 
 void PlaylistSongList::setArtworkSession(not_null<Main::Session*> session) {
 	_rows->setArtworkSession(session);
+}
+
+void PlaylistSongList::reserveTileScrollbarSpace() {
+	_rows->reserveTileScrollbarSpace();
+	resizeToWidth(width());
 }
 
 void PlaylistSongList::setTiles(bool tiles) {

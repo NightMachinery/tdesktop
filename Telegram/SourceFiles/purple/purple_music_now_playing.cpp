@@ -183,8 +183,9 @@ int NowPlaying::resizeGetHeight(int width) {
 	const auto compactMode = compact(width);
 	const auto metadataHeight = st::purpleMusicNowEyebrow->height
 		+ st::purpleMusicNowTitle->height + st::normalFont->height;
+	const auto transportTop = metadataHeight + (_play ? st::purpleMusicNowTransportGap : 0);
 	const auto progressTop = compactMode
-		? 2 * padding + std::max(side, metadataHeight + transportHeight())
+		? 2 * padding + std::max(side, transportTop + transportHeight())
 		: padding + side - st::normalFont->height;
 	_time->resizeToNaturalWidth(width);
 	const auto progressHeight = std::max(_time->height(), st::normalFont->height);
@@ -194,7 +195,7 @@ int NowPlaying::resizeGetHeight(int width) {
 		progressHeight);
 	if (_play) {
 		placeTransport(compactMode ? left : width - padding - transportWidth(),
-			compactMode ? padding + metadataHeight : padding + st::purpleMusicActionGap, width);
+			compactMode ? padding + transportTop : padding + st::purpleMusicActionGap, width);
 	}
 	return std::max(side + 2 * padding, progressTop + progressHeight + padding);
 }
