@@ -244,7 +244,8 @@ object_ptr<Ui::RpWidget> MakeMusicHeader(
 	auto result = object_ptr<Ui::RpWidget>(parent);
 	const auto header = result.data();
 	header->setFixedHeight(st::purpleMusicHeaderHeight);
-	const auto previous = Ui::CreateChild<Ui::IconButton>(header, st::purpleMusicBack);
+	const auto previous = Ui::CreateChild<Ui::IconButton>(header, style::RightToLeft()
+		? st::purpleMusicBackRtl : st::purpleMusicBack);
 	previous->setAccessibleName(tr::lng_purple_music_back(tr::now));
 	previous->setClickedCallback(std::move(back));
 	const auto title = Ui::CreateChild<Ui::FlatLabel>(

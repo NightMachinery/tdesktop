@@ -107,3 +107,8 @@ purpleMusicBack: IconButton(defaultIconButton) {
 	rippleAreaSize: 32px;
 	rippleAreaPosition: point(2px, 2px);
 }
+
+purpleMusicBackRtl: IconButton(purpleMusicBack) {
+	icon: icon {{ "box_button_back-flip_horizontal", boxTitleCloseFg }};
+	iconOver: icon {{ "box_button_back-flip_horizontal", boxTitleCloseFgOver }};
+}

@@ -1,3 +1,4 @@
+#include "base/timer.h"
 #include "ui/integration.h"
 #include "ui/style/style_core.h"
 #include "ui/widgets/continuous_sliders.h"
@@ -25,7 +26,8 @@ public:
 	QString emojiCacheFolder() override { return {}; }
 	QString fontsCacheFolder() override { return {}; }
 	QString openglCheckFilePath() override { return {}; }
-	int touchCounterIncrement() override { return 0; }
+	QString angleBackendFilePath() override { return {}; }
+	void touchCounterIncrement() override {}
 	int touchCounterNow() override { return 0; }
 };
 
