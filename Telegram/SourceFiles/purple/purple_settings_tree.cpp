@@ -133,12 +133,7 @@ std::optional<int> Duration(const SettingDescriptor &descriptor, const QString &
 	return (*seconds > 0 && *seconds < DurationMinimum(descriptor.id)) ? std::nullopt : seconds;
 }
 
-QString DefaultText(const Row &row, const Settings &global) {
-	if (row.scope == SettingScope::PerAccount) {
-		auto inherited = row;
-		inherited.effective = EffectiveSettingValue(global, row.address);
-		return inherited.effective.isValid() ? ValueText(inherited) : u"Context dependent"_q;
-	}
+QString DefaultText(const Row &row) {
 	const auto fallback = QString::fromLatin1(row.descriptor->fallback);
 	if (fallback == u"@required"_q) return u"Required"_q;
 	if (fallback.startsWith(u'@')) return u"Context dependent"_q;
@@ -315,7 +310,7 @@ std::vector<Row> Build(const LayerSettingsResult &layers, const std::vector<Sour
 			&& row.scope != SettingScope::AppWide;
 		const auto &globalParse = layers.global.usedGood && layers.global.good
 			? layers.global.good->parsed : layers.global.current.parsed;
-		row.defaultValue = DefaultText(row, globalParse.settings);
+		row.defaultValue = DefaultText(row);
 		row.resetLabel = !sameFile && row.scope == SettingScope::PerAccount
 			? u"Use global account value"_q
 			: (row.descriptor->fallback.starts_with("@") ? u"Use local fallback"_q : u"Use built-in"_q);

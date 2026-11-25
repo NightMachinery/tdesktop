@@ -51,6 +51,19 @@ int main() {
 	const auto reasons = found(last);
 	Check(reasons != rows.end() && reasons->source == QStringLiteral("Inherited · same value · Studio"),
 		"inherited default has a distinct source label");
+	const auto reply = QByteArray("[media_reply]\ntext = \"staged line one\\nstaged line two\"\n");
+	const auto preview = LayerSettings(QString::fromUtf8(reply), QStringLiteral("fixture.toml"),
+		QString::fromUtf8(reply), QStringLiteral("fixture.toml"), { .traceReads = true });
+	const auto previewRows = Build(preview, {
+		{ QStringLiteral("Fixture"), QStringLiteral("fixture.toml"), reply, true },
+	});
+	const auto stagedReply = std::find_if(previewRows.begin(), previewRows.end(), [](const Row &row) {
+		return row.descriptor && row.descriptor->id == SettingId::ReplyText;
+	});
+	Check(stagedReply != previewRows.end()
+		&& stagedReply->effective.toString() == QStringLiteral("staged line one\nstaged line two")
+		&& stagedReply->defaultValue == QStringLiteral("@TranscribeThisAI"),
+		"a staged multiline override keeps the built-in default in the inspector");
 	const auto view = View(rows, {}, QStringLiteral("timeout peek"));
 	Check(view.matches == 1 && std::any_of(view.rows.begin(), view.rows.end(), [&](size_t id) {
 		return rows[id].key == peek;
