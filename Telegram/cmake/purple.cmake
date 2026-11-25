@@ -136,6 +136,7 @@ PRIVATE
     purple/purple_settings_editor.h
     purple/purple_settings_draft.h
     purple/purple_settings_focus.h
+    purple/purple_settings_confirm_gesture.h
     purple/purple_settings_review_display.h
     purple/purple_settings_structures.cpp
     purple/purple_settings_structures.h

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <QtCore/QPointer>
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QPlainTextEdit>
+#include <QtWidgets/QStackedWidget>
 
 #include <algorithm>
 
@@ -51,6 +53,34 @@ private:
 	QPointer<QWidget> _widget;
 	int _position = 0;
 	int _anchor = -1;
+};
+
+class SettingsProtectedForm final {
+public:
+	void hide(QStackedWidget *pages, QWidget *form, QWidget *cover, bool retainForm) {
+		if (retainForm && pages->currentWidget() == form) {
+			_held = true;
+			_focus = SettingsFocus(QApplication::focusWidget());
+		}
+		pages->setCurrentWidget(cover);
+	}
+
+	[[nodiscard]] bool held() const { return _held; }
+
+	[[nodiscard]] bool restore(QStackedWidget *pages, QWidget *form, bool validated) {
+		if (!_held || !validated) {
+			return false;
+		}
+		_held = false;
+		pages->setCurrentWidget(form);
+		if (!_focus.restore(form)) form->setFocus();
+		_focus = SettingsFocus();
+		return true;
+	}
+
+private:
+	SettingsFocus _focus;
+	bool _held = false;
 };
 
 } // namespace Purple

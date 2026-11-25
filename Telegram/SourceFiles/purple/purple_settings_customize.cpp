@@ -11,6 +11,7 @@
 #include "mainwindow.h"
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
+#include "purple/purple_keys.h"
 #include "purple/purple_picker.h"
 #include "purple/purple_privacy_screen.h"
 #include "purple/purple_settings_collection_ui.h"
@@ -33,6 +34,7 @@
 #include "window/window_separate_id.h"
 
 #include <QtCore/QPointer>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QFileInfo>
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QTimer>
@@ -293,10 +295,11 @@ private:
 	bool _done = false;
 };
 
-class CustomizeLayer final : public Ui::LayerWidget {
+class CustomizeLayer final : public Ui::RpWidget {
 public:
 	explicit CustomizeLayer(not_null<Window::Controller*> host)
-	: _host(base::make_weak(host.get()))
+	: RpWidget(host->widget()->bodyWidget())
+	, _host(base::make_weak(host.get()))
 	, _session(base::make_weak(host->maybeSession()))
 	, _window(host->widget().get())
 	, _pages(new QStackedWidget(this))
@@ -421,28 +424,40 @@ public:
 		showRecoveryIfNeeded();
 	}
 
-	bool closeByOutsideClick() const override { return false; }
+	void present(anim::type animated);
 
-	bool closeByBackButton() override {
-		back();
-		return true;
-	}
-
-protected:
-	void parentResized() override {
-		if (const auto parent = parentWidget()) {
-			const auto gap = fontMetrics().height();
-			const auto w = std::max(1, std::min(parent->width() - 2 * gap, st::boxWideWidth + 14 * gap));
-			const auto h = std::max(1, std::min(parent->height() - 2 * gap, 34 * gap));
-			setGeometry((parent->width() - w) / 2, (parent->height() - h) / 2, w, h);
+	void focusPage() {
+		if (isVisible()) {
+			if (_pages->currentWidget() == _browser) _tree->setFocus();
+			else if (_resumeRefused && visibleContent()) _coverClose->setFocus();
+		} else if (!_presentation && visibleContent()) {
+			protectionChanged();
 		}
 	}
 
-	void doSetInnerFocus() override {
-		if (_pages->currentWidget() == _browser) _tree->setFocus();
-		else if (_resumeRefused && visibleContent()) _coverClose->setFocus();
+	bool privacyKey(QWidget *focus, const QKeyEvent &key) {
+		const auto text = qobject_cast<QTextEdit*>(focus);
+		if (!visibleContent() || _capture || QApplication::activePopupWidget()
+			|| qobject_cast<QLineEdit*>(focus) || qobject_cast<QPlainTextEdit*>(focus)
+			|| (text && !text->isReadOnly())) {
+			_privacyPrefix.invalidate();
+			return false;
+		}
+		const auto plain = !(key.modifiers() & ~Qt::KeypadModifier);
+		const auto prefix = _privacyPrefix.isValid() && _privacyPrefix.elapsed() < 1000;
+		_privacyPrefix.invalidate();
+		if (plain && (key.key() == Qt::Key_F8 || (prefix && key.key() == Qt::Key_Z))) {
+			if (!key.isAutoRepeat()) TogglePrivacyScreen(_window.data());
+			return true;
+		}
+		if (plain && key.key() == Qt::Key_Space && focus == _tree && ModalKeysEnabled()) {
+			if (!key.isAutoRepeat()) _privacyPrefix.start();
+			return true;
+		}
+		return false;
 	}
 
+protected:
 	void keyPressEvent(QKeyEvent *event) override {
 		if (handleKey(this, event)) return;
 		event->accept();
@@ -450,7 +465,9 @@ protected:
 
 	bool eventFilter(QObject *object, QEvent *event) override {
 		if (object == _window.data()) {
-			if (_needsRefresh && event->type() == QEvent::WindowActivate) {
+			if (event->type() == QEvent::Close) {
+				retire();
+			} else if (_needsRefresh && event->type() == QEvent::WindowActivate) {
 				QTimer::singleShot(0, this, [this] { protectionChanged(); });
 			}
 			return false;
@@ -478,6 +495,13 @@ protected:
 	}
 
 private:
+	friend class CustomizePresentation;
+
+	void closeLayer() {
+		if (const auto layer = _presentation.data()) layer->closeLayer();
+		else deleteLater();
+	}
+
 	void setupBrowser() {
 		_title->setFont(st::keysLegendHeaderStyle.font);
 		auto layout = new QVBoxLayout(_browser);
@@ -550,7 +574,9 @@ private:
 	}
 
 	void retire() {
+		if (_retired) return;
 		_retired = true;
+		hide();
 		_pages->setCurrentWidget(_covered);
 		clearSheet();
 		_frames.clear();
@@ -566,15 +592,20 @@ private:
 			retire();
 		} else if (!visibleContent()) {
 			QToolTip::hideText();
-			if (_pages->currentWidget() == _sheetPage && !_editingKey.isEmpty()) {
-				_pausedForm = true;
-				_formFocus = SettingsFocus(QApplication::focusWidget());
-				if (_choice) _choice->hidePopup();
-			}
+			_privacyPrefix.invalidate();
 			_coverMessage->setText(u"Settings hidden while locked"_q);
 			_coverClose->hide();
-			_pages->setCurrentWidget(_covered);
-			if (!_pausedForm) clearSheet();
+			for (const auto choice : _sheet->findChildren<QComboBox*>()) {
+				choice->hidePopup();
+			}
+			_protectedForm.hide(_pages, _sheetPage, _covered, !_editingKey.isEmpty());
+			if (!_protectedForm.held()) clearSheet();
+			if (Core::App().passcodeLocked() && _presentation && _window) {
+				// The stock lock destroys layers, so the hidden editor belongs to its window.
+				hide();
+				setParent(_window->bodyWidget());
+				_presentation.clear();
+			}
 		} else {
 			const auto wasCovered = _pages->currentWidget() == _covered;
 			QTimer::singleShot(0, this, [this, wasCovered] {
@@ -584,6 +615,8 @@ private:
 				if (!weak || !visibleContent()) return;
 				if (wasCovered && !_needsRefresh) {
 					_resumeRefused = _draftStale || !_opening.current;
+					if (!_presentation) present(anim::type::instant);
+					if (!weak || !visibleContent()) return;
 					if (_resumeRefused) {
 						_coverMessage->setText(u"The source changed while settings were hidden. Close and reopen Customize to see the current settings."_q);
 						_coverClose->setText(u"Discard draft and close"_q);
@@ -591,11 +624,8 @@ private:
 						_coverClose->setFocus();
 					} else if (_applyInFlight) {
 						displayApplying(u"Waiting for the reviewed settings operation."_q);
-					} else if (_pausedForm && SettingsDraft::CanRestoreForm(sameSession(), !_draftStale)) {
-						_pausedForm = false;
-						_pages->setCurrentWidget(_sheetPage);
-						if (!_formFocus.restore(_sheet)) _sheetPage->setFocus();
-					} else {
+					} else if (!_protectedForm.restore(_pages, _sheetPage,
+							SettingsDraft::CanRestoreForm(sameSession(), !_draftStale))) {
 						_pages->setCurrentWidget(_browser);
 						_tree->setFocus();
 					}
@@ -1000,8 +1030,7 @@ private:
 		_reviewEffectsShown = false;
 		_applyMessage.clear();
 		_reviewPages.clear();
-		_pausedForm = false;
-		_formFocus = SettingsFocus();
+		_protectedForm = SettingsProtectedForm();
 		_exitFocus = SettingsFocus();
 		_lastField.clear();
 		_formExit.clear();
@@ -1659,7 +1688,7 @@ private:
 		if (row && !row->help.isEmpty()) addSheetWidget(HelpLabel(_sheet, row->help));
 		addSheetWidget(HelpLabel(_sheet, u"j / k Move · h / l Fold or enter · / Filter · Return Edit\n"
 			"t Toggle · + / − Step · r Reset · u Undo · d Review · y Copy TOML path\n"
-			"A Switch account · F6 Change panel · Esc Back"_q));
+			"A Switch account · F6 Change panel · F8 Privacy screen outside text fields · Esc Back"_q));
 		addSheetWidget(HelpLabel(_sheet, u"Forms · Ctrl+Return Stage. Return inserts a newline in multiline fields.\n"
 			"Collections · a Add · Shift+D Duplicate · x Remove · Shift+J/K Reorder · u Undo\n"
 			"Chat picker · / Search · Space Add the selected chat"_q));
@@ -2069,6 +2098,7 @@ private:
 	base::weak_ptr<Window::Controller> _host;
 	base::weak_ptr<Main::Session> _session;
 	QPointer<::MainWindow> _window;
+	QPointer<Ui::LayerWidget> _presentation;
 	QStackedWidget *_pages;
 	QWidget *_browser;
 	QScrollArea *_sheetPage;
@@ -2109,7 +2139,8 @@ private:
 	QPushButton *_record = nullptr;
 	QPushButton *_cancelCapture = nullptr;
 	QPointer<QPushButton> _confirm;
-	SettingsFocus _formFocus;
+	SettingsProtectedForm _protectedForm;
+	QElapsedTimer _privacyPrefix;
 	SettingsFocus _exitFocus;
 	QPointer<QWidget> _browserFocus;
 	QPointer<QWidget> _lastField;
@@ -2126,13 +2157,55 @@ private:
 	bool _reviewEffectsShown = false;
 	uint64_t _applySerial = 0;
 	bool _applyInFlight = false;
-	bool _pausedForm = false;
 	bool _capture = false;
 	bool _needsRefresh = false;
 	bool _retired = false;
 	bool _draftStale = false;
 	bool _resumeRefused = false;
 };
+
+class CustomizePresentation final : public Ui::LayerWidget {
+public:
+	explicit CustomizePresentation(not_null<CustomizeLayer*> editor)
+	: _editor(editor.get()) {
+		setFont(editor->font());
+		editor->setParent(this);
+		editor->show();
+	}
+
+	void parentResized() override {
+		if (const auto parent = parentWidget()) {
+			const auto gap = fontMetrics().height();
+			const auto w = std::max(1, std::min(parent->width() - 2 * gap, st::boxWideWidth + 14 * gap));
+			const auto h = std::max(1, std::min(parent->height() - 2 * gap, 34 * gap));
+			setGeometry((parent->width() - w) / 2, (parent->height() - h) / 2, w, h);
+			if (_editor && _editor->parentWidget() == this) _editor->setGeometry(rect());
+		}
+	}
+
+	bool closeByOutsideClick() const override { return false; }
+
+	bool closeByBackButton() override {
+		if (_editor && _editor->parentWidget() == this) _editor->back();
+		return true;
+	}
+
+protected:
+	void doSetInnerFocus() override {
+		if (_editor && _editor->parentWidget() == this) _editor->focusPage();
+	}
+
+private:
+	QPointer<CustomizeLayer> _editor;
+};
+
+void CustomizeLayer::present(anim::type animated) {
+	const auto host = _host.get();
+	if (!host || !visibleContent() || _presentation) return;
+	auto layer = std::make_unique<CustomizePresentation>(this);
+	_presentation = layer.get();
+	host->showLayer(std::move(layer), Ui::LayerOption::KeepOther, animated);
+}
 
 } // namespace
 
@@ -2147,7 +2220,7 @@ void ShowCustomizeSettings(not_null<Window::Controller*> window) {
 	}
 	const auto host = window->widget();
 	if (const auto existing = OpenEditors.value(host.get())) {
-		existing->setInnerFocus();
+		existing->focusPage();
 		return;
 	}
 	if (!OpenEditors.contains(host.get())) {
@@ -2156,10 +2229,10 @@ void ShowCustomizeSettings(not_null<Window::Controller*> window) {
 			LastSelection.remove(raw);
 		});
 	}
-	auto layer = std::make_unique<CustomizeLayer>(window);
+	const auto layer = QPointer(new CustomizeLayer(window));
+	OpenEditors[host.get()] = layer;
 	layer->open();
-	OpenEditors[host.get()] = layer.get();
-	window->showLayer(std::move(layer), Ui::LayerOption::KeepOther);
+	if (layer) layer->present(anim::type::normal);
 }
 
 std::optional<bool> FilterCustomizeSettingsInput(QObject *receiver, QEvent *event) {
@@ -2177,6 +2250,9 @@ std::optional<bool> FilterCustomizeSettingsInput(QObject *receiver, QEvent *even
 			return widget && (editor.data() == widget || editor->isAncestorOf(widget));
 		};
 		if (owns(target) || ((shortcut || QApplication::activePopupWidget()) && owns(focus))) {
+			if (type == QEvent::KeyPress && editor->privacyKey(focus, *static_cast<QKeyEvent*>(event))) {
+				return true;
+			}
 			if (shortcut) event->accept();
 			return shortcut;
 		}

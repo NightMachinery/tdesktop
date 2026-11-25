@@ -335,6 +335,10 @@ recovery view to find the offending location and see whether effective values
 come from a last-good copy. Repair the file in a text editor and select
 **Retry after repair**.
 
+Passcode lock and the privacy screen hide an open draft and its form input.
+Customize can restore that input in the same account window after it checks
+the source again. If the opening has gone stale, the form stays hidden.
+
 ### Known limits
 
 - Each Apply uses one guarded writer for one destination. Review changes for

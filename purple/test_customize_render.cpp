@@ -1,6 +1,7 @@
 #include "purple/purple_settings_confirm_gesture.h"
 #include "purple/purple_settings_customize_look.h"
 #include "purple/purple_settings_focus.h"
+#include "purple/purple_settings_draft.h"
 #include "purple/purple_settings_review_display.h"
 
 #include <QtCore/QDir>
@@ -14,6 +15,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 
 namespace {
 
@@ -57,6 +59,57 @@ void ConfirmGesture() {
 	QApplication::sendEvent(&underneath, &press);
 	QApplication::sendEvent(&underneath, &end);
 	Check(clicks == 1, "a distinct click still reaches the replacement page");
+}
+
+void ProtectedForm() {
+	auto owner = Canvas();
+	auto presentation = std::make_unique<QWidget>(&owner);
+	auto editor = new QStackedWidget(presentation.get());
+	auto form = new QWidget(editor);
+	auto formLayout = new QVBoxLayout(form);
+	auto text = new QPlainTextEdit(QStringLiteral("Draft line one\nDraft line two"), form);
+	formLayout->addWidget(text);
+	auto cover = new QLabel(QStringLiteral("Settings hidden while locked"), editor);
+	editor->addWidget(form);
+	editor->addWidget(cover);
+	owner.resize(400, 250);
+	presentation->resize(owner.size());
+	editor->resize(owner.size());
+	owner.show();
+	presentation->show();
+	editor->show();
+	text->setFocus();
+	auto cursor = text->textCursor();
+	cursor.setPosition(7);
+	text->setTextCursor(cursor);
+	QApplication::processEvents();
+
+	auto protection = SettingsProtectedForm();
+	for (const auto detach : { false, true }) {
+		protection.hide(editor, form, cover, true);
+		Check(protection.held() && !text->isVisible() && !text->hasFocus(),
+			"protected form is hidden and unfocusable");
+		if (detach) {
+			editor->hide();
+			editor->setParent(&owner);
+			presentation.reset();
+			Check(!editor->isVisible(), "passcode teardown leaves the detached form hidden");
+			presentation = std::make_unique<QWidget>(&owner);
+			editor->setParent(presentation.get());
+			presentation->resize(owner.size());
+			editor->resize(owner.size());
+			presentation->show();
+			editor->show();
+		}
+		Check(!protection.restore(editor, form, SettingsDraft::CanRestoreForm(true, false))
+			&& editor->currentWidget() == cover && !text->isVisible(), "stale opening keeps typed text covered");
+		Check(!protection.restore(editor, form, SettingsDraft::CanRestoreForm(false, true))
+			&& !text->isVisible(), "another session cannot reveal the form");
+		Check(protection.restore(editor, form, SettingsDraft::CanRestoreForm(true, true))
+			&& text->isVisible() && text->textCursor().position() == 7
+			&& text->toPlainText() == QStringLiteral("Draft line one\nDraft line two"),
+			"same opening resumes the exact unsaved text and caret");
+	}
 }
 
 void Theme(QWidget *root, bool dark) {
@@ -451,6 +504,7 @@ int main(int argc, char **argv) {
 	const auto output = QDir(QString::fromLocal8Bit(argv[1]));
 	Check(output.mkpath(QStringLiteral(".")), "create render directory");
 	ConfirmGesture();
+	ProtectedForm();
 	ReviewRenameLosses();
 	ReviewCollidingEntries();
 	for (const auto dark : { false, true }) {

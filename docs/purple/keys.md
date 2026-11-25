@@ -150,11 +150,15 @@ Customize settings…** also opens the editor with modal keys off.
 - Press `Return` to edit, `t` to toggle a boolean, `+` / `-` to step
   a number, `r` to reset, and `y` to copy the TOML path. **Account** or
   `A` selects a signed-in account.
+- Press `F8` from a non-text control to show the privacy screen, including
+  from a form after tabbing out of its text field. From the settings tree,
+  the default `SPC z` chord also works with modal keys enabled.
 - Use `Ctrl+Return` to submit a form. In a multiline field, `Return`
   inserts a newline. The focused field keeps its native text editing keys.
 - In a collection, `a` adds, `Shift+D` duplicates, `x` removes, and
   `Shift+J` / `Shift+K` reorder where supported. In the chat picker,
-  `/` focuses search and `Space` adds the selected chat.
+  `/` focuses search and `Space` or **Add** adds the selected chat.
+  Use **Enter ID** to type a chat ID.
 - Use `u` to undo staged edits and `d` to review them. In **Lines**,
   `[` / `]` page through the review when the diff has focus. **Apply
   changes** is a separate action. `Esc` backs out and asks before

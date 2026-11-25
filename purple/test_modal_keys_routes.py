@@ -84,8 +84,15 @@ assert re.search(r'"SPC f e"\s+"edit settings"', defaults)
 assert 'pushRow(leader.rows, rowFor(Action::CustomizeSettings))' in keys
 assert command_ids["CustomizeSettings"] == "customize-settings"
 ordered(keys, "case Action::CustomizeSettings:", "ShowCustomizeSettings")
-ordered(keys, ".onPick = [guard", "Available(action, restoredTarget)", "guard->dispatch(action, restored, 1)")
 customize = read("purple/purple_settings_customize.cpp")
+ordered(customize, "class CustomizeLayer final", "passcodeLockChanges()", "PrivacyScreenChanges()",
+        "void protectionChanged()", "_protectedForm.hide", "Core::App().passcodeLocked()",
+        "setParent(_window->bodyWidget())", "_presentation.clear()", "refreshFromDisk()",
+        "_resumeRefused = _draftStale", "present(anim::type::instant)", "_coverClose->show()",
+        "_protectedForm.restore", "setCurrentWidget(_browser)")
+ordered(customize, "bool privacyKey", "qobject_cast<QLineEdit*>", "Qt::Key_F8", "TogglePrivacyScreen")
+ordered(customize, "FilterCustomizeSettingsInput", "editor->privacyKey")
+ordered(keys, ".onPick = [guard", "Available(action, restoredTarget)", "guard->dispatch(action, restored, 1)")
 customize_look = read("purple/purple_settings_customize_look.h")
 ordered(customize_look, "class Chip", "setToolTip(details)", "setAccessibleDescription(details)", "Qt::ElideMiddle")
 ordered(customize_look, "class Tree", "setAlternatingRowColors(false)", "drawBranches")
@@ -96,9 +103,6 @@ ordered(customize, "void showConflict(", "SummarizeConfigChange(preview.before, 
         "SettingsReviewDisplay::Conflict", "raw->hide()", "Show raw files")
 ordered(customize, "QTextEdit *sheetText", "WrapAtWordBoundaryOrAnywhere", "ScrollBarAlwaysOff")
 ordered(customize, "sessionDataAboutToBeCleared()", "retire()", "PrivacyScreenChanges()")
-ordered(customize, "void protectionChanged()", "setCurrentWidget(_covered)",
-        "refreshFromDisk()", "_resumeRefused = _draftStale", "_coverClose->show()",
-        "setCurrentWidget(_browser)")
 ordered(customize, "QEvent::InputMethod", "preeditString()", "QEvent::KeyPress", "handleKey(")
 ordered(customize, "bool handleKey", "_preedit.contains(object)", "return false", "ShouldHandleEditorKey")
 ordered(customize, "new QPlainTextEdit", "setPlainText", "stageForm()", "PrepareWindowSettingsEditorEdit")
@@ -116,10 +120,12 @@ ordered(collection_edit, "FindSettingDescriptor(item.address)", "if (_config.nam
 assert not re.search(r"FindSettingDescriptor\([^\n]+\)->", collections)
 ordered(collections, "void showOtherReferences", "_config.otherReferences(object)", "Other accounts’ files are not checked")
 ordered(collection_edit, "showOtherReferences(item.address)", "_accept = button")
-ordered(collections, 'u"Add"_q, [this] { edit(Op::Insert)', 'u"Duplicate"_q, [this] { edit(Op::Duplicate)',
+ordered(collections, 'u"Add"_q, [this] { add()', 'u"Enter ID"_q, [this] { edit(Op::Insert)',
+        'u"Duplicate"_q, [this] { edit(Op::Duplicate)',
         'u"Delete"_q, [this] { edit(Op::Erase)', 'u"Move up"_q, [this] { move(-1)',
         "&QAbstractItemModel::rowsMoved", "moveTo(from, to)",
-        "code == Qt::Key_D", "edit(Op::Duplicate)", "edit(Op::Insert)", "edit(Op::Erase)")
+        "code == Qt::Key_D", "edit(Op::Duplicate)", "code == Qt::Key_A", "add()", "edit(Op::Erase)")
+ordered(collections, "void add()", "_config.peerField", "addPeer()", "edit(Op::Insert)")
 # Verify new native UI surfaces reuse stock Ui::KeysLegend & Ui::LayerWidget, not Toasts/ASCII TextBox.
 assert "Ui::Toast::Show" not in keys, "Modal UI must not fall back to plain Toast popups"
 for required_ui in (
