@@ -732,7 +732,22 @@ private:
 		const auto global = source(_opening.globalSource, _opening.globalGood,
 			layers.global, bool(_opening.appWide));
 		const auto files = std::vector<SettingsTree::Source>{ global, own };
-		_rows = SettingsTree::Build(layers, files);
+		_rows = SettingsTree::Build(layers, files, [session = _session.get()](const QString &key) {
+			using Kind = ArchiveV2::ChatClass;
+			const auto token = ParsePeerToken(key);
+			if (!session || !token) return Kind::Unknown;
+			if (token->kind == PeerTokenKind::Chat) return Kind::Group;
+			if (token->kind == PeerTokenKind::User) {
+				const auto peer = session->data().peerLoaded(peerFromUser(UserId(token->id)));
+				const auto user = peer ? peer->asUser() : nullptr;
+				return !user ? Kind::Unknown : user->isBot() ? Kind::Bot : Kind::Direct;
+			}
+			if (token->kind == PeerTokenKind::Channel) {
+				const auto peer = session->data().peerLoaded(peerFromChannel(ChannelId(token->id)));
+				return !peer ? Kind::Unknown : peer->isMegagroup() ? Kind::Group : Kind::Channel;
+			}
+			return Kind::Unknown;
+		});
 		if (revealSelection) {
 			auto key = _selection;
 			while (!key.isEmpty()) {

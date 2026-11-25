@@ -5,6 +5,8 @@
 #include "purple/purple_archive_journal.h"
 #include "purple/purple_archive_media_lifecycle.h"
 #include "purple/purple_archive_sql_maintenance.h"
+#include "purple/purple_archive_sqlite.h"
+#include "purple/purple_archive_v2_schema.h"
 #include "purple/purple_desktop_archive_store.h"
 #include "purple/purple_sync_json.h"
 #include "tests/archive_test_support.h"
@@ -2444,6 +2446,57 @@ void Crypto() {
 	CHECK(!api.openAes256Gcm(u"key"_q, QByteArray(12, char(0)), *sealed, "wrong"));
 }
 
+void ArchiveV2Schema() {
+	Section = "v2 SQLite format, version order, reference identity and indexes";
+	const auto temp = QTemporaryDir();
+	auto db = DesktopArchiveSqlite();
+	CHECK(db.Open(temp.filePath(u"v2.sqlite"_q), true).ok);
+	CHECK(db.ConfigureV2().ok);
+	CHECK(db.Execute(ArchiveV2::Schema()).committed);
+	const auto one = ArchiveSqlExpectation::OneRow;
+	const auto scalar = [&](QString sql) -> ArchiveSqlValue {
+		const auto result = db.Read({ sql, {}, one });
+		return result.ok && result.rows.size() == 1 && result.rows.front().size() == 1
+			? result.rows.front().front() : ArchiveSqlValue(nullptr);
+	};
+	const auto apply = [&](std::initializer_list<ArchiveSqlStatement> ops) {
+		auto program = ArchiveSqlProgram{ ArchiveSqlStatus::Ready, {{ u"BEGIN IMMEDIATE"_q }} };
+		for (const auto &op : ops) {
+			program.statements.emplace_back(op.sql, op.binds, ArchiveSqlExpectation::OneChange);
+		}
+		program.statements.push_back({ u"COMMIT"_q });
+		return db.Execute(program).committed;
+	};
+	CHECK(scalar(u"PRAGMA auto_vacuum"_q) == ArchiveSqlValue(int64(2)));
+	CHECK(apply({
+		{u"INSERT INTO meta VALUES(2,?,?)"_q, {QByteArray("store"), QByteArray("header")}},
+		{u"INSERT INTO messages VALUES(x'01',x'02',x'03',0,0,25,3,x'FF')"_q},
+		{u"INSERT INTO versions VALUES(x'01',1,x'A1',25,x'A0',x'AA')"_q},
+		{u"INSERT INTO versions VALUES(x'01',2,x'A2',25,x'B0',x'BB')"_q},
+		{u"INSERT INTO versions VALUES(x'01',3,x'A3',25,x'A0',x'AA')"_q},
+		{u"INSERT INTO blobs VALUES(x'04',1000,x'FE')"_q},
+		{u"INSERT INTO blob_parts VALUES(x'04',0,x'FD')"_q},
+		{u"INSERT INTO media VALUES(x'01',1,0,x'50',1,1,1,0,x'FC',x'04')"_q},
+		{u"INSERT INTO media VALUES(x'01',3,0,x'50',1,0,1,0,x'FC',x'04')"_q},
+	}));
+	CHECK(!apply({ {u"INSERT INTO versions VALUES(x'01',4,x'A3',25,x'A0',x'AA')"_q} }));
+	CHECK(!apply({ {u"INSERT INTO media VALUES(x'01',4,0,x'50',1,0,1,0,x'FC',x'04')"_q} }));
+	CHECK(!apply({ {u"INSERT INTO meta VALUES(1,x'01',x'02')"_q} }));
+	CHECK(scalar(u"SELECT group_concat(seq) FROM (SELECT seq FROM versions ORDER BY seq)"_q)
+		== ArchiveSqlValue(u"1,2,3"_q));
+	CHECK(scalar(u"SELECT count(*) FROM sqlite_schema WHERE type='index' AND name IN "
+		"('messages_chat','messages_status','messages_lookup','media_blob')"_q) == ArchiveSqlValue(int64(4)));
+	CHECK(apply({ {u"DELETE FROM versions WHERE seq=1"_q} }));
+	CHECK(scalar(u"SELECT count(*) FROM blobs"_q) == ArchiveSqlValue(int64(1)));
+	CHECK(apply({ {u"UPDATE media SET blob_key=NULL WHERE seq=3"_q} }));
+	CHECK(scalar(u"SELECT count(*) FROM blobs"_q) == ArchiveSqlValue(int64(0)));
+	CHECK(scalar(u"SELECT count(*) FROM blob_parts"_q) == ArchiveSqlValue(int64(0)));
+	CHECK(apply({ {u"DELETE FROM messages WHERE message_key=x'01'"_q} }));
+	CHECK(scalar(u"SELECT count(*) FROM versions"_q) == ArchiveSqlValue(int64(0)));
+	CHECK(scalar(u"SELECT count(*) FROM media"_q) == ArchiveSqlValue(int64(0)));
+	CHECK(db.Close());
+}
+
 }
 
 int main(int argc, char** argv) {
@@ -2471,6 +2524,7 @@ int main(int argc, char** argv) {
 		std::printf("Desktop archive binding: %d checks, %d failures\n", Checks, Failures);
 		return Failures ? 1 : 0;
 	}
+	ArchiveV2Schema();
 	LegacyProfileBinding();
 	KeySetMigrationAndRebind();
 	ExplicitDiscardRecovery();

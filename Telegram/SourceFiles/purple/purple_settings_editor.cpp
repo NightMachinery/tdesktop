@@ -472,6 +472,16 @@ SettingsEditorPreparation PrepareSettingsEditorEdit(
 	review->_intent = std::move(intent);
 	if (const auto group = std::get_if<std::vector<SettingsEdit>>(&review->_intent)) {
 		for (const auto &operation : *group) {
+			const auto descriptor = FindSettingDescriptor(operation.address);
+			if (descriptor && descriptor->codec == SettingCodec::Choice
+				&& operation.address.front() == SettingAddressPart(u"archive"_q)) {
+				const auto scalar = std::get_if<std::optional<SettingScalar>>(&operation.operation);
+				const auto text = scalar && *scalar ? std::get_if<QString>(&**scalar) : nullptr;
+				if (text && *text == u"on_arrival"_q) {
+					return { .status = Status::InvalidValue, .error = u"On-arrival timed downloads require the "
+						"two-account receipt gate. Use on_open until it passes."_q, .address = operation.address };
+				}
+			}
 			if (!ranges::contains(preview.changedAddresses, operation.address)) {
 				preview.changedAddresses.push_back(operation.address);
 			}
@@ -489,6 +499,15 @@ SettingsEditorPreparation PrepareSettingsEditorEdit(
 	preview.physicalAfter = ParseSettingsWithTrace(QString::fromUtf8(preview.after), file.path);
 	if (!preview.physicalAfter.ok()) {
 		return { .status = Status::InvalidSource, .error = preview.physicalAfter.error };
+	}
+	const auto archiveEdit = std::any_of(preview.changedAddresses.begin(), preview.changedAddresses.end(),
+		[](const SettingAddress &address) { return !address.empty() && address.front() == SettingAddressPart(u"archive"_q); });
+	if (archiveEdit) {
+		const auto &warnings = preview.physicalAfter.warnings;
+		const auto issue = std::find_if(warnings.begin(), warnings.end(), [](const QString &warning) {
+			return warning.startsWith(u"archive:"_q);
+		});
+		if (issue != warnings.end()) return { .status = Status::InvalidValue, .error = *issue };
 	}
 	if (const auto group = std::get_if<std::vector<SettingsEdit>>(&review->_intent)) {
 		for (auto i = group->begin(); i != group->end(); ++i) {

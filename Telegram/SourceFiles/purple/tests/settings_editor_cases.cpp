@@ -95,6 +95,24 @@ struct Fixture {
 	}
 };
 
+void ArchivePolicyCases() {
+	auto f = Fixture();
+	Put(f.root, Get(f.root) + "\n[archive]\ndays=15\ntotal_mib=16\ntimed_media_mib=30\n");
+	f.routing.refreshSettings();
+	CHECK(f.routing.settings(A).archive.days == 15);
+	CHECK(f.routing.settings(B).archive.timedMiB == 30);
+	const auto gate = f.scalar(A, { u"archive"_q, u"timed_download"_q }, u"on_arrival"_q);
+	CHECK(gate.status == SettingsEditorStatus::InvalidValue && gate.error.contains(u"two-account"_q));
+	const auto oversized = f.scalar(A, { u"archive"_q, u"ordinary_file_mib"_q }, int64(17));
+	CHECK(oversized.status == SettingsEditorStatus::InvalidValue && oversized.error.contains(u"1..16"_q));
+	Put(f.root, Get(f.root) + "ordinary_file_mib=17\n");
+	f.routing.refreshSettings();
+	CHECK(f.routing.settings(A).archive.days == 15 && f.routing.settings(A).archive.ordinaryFileMiB == 16);
+	CHECK(f.routing.settings(B).archive.timedMiB == 30);
+	const auto repaired = f.scalar(A, { u"archive"_q, u"ordinary_file_mib"_q }, int64(2));
+	CHECK(repaired.status == SettingsEditorStatus::Ready && repaired.review);
+}
+
 void ScopeCases() {
 	auto f = Fixture();
 	const auto global = f.scalar(B, { u"premium"_q, u"enabled_p"_q }, false);
@@ -495,6 +513,7 @@ void SaveCases() {
 int main(int argc, char **argv) {
 	const auto app = QCoreApplication(argc, argv);
 	ScopeCases();
+	ArchivePolicyCases();
 	MembershipCases();
 	Refusals();
 	CollectionAndConflictCases();

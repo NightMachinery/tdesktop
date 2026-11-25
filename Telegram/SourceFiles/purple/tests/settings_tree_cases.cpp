@@ -51,6 +51,26 @@ int main() {
 	const auto reasons = found(last);
 	Check(reasons != rows.end() && reasons->source == QStringLiteral("Inherited · same value · Studio"),
 		"inherited default has a distinct source label");
+	const auto archiveGlobal = QByteArray(
+		"[archive]\ntimed_download = 'on_open'\n[archive.timed_download_by_class]\nbot = 'off'\n"
+		"[archive.chats.\"user:17\"]\ntimed_download = 'on_open'\n");
+	const auto archiveOwn = QByteArray("[archive.chats.\"user:17\"]\nordinary_on_arrival = true\n");
+	const auto archive = LayerSettings(QString::fromUtf8(archiveGlobal), QStringLiteral("global.toml"),
+		QString::fromUtf8(archiveOwn), QStringLiteral("own.toml"), { .traceReads = true });
+	const auto archiveRows = Build(archive, {
+		{ QStringLiteral("Global"), QStringLiteral("global.toml"), archiveGlobal, true },
+		{ QStringLiteral("Account"), QStringLiteral("own.toml"), archiveOwn, true },
+	}, [](const QString &) { return ArchiveV2::ChatClass::Bot; });
+	const auto timed = std::find_if(archiveRows.begin(), archiveRows.end(), [](const Row &row) {
+		return row.descriptor && row.descriptor->id == SettingId::ArchiveTimedDownload && row.address.size() == 4;
+	});
+	Check(timed != archiveRows.end() && timed->effective.toString() == QStringLiteral("off")
+		&& timed->source == QStringLiteral("Inherited · Chat class"), "chat inherits its class in the preview");
+	Check(timed != archiveRows.end() && timed->physical.size() == 1 && timed->physical.front().inactive
+		&& timed->destination == QStringLiteral("Account"), "other account chat policy cannot leak into the preview");
+	const auto &descriptor = DescribeSetting(SettingId::ArchiveTimedDownload);
+	Check(!Decode(descriptor, QStringLiteral("on_arrival"))
+		&& Decode(descriptor, QStringLiteral("on_open")).has_value(), "Customize enforces the receipt gate");
 	const auto reply = QByteArray("[media_reply]\ntext = \"staged line one\\nstaged line two\"\n");
 	const auto preview = LayerSettings(QString::fromUtf8(reply), QStringLiteral("fixture.toml"),
 		QString::fromUtf8(reply), QStringLiteral("fixture.toml"), { .traceReads = true });

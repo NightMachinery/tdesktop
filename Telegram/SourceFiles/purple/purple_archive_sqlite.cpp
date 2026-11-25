@@ -258,6 +258,16 @@ DesktopArchiveSqlResult DesktopArchiveSqlite::Configure() {
 	return result;
 }
 
+DesktopArchiveSqlResult DesktopArchiveSqlite::ConfigureV2() {
+	const auto mode = Read({ u"PRAGMA auto_vacuum=INCREMENTAL"_q });
+	if (!mode.ok) return mode;
+	const auto actual = Read({ u"PRAGMA auto_vacuum"_q, {}, ArchiveSqlExpectation::OneRow });
+	if (!actual.ok || actual.rows != std::vector<std::vector<ArchiveSqlValue>>{{ int64(2) }}) {
+		return Failure(SQLITE_ERROR, u"incremental-vacuum-unavailable"_q);
+	}
+	return Configure();
+}
+
 DesktopArchiveSqlResult DesktopArchiveSqlite::Read(const ArchiveSqlStatement &statement) {
 	if (!_impl->Current()) {
 		return Failure(SQLITE_MISUSE, u"not-open"_q);

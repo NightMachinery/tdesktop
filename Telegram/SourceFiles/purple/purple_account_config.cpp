@@ -922,7 +922,10 @@ const Settings &DesktopAccountConfig::settings(const AccountKey &key) {
 	slot->report.account = std::move(accountReport);
 	slot->read.effectiveAccepted = slot->report.effective.ok();
 	if (slot->report.effective.ok()) {
-		slot->settings = slot->report.effective.settings;
+		auto next = slot->report.effective.settings;
+		if (!next.archive.valid) next.archive = slot->settings.archive;
+		if (!_owner) next.archive.chats.clear();
+		slot->settings = std::move(next);
 	}
 	return slot->settings;
 }

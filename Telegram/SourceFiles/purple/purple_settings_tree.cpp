@@ -13,7 +13,7 @@ namespace {
 constexpr auto kSections = std::array{
 	"File & account", "Work Mode", "Schedule & Focus", "Peek",
 	"Recent & suggestions", "Notifications & Last Seen", "Playback & playlists",
-	"Recording & replies", "Screen time", "Diagnostics",
+	"Recording & replies", "Screen time", "Archive v2", "Diagnostics",
 };
 
 QString SectionKey(size_t index) {
@@ -34,6 +34,7 @@ size_t Section(const SettingAddress &address, bool known) {
 	if (root == u"playback"_q || root == u"playlists"_q) return 6;
 	if (root == u"recording"_q || root == u"media_reply"_q) return 7;
 	if (root == u"screen_time"_q) return 8;
+	if (root == u"archive"_q) return 9;
 	return 0;
 }
 
@@ -92,6 +93,7 @@ bool LayerMatches(const SettingsLayerKey &key, const SettingAddress &address) {
 QString InactiveReason(SettingsInactiveReason reason) {
 	switch (reason) {
 	case SettingsInactiveReason::AppWide: return u"App-wide setting"_q;
+	case SettingsInactiveReason::OtherAccount: return u"Another account’s chat policy"_q;
 	case SettingsInactiveReason::UndefinedGlobalList: return u"List is absent from the app-wide file"_q;
 	case SettingsInactiveReason::FollowListMembers: return u"This account follows global list members"_q;
 	}
@@ -136,6 +138,7 @@ std::optional<int> Duration(const SettingDescriptor &descriptor, const QString &
 QString DefaultText(const Row &row) {
 	const auto fallback = QString::fromLatin1(row.descriptor->fallback);
 	if (fallback == u"@required"_q) return u"Required"_q;
+	if (fallback == u"@inherit"_q) return u"Inherit"_q;
 	if (fallback.startsWith(u'@')) return u"Context dependent"_q;
 	if (row.descriptor->codec == SettingCodec::Boolean) return fallback == u"true"_q ? u"On"_q : u"Off"_q;
 	if (IsSecondsInteger(row.descriptor->id)) return DurationText(fallback.toLongLong());
@@ -209,7 +212,8 @@ QString ValueText(const Row &row) {
 	return row.effective.toString();
 }
 
-std::vector<Row> Build(const LayerSettingsResult &layers, const std::vector<Source> &sources) {
+std::vector<Row> Build(const LayerSettingsResult &layers, const std::vector<Source> &sources,
+		const std::function<ArchiveV2::ChatClass(const QString &)> &archiveChatClass) {
 	if (sources.empty()) return {};
 	const auto &global = sources.front();
 	const auto &own = sources.back();
@@ -246,9 +250,9 @@ std::vector<Row> Build(const LayerSettingsResult &layers, const std::vector<Sour
 		const auto map = MapSettingsSource(source.bytes);
 		for (const auto &node : map.nodes) {
 			auto &row = ensure(node.address);
-			const auto inactive = (!sameFile && source.path == own.path)
+			const auto inactive = !sameFile
 				? std::find_if(layers.inactive.begin(), layers.inactive.end(), [&](const auto &key) {
-					return LayerMatches(key.source, node.address);
+					return key.source.path == source.path && LayerMatches(key.source, node.address);
 				}) : layers.inactive.end();
 			const auto isInactive = inactive != layers.inactive.end();
 			const auto raw = node.token
@@ -335,6 +339,23 @@ std::vector<Row> Build(const LayerSettingsResult &layers, const std::vector<Sour
 				|| WarnsAbout(parsed, row, active->line);
 		} else {
 			row.source = builtIn.startsWith(u'@') ? u"Local fallback"_q : u"Built-in"_q;
+		}
+		const auto &policy = layers.effective.settings.archive;
+		if (row.descriptor->id == SettingId::ArchiveTimedDownload && row.address.size() == 4) {
+			const auto &chat = std::get<QString>(row.address[2]);
+			const auto value = policy.timedFor(
+				archiveChatClass ? archiveChatClass(chat) : ArchiveV2::ChatClass::Unknown, chat);
+			row.effective = ArchiveV2::TimedName(value.download);
+			row.resetLabel = u"Inherit timed download"_q;
+			if (!explicitSource) {
+				using Origin = ArchiveV2::PolicySource;
+				row.source = value.source == Origin::Class ? u"Inherited · Chat class"_q
+					: value.source == Origin::Global ? u"Inherited · App-wide"_q : u"Built-in"_q;
+			}
+		} else if (!row.address.empty() && row.address.front() == SettingAddressPart(u"archive"_q)
+			&& row.address.size() == 3 && row.descriptor->fallback == "@inherit") {
+			row.resetLabel = u"Inherit from Archive v2"_q;
+			if (!explicitSource) row.source = u"Inherited · App-wide"_q;
 		}
 	}
 	for (const auto *report : { &layers.global, &layers.account }) {

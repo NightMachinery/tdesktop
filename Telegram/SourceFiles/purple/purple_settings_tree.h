@@ -3,6 +3,7 @@
 #include "purple/purple_settings_edit.h"
 
 #include <QtCore/QSet>
+#include <functional>
 
 namespace Purple::SettingsTree {
 
@@ -54,7 +55,8 @@ struct VisibleRows {
 [[nodiscard]] QString ScopeText(SettingScope scope);
 [[nodiscard]] std::vector<Row> Build(
 	const LayerSettingsResult &layers,
-	const std::vector<Source> &sources);
+	const std::vector<Source> &sources,
+	const std::function<ArchiveV2::ChatClass(const QString &)> &archiveChatClass = {});
 [[nodiscard]] VisibleRows View(
 	const std::vector<Row> &rows,
 	const QSet<QString> &expanded,

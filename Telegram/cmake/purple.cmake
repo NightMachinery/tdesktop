@@ -59,6 +59,8 @@ PRIVATE
     purple/purple_archive_attention.h
     purple/purple_archive_sqlite.cpp
     purple/purple_archive_sqlite.h
+    purple/purple_archive_v2_schema.cpp
+    purple/purple_archive_v2_schema.h
     purple/purple_archive_deleted_box.cpp
     purple/purple_archive_deleted_box.h
     purple/purple_archive_menu.cpp

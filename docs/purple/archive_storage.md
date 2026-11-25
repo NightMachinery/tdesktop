@@ -1,5 +1,27 @@
 # Local message archive
 
+## Archive v2 policy preview
+
+The next archive has a distinct empty store and an account-scoped policy.
+The current archive remains the writer during this preview. Parsing these
+settings does not open a v2 database, change capture or remove legacy data.
+
+Set `days`, `total_mib`, `timed_media_mib` and `ordinary_file_mib` under
+`[archive]`. Their defaults are 90 days and 512, 256 and 16 MiB respectively.
+Timed media uses its own allowance. The ordinary file limit must fit inside
+the ordinary allowance. Zero timed MiB disables timed file storage.
+`[archive.days_by_class]` accepts optional `direct`, `bot`, `group` and
+`channel` overrides.
+
+Timed media defaults to `on_open`. Set `timed_download` to `off` or
+`on_open` under `[archive]` or a typed chat table such as
+`[archive.chats."user:17"]`. The optional `[archive.timed_download_by_class]`
+table uses the same four chat classes. A chat value wins over its class, then
+the app-wide value. Clear an override to inherit. Customize reports the
+effective value and where it comes from. The parser warns and uses `on_open`
+for `on_arrival` until the two-account receipt check is qualified.
+Only a chat's own account file may opt it in with `ordinary_on_arrival = true`.
+
 ## Stream retirement wakeups
 
 Retirement sets the cleanup predicate and notifies under the worker wait mutex.
