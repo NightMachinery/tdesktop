@@ -237,7 +237,9 @@ program no driver compiles yet is recorded under `undriven` with the reason. The
 runner refuses to start while any driver or program is missing from the list,
 while a listed file does not exist, or while a configuration of a driver with
 several lists fixtures other than the ones its arguments select (a file name in
-its arguments, or a flag mapped under `variants`). `--list` prints the list and
+its arguments, or a flag mapped under `variants`). A variant may name multiple
+fixtures when the driver compiles them together. Use `{qt}` for the Qt prefix
+when a driver takes it as an argument. `--list` prints the list and
 runs only that check.
 
 `purple/test_cases.py --case <name>` builds and runs one program under

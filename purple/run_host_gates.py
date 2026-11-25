@@ -494,6 +494,10 @@ def dependencies(gate):
     return re.findall(r'\{out:([^}]+)\}', json.dumps([gate.get('args', []), gate.get('runs', [])]))
 
 
+def variant_fixtures(value):
+    return [value] if isinstance(value, str) else value
+
+
 def self_check(tree, listing, own):
     problems = []
     gates = listing['gates']
@@ -508,7 +512,9 @@ def self_check(tree, listing, own):
         relative = 'purple/' + path.name
         if relative not in drivers:
             problems.append(relative + ' is a driver with no configuration in host_gates.json')
-        for name in sorted(set(re.findall(r'test_\w+\.cpp', path.read_text()))):
+        references = re.findall(r'(?:[\w.-]+/)*test_\w+\.cpp', path.read_text())
+        for name in sorted({Path(ref).name for ref in references
+                            if Path(ref).parent.name in ('', 'purple')}):
             if 'purple/' + name not in covered:
                 problems.append(relative + ' names purple/' + name + ', which no configuration lists')
     programs = sorted(purple.glob('test_*.cpp')) + sorted(p for p in (tree / 'Telegram/SourceFiles/purple/tests').glob('*') if p.suffix in ('.cpp', '.mm'))
@@ -540,9 +546,10 @@ def self_check(tree, listing, own):
             choices = variants.get(gate['driver'], {})
             arguments = gate.get('args', [])
             selected = {'purple/' + value for value in arguments if re.fullmatch(r'test_\w+\.cpp', value)}
-            selected |= {choices[value] for value in arguments if value in choices}
+            selected |= {fixture for value in arguments
+                         for fixture in variant_fixtures(choices.get(value, []))}
             if not selected and '' in choices:
-                selected = {choices['']}
+                selected = set(variant_fixtures(choices['']))
             if selected != set(gate.get('fixtures', [])):
                 problems.append(gate['name'] + ' lists ' + str(sorted(gate.get('fixtures', []))) + ', but its arguments select ' + str(sorted(selected)))
         for dependency in dependencies(gate):
@@ -550,9 +557,10 @@ def self_check(tree, listing, own):
                 problems.append(gate['name'] + ' reuses ' + dependency + ', which is not listed before it')
         seen.add(gate['name'])
     for driver, choices in sorted(variants.items()):
-        for flag, fixture in sorted(choices.items()):
-            if own and not (tree / fixture).exists():
-                problems.append('the ' + (flag or 'default') + ' variant of ' + driver + ' names ' + fixture + ', which does not exist')
+        for flag, value in sorted(choices.items()):
+            for fixture in variant_fixtures(value):
+                if own and not (tree / fixture).exists():
+                    problems.append('the ' + (flag or 'default') + ' variant of ' + driver + ' names ' + fixture + ', which does not exist')
     return problems
 
 
@@ -658,7 +666,8 @@ def main():
     if any(gate.get('compiles') for gate in chosen) and not any((tree / 'Telegram/ThirdParty/purple_core/purple').glob('*.cpp')):
         parser.error('the tree has no Telegram/ThirdParty/purple_core sources; populate that submodule first')
     qt = args.qt_prefix or (Path(os.environ['QtPrefix']) if os.environ.get('QtPrefix') else Path(qt_dir).parents[2] if qt_dir else None)
-    if any(gate['driver'].endswith('.sh') for gate in chosen) and (qt is None or not (qt / 'frameworks/QtCore.framework').exists()):
+    requires_qt = any(gate['driver'].endswith('.sh') or '{qt}' in gate.get('args', []) for gate in chosen)
+    if requires_qt and (qt is None or not (qt / 'frameworks/QtCore.framework').exists()):
         parser.error('no Qt prefix with frameworks/QtCore.framework; pass --qt-prefix')
     wrapper = shlex.split(args.compile_wrapper)
 
@@ -736,6 +745,7 @@ def main():
 
     def substitute(value, gate):
         value = value.replace('{build}', str(build)).replace('{out}', str(out / 'gates' / gate['name']))
+        value = value.replace('{qt}', str(qt))
         return re.sub(r'\{out:([^}]+)\}', lambda m: str(out / 'gates' / m.group(1)), value)
 
     def run(gate):
