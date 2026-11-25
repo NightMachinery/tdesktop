@@ -466,6 +466,7 @@ void ScopeAndFreshCapture() {
 	oldDelete.observation.context.insert(
 		u"desktopDeleteGenerations"_q, QJsonObject());
 	CHECK(journal.Append(oldDelete) && journal.Drain(store));
+	CHECK(store.TakeCaptureLosses().empty());
 	const auto stillLive = store.ReadSlice(aliasFresh);
 	CHECK(stillLive && FindArchiveMessage(stillLive->state, aliasFresh)
 		  && !FindArchiveMessage(stillLive->state, aliasFresh)->deleted);
@@ -827,7 +828,7 @@ void LeaseAndGarbage() {
 }
 
 void ExpectedMediaRetirement() {
-	Section = "production media releases before/after Finish are expected; genuine IO remains a gap";
+	Section = "production media releases before/after Finish are expected; lease IO failure remains a hold";
 	using namespace Purple::MediaRetirementProbe;
 	for (const auto mode : {u"before"_q, u"after"_q, u"io-failure"_q}) {
 		auto temporary = QTemporaryDir();
@@ -856,7 +857,8 @@ void ExpectedMediaRetirement() {
 			store.database().FailForTest(u"commit"_q, 1);
 			access->close(); Flush();
 			const auto gaps = store.database().Read(ArchiveSqlReadCaptureGaps(16));
-			CHECK(gaps.ok && !gaps.rows.empty());
+			CHECK(gaps.ok && gaps.rows.empty());
+			CHECK(store.TakeCaptureLosses().empty());
 			CHECK(store.failure() == u"media-reader-release-held"_q);
 		} else {
 			const auto preview = store.PreparePurge(ArchivePurgeKind::Trashbin, Scope());

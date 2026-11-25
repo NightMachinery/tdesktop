@@ -703,6 +703,8 @@ class DesktopArchiveStore::Impl {
 	ArchiveStoreEpoch epoch;
 	DesktopArchiveStatus status = DesktopArchiveStatus::Disabled;
 	QString failure;
+	bool hasCaptureGap = false;
+	DesktopArchiveCaptureLosses captureLosses;
 	QByteArray native;
 	QByteArray profileNative;
 	QByteArray databaseNative;
@@ -918,6 +920,8 @@ DesktopArchiveStatus DesktopArchiveStore::Open(DesktopArchiveOptions options) {
 	}
 	self.markdownPublication = std::make_shared<DesktopMarkdownPublication>();
 	self.failure.clear();
+	self.hasCaptureGap = false;
+	self.captureLosses.clear();
 	self.admissionFailure.clear();
 	self.journalRenewal.reset();
 	self.mediaObservations.clear();
@@ -1311,9 +1315,7 @@ DesktopArchiveStatus DesktopArchiveStore::Open(DesktopArchiveOptions options) {
 		self.Fail(DesktopArchiveStatus::Unreadable, u"gap-index"_q);
 		return self.status;
 	}
-	if (!gaps.rows.empty()) {
-		self.failure = u"capture-gap"_q;
-	}
+	self.hasCaptureGap = self.hasCaptureGap || !gaps.rows.empty();
 	return self.status;
 }
 
@@ -1427,14 +1429,47 @@ bool DesktopArchiveStore::Execute(const ArchiveSqlProgram &program, bool mainten
 
 bool DesktopArchiveStore::Gap(
 	const QString &id, const QString &reason, int64 observedAt) {
-	_impl->failure = reason;
+	auto &self = *_impl;
 	if (!Current()) {
-		return _impl->Authorized() && _impl->maintenancePending
-			&& WriteDesktopArchiveAttention(directory(), epoch(), security(), reason, observedAt);
+		return self.Authorized() && self.maintenancePending
+			&& WriteDesktopArchiveAttention(directory(), epoch(), security(), reason, observedAt,
+				QString::fromLatin1(QCryptographicHash::hash(id.toUtf8(), QCryptographicHash::Sha256).toHex()));
 	}
-	return Execute(PlanArchiveCaptureGap(
-		{_impl->options.account, _impl->layout.store, id, observedAt, reason, {}},
-		_impl->security));
+	const auto token = ArchiveSqlToken(self.options.account, ArchiveIndexKind::Maintenance,
+		(u"gap/"_q + id).toUtf8(), self.security);
+	if (token.isEmpty()) {
+		return false;
+	}
+	const auto existing = self.database.Read({u"SELECT envelope FROM capture_gaps WHERE gap_id=?"_q,
+		{token}, ArchiveSqlExpectation::Rows});
+	if (!existing.ok) {
+		return false;
+	}
+	if (!existing.rows.empty()) {
+		const auto envelope = Value<QByteArray>(existing.rows.front(), 0);
+		const auto opened = envelope ? OpenArchiveEnvelope({self.options.account, self.layout.store,
+			ArchiveRecordKind::CaptureGap, token.toUtf8()}, self.security.keyId, *envelope,
+			self.security.crypto) : ArchiveEnvelopeResult();
+		return opened && QJsonDocument::fromJson(opened.bytes).object().value(u"id"_q) == QJsonValue(id);
+	}
+	if (!Execute(PlanArchiveCaptureGap(
+			{self.options.account, self.layout.store, id, observedAt, reason, {}}, self.security))) {
+		return false;
+	}
+	NoteCaptureLoss(reason);
+	return true;
+}
+
+void DesktopArchiveStore::NoteCaptureLoss(const QString &reason) {
+	_impl->hasCaptureGap = true;
+	++_impl->captureLosses[reason];
+}
+
+DesktopArchiveCaptureLosses DesktopArchiveStore::TakeCaptureLosses() {
+	if (Current()) {
+		static_cast<void>(RecoverCaptureAttention());
+	}
+	return std::exchange(_impl->captureLosses, {});
 }
 
 bool DesktopArchiveStore::Remove(int maximumActions) {
@@ -2040,15 +2075,16 @@ std::optional<ArchiveVersionSnapshot> DesktopArchiveStore::ReadObservationInTran
 	return RestoreArchiveSqlUnorderedObservation(key, id, *order, *bytes, *header, chunks, self.security);
 }
 
-DesktopArchiveCaptureResult DesktopArchiveStore::Capture(ArchiveEvent event) {
+DesktopArchiveCaptureResult DesktopArchiveStore::Capture(ArchiveEvent event, bool journaled) {
 	auto result = DesktopArchiveCaptureResult();
 	const auto slice = ReadSlice(event.key, event.id, event.targetVersion);
 	if (!slice) {
 		result.status
 			= Current() ? DesktopArchiveStatus::Invalid : DesktopArchiveStatus::Stale;
 		result.reason = u"capture-slice"_q;
-		_impl->failure = result.reason;
-		static_cast<void>(Gap(event.id, result.reason, event.observation.observedAt));
+		if (!journaled && !Gap(event.id, result.reason, event.observation.observedAt)) {
+			NoteCaptureLoss(result.reason);
+		}
 		return result;
 	}
 	const auto plan
@@ -2121,10 +2157,14 @@ DesktopArchiveCaptureResult DesktopArchiveStore::Capture(ArchiveEvent event) {
 		}
 		return result;
 	}
-	_impl->failure = result.reason;
-	const auto id = QString::fromLatin1(
-		QCryptographicHash::hash(event.id.toUtf8(), QCryptographicHash::Sha256).toHex());
-	static_cast<void>(Gap(id, result.reason, event.observation.observedAt));
+	if (!journaled && result.model != ArchivePlanStatus::Purged
+		&& result.model != ArchivePlanStatus::Stale && result.model != ArchivePlanStatus::NotFound) {
+		const auto id = QString::fromLatin1(
+			QCryptographicHash::hash(event.id.toUtf8(), QCryptographicHash::Sha256).toHex());
+		if (!Gap(id, result.reason, event.observation.observedAt)) {
+			NoteCaptureLoss(result.reason);
+		}
+	}
 	return result;
 }
 
@@ -2138,7 +2178,7 @@ DesktopArchiveHistoryPage DesktopArchiveStore::ReadHistoryPage(const ArchiveMess
 	auto result = DesktopArchiveHistoryPage();
 	auto &self = *_impl;
 	result.epoch = self.epoch;
-	result.hasGap = !self.failure.isEmpty();
+	result.hasGap = self.hasCaptureGap || !self.failure.isEmpty();
 	if (!Current() || key.account != self.options.account || limit < 1
 		|| limit > kArchiveSqlPageLimit || !self.database.BeginRead()) {
 		return result;
@@ -2361,24 +2401,32 @@ std::optional<QString> DesktopArchiveStore::ObservedMediaVersion(
 			   : std::nullopt;
 }
 
-bool DesktopArchiveStore::CaptureLifecycle(const ArchiveEvent &preimage, const ArchiveStoreEpoch &captured) {
+DesktopArchiveLifecycleResult DesktopArchiveStore::CaptureLifecycle(
+		const ArchiveEvent &preimage, const ArchiveStoreEpoch &captured) {
+	using Result = DesktopArchiveLifecycleResult;
 	const auto context = preimage.observation.context;
 	const auto transition = context.value(u"desktopLifecycle"_q).toInt(-1);
-	if (!preimage.content || transition < 0 || transition > int(ArchiveMediaTransition::CacheEviction)
-		|| !CanRunArchiveWork(captured, epoch())) {
-		return false;
+	if (!preimage.content || transition < 0 || transition > int(ArchiveMediaTransition::CacheEviction)) {
+		return Result::Lost;
+	}
+	if (!CanRunArchiveWork(captured, epoch())) {
+		return Result::Held;
 	}
 	auto slice = ReadSlice(preimage.key);
-	const auto message = slice ? FindArchiveMessage(slice->state, preimage.key) : nullptr;
+	if (!slice) {
+		return Result::Held;
+	}
+	const auto message = FindArchiveMessage(slice->state, preimage.key);
 	if (!message || message->versions.empty()) {
-		return false;
+		return Result::Lost;
 	}
 	if (std::any_of(message->receipts.begin(), message->receipts.end(),
 		[&](const auto &receipt) { return receipt.id == preimage.id + u":lifecycle"_q; })) {
 		const auto missing = std::any_of(message->versions.back().media.begin(), message->versions.back().media.end(),
 			[](const auto &ref) { return ref.state != ArchiveMediaState::Complete; });
-		return !missing || Gap(preimage.id + u":media-unavailable"_q,
-			u"lifecycle-media-not-owned"_q, preimage.observation.observedAt);
+		return (!missing || Gap(preimage.id + u":media-unavailable"_q,
+			u"lifecycle-media-not-owned"_q, preimage.observation.observedAt))
+			? Result::Retained : Result::Held;
 	}
 	const auto &head = message->versions.back();
 	const auto original = context.value(u"desktopLifecycleObservation"_q).toString();
@@ -2387,7 +2435,7 @@ bool DesktopArchiveStore::CaptureLifecycle(const ArchiveEvent &preimage, const A
 		|| (!hash.isEmpty() && ArchiveContentHash(head.content) != hash)
 		|| (!context.value(u"desktopLifecycleFallback"_q).toBool() && original.isEmpty() && (head.content.text != preimage.content->text
 			|| head.content.media.size() != preimage.content->media.size()))) {
-		return false;
+		return Result::Lost;
 	}
 	auto event = ArchiveEvent();
 	auto mediaUnavailable = false;
@@ -2404,11 +2452,11 @@ bool DesktopArchiveStore::CaptureLifecycle(const ArchiveEvent &preimage, const A
 		event.observation = preimage.observation;
 		if (!context.value(u"desktopWholeMessageTtl"_q).toBool()
 			|| preimage.generation != ArchiveGenerationFor(slice->state, preimage.key.chat)) {
-			return false;
+			return Result::Lost;
 		}
 	} else {
 		if (fallback && head.media.empty()) {
-			return false;
+			return Result::Lost;
 		}
 		const auto identity = fallback ? head.media.front().identity : preimage.content->media.front().identity;
 		const auto plan = PlanArchiveMediaLifecycle(slice->state, epoch(), {
@@ -2418,18 +2466,21 @@ bool DesktopArchiveStore::CaptureLifecycle(const ArchiveEvent &preimage, const A
 			ArchiveMediaTransition(transition), ArchiveAvailableBytes::Unavailable, true,
 			preimage.id + u":lifecycle"_q, preimage.order + 1, preimage.observation.observedAt});
 		if (plan.transaction.status == ArchivePlanStatus::NoChange) {
-			return true;
+			return Result::Retained;
 		}
 		if (!plan.event) {
-			return false;
+			return Result::Lost;
 		}
 		mediaUnavailable = plan.retention != ArchiveMediaRetention::Owned;
 		event = *plan.event;
 	}
-	const auto result = Capture(std::move(event));
-	return (result.retained || result.model == ArchivePlanStatus::NoChange)
-		&& (!mediaUnavailable || Gap(preimage.id + u":media-unavailable"_q,
-			u"lifecycle-media-not-owned"_q, preimage.observation.observedAt));
+	const auto result = Capture(std::move(event), true);
+	if (!result.retained && result.model != ArchivePlanStatus::NoChange) {
+		return result.status == DesktopArchiveStatus::RetentionGap ? Result::Lost : Result::Held;
+	}
+	return (!mediaUnavailable || Gap(preimage.id + u":media-unavailable"_q,
+		u"lifecycle-media-not-owned"_q, preimage.observation.observedAt))
+		? Result::Retained : Result::Held;
 }
 
 std::optional<ArchiveStagingBinding> DesktopArchiveStore::StageStream(const ArchiveMessageKey &key,
@@ -2503,9 +2554,8 @@ bool DesktopArchiveStore::ResumeStreams(QString &cursor, bool &more) {
 		}
 		auto stream = DesktopArchiveStream(*this, binding);
 		if (!stream.Open() || (stream.header().coveredBytes == binding.totalBytes && !stream.Complete())) {
-			if (!Gap(job.id + u":resume"_q, u"stream-recovery-held"_q, QDateTime::currentSecsSinceEpoch())) {
-				return false;
-			}
+			_impl->failure = u"stream-recovery-held"_q;
+			return false;
 		}
 	}
 	more = page.rows.size() == 16;
@@ -3188,7 +3238,7 @@ ArchiveDeletedPage DesktopArchiveStore::ReadDeletedView(const QString &id,
 	}
 	if (i->second->Current(self.database)) {
 		result = i->second->Read(limit);
-		result.hasGap = !self.failure.isEmpty();
+		result.hasGap = self.hasCaptureGap || !self.failure.isEmpty();
 		if (result.status == ArchiveQueryStatus::Ready && (!Current() || !i->second->Current(self.database))) {
 			result.entries.clear();
 			result.status = ArchiveQueryStatus::Stale;
@@ -3418,9 +3468,34 @@ bool DesktopArchiveStore::RecoverCaptureAttention() {
 		return false;
 	}
 	if (attention.present) {
-		if (Gap(attention.gap.id, attention.gap.reason, attention.gap.observedAt)) {
-			static_cast<void>(
-				DesktopArchiveRemoveFile(self.layout.root + u"/retention-gap"_q));
+		const auto &gap = attention.gap;
+		auto alreadyRecorded = false;
+		if (attention.legacy) {
+			// Older versions wrote this marker for a failed journal open or replay,
+			// even when everything was still on disk and could be retried.
+			const auto recoveryHold = gap.reason == u"capture-gap"_q
+				|| gap.reason == u"capture-recovery-held"_q
+				|| gap.reason == u"capture-commit"_q
+				|| gap.reason == u"capture-slice"_q
+				|| gap.reason == u"outbox-replay-held"_q
+				|| gap.reason == u"outbox-stale"_q
+				|| gap.reason == u"outbox-sequence"_q
+				|| gap.reason == u"outbox-sequence-missing"_q
+				|| gap.reason == u"outbox-sequence-create"_q
+				|| gap.reason == u"outbox-order-regression"_q
+				|| gap.reason == u"outbox-entry"_q
+				|| gap.reason == u"outbox-evidence"_q
+				|| gap.reason == u"outbox-confirmation"_q;
+			const auto known = self.database.Read({u"SELECT 1 FROM capture_gaps "
+				"WHERE observed_at=? AND reason=? LIMIT 1"_q,
+				{gap.observedAt, gap.reason}, ArchiveSqlExpectation::Rows});
+			if (!known.ok) {
+				return false;
+			}
+			alreadyRecorded = recoveryHold || !known.rows.empty();
+		}
+		if (alreadyRecorded || Gap(gap.id, gap.reason, gap.observedAt)) {
+			static_cast<void>(DesktopArchiveRemoveFile(self.layout.root + u"/retention-gap"_q));
 		}
 	}
 	return true;

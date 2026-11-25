@@ -449,7 +449,10 @@ void Lifecycle() {
 			fact.order = 2;
 			fact.observation.context.insert(u"desktopWholeMessageTtl"_q, true);
 			fact.observation.context.insert(u"desktopLifecycle"_q, int(ArchiveMediaTransition::Expiry));
-			CHECK(store.CaptureLifecycle(fact, store.epoch()));
+			store.database().FailForTest(u"commit"_q);
+			CHECK(store.CaptureLifecycle(fact, store.epoch()) == DesktopArchiveLifecycleResult::Held);
+			CHECK(store.TakeCaptureLosses().empty());
+			CHECK(store.CaptureLifecycle(fact, store.epoch()) == DesktopArchiveLifecycleResult::Retained);
 			const auto after = store.ReadSlice(Key());
 			CHECK(after && FindArchiveMessage(after->state, Key())->deleted);
 		}

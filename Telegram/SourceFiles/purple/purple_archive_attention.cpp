@@ -11,6 +11,11 @@ QString Row(const ArchiveStoreEpoch &epoch, const ArchiveSqlSecurity &security) 
 	return ArchiveSqlToken(
 		epoch.account, ArchiveIndexKind::Maintenance, "desktop-attention", security);
 }
+
+QString LegacyId(const QString &reason, int64 time) {
+	return QString::fromLatin1(QCryptographicHash::hash(
+		reason.toUtf8() + '/' + QByteArray::number(time), QCryptographicHash::Sha256).toHex());
+}
 }
 
 DesktopArchiveAttention ReadDesktopArchiveAttention(const QString &root,
@@ -54,27 +59,29 @@ DesktopArchiveAttention ReadDesktopArchiveAttention(const QString &root,
 	}
 	result.gap = {epoch.account, epoch.storeId, object.value(u"id"_q).toString(), time,
 		object.value(u"reason"_q).toString(), {}};
+	result.legacy = result.gap.id == LegacyId(result.gap.reason, result.gap.observedAt);
 	result.valid = true;
 	return result;
 }
 
 bool WriteDesktopArchiveAttention(const QString &root, const ArchiveStoreEpoch &epoch,
-	const ArchiveSqlSecurity &security, const QString &reason, int64 time) {
+	const ArchiveSqlSecurity &security, const QString &reason, int64 time, const QString &lossId) {
 	if (!IsArchiveToken(reason) || time < 0 || epoch.storeId != security.storeId
 		|| epoch.removalPending) {
 		return false;
 	}
+	const auto id = lossId.isEmpty() ? LegacyId(reason, time) : lossId;
+	if (!IsArchiveHash(id)) {
+		return false;
+	}
 	const auto old = ReadDesktopArchiveAttention(root, epoch, security);
 	if (old.present || !old.valid) {
-		return old.valid;
+		return old.valid && old.gap.id == id;
 	}
 	const auto row = Row(epoch, security);
 	if (row.isEmpty()) {
 		return false;
 	}
-	const auto id = QString::fromLatin1(QCryptographicHash::hash(
-		reason.toUtf8() + '/' + QByteArray::number(time), QCryptographicHash::Sha256)
-			.toHex());
 	const auto bytes = CanonicalizeSyncJson(
 		QJsonDocument(QJsonObject{{u"format"_q, u"desktop-archive-attention"_q},
 						  {u"version"_q, 1}, {u"id"_q, id}, {u"reason"_q, reason},

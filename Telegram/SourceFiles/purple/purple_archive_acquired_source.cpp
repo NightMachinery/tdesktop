@@ -57,12 +57,13 @@ void Available(not_null<Main::Session*> session, const DesktopArchiveObservation
 		}
 		const auto bytes = media ? media->bytes() : QByteArray();
 		const auto path = document->filepath(false);
-		if ((media && media->loaded() && uint64_t(bytes.size()) == uint64_t(document->size))
-			|| !path.isEmpty()) {
-			const auto proof = !path.isEmpty() && document->location(false).check()
-				? DesktopArchiveInspectSource(path, uint64_t(document->size)) : std::nullopt;
+		const auto size = uint64_t(document->size);
+		const auto loaded = media && media->loaded() && uint64_t(bytes.size()) == size;
+		const auto proof = !loaded && !path.isEmpty() && document->location(false).check()
+			? DesktopArchiveInspectSource(path, size) : std::nullopt;
+		if (loaded || proof) {
 			QueueArchiveAvailableMedia(session, entry.key, entry.observation, entry.contentHash,
-				entry.identity, bytes, path, uint64_t(document->size), proof);
+				entry.identity, loaded ? bytes : QByteArray(), proof ? path : QString(), size, proof);
 		}
 	} else if (entry.kind == u"photo"_q) {
 		const auto media = session->data().photo(id)->activeMediaView();
@@ -110,7 +111,6 @@ void Stream(not_null<Main::Session*> session, const QString &identity,
 	const auto key = ArchiveMessageKey{SessionAccountKey(session), DesktopArchiveChat(message->peer), message->msg.bare};
 	const auto observation = ArchiveAcquisitionObservation(session, key, identity);
 	if (!observation) {
-		QueueArchiveRetentionGap(session, u"stream-unbound"_q);
 		return;
 	}
 	auto &streams = For(session).streams;
@@ -147,11 +147,9 @@ void Stream(not_null<Main::Session*> session, const QString &identity,
 		if (!weak || !sessionWeak) {
 			return;
 		}
-		*seen = true;
 		if (part.offset >= 0 && !part.bytes.isEmpty()) {
+			*seen = true;
 			submit(uint64_t(part.offset), part.bytes);
-		} else if (part.offset == Media::Streaming::LoadedPart::kFailedOffset) {
-			QueueArchiveRetentionGap(sessionWeak.get(), u"stream-input-failed"_q);
 		}
 	}, session->lifetime());
 }
@@ -214,7 +212,6 @@ void BindArchiveStreamDocument(not_null<Main::Session*> session,
 	auto &documents = For(session).documents;
 	std::erase_if(documents, [](const auto &entry) { return entry.second.document.expired() || !entry.second.reader; });
 	if (documents.size() >= 64 && !documents.contains(document.get())) {
-		QueueArchiveRetentionGap(session, u"stream-document-binding-full"_q);
 		return;
 	}
 	documents[document.get()] = {document, base::make_weak(reader.get())};
@@ -227,7 +224,6 @@ void ReusedDocument(not_null<Main::Session*> session, const QString &identity,
 	auto &documents = For(session).documents;
 	const auto i = documents.find(document.get());
 	if (i == documents.end() || i->second.document.expired() || !i->second.reader) {
-		QueueArchiveRetentionGap(session, u"stream-document-unbound"_q);
 		return;
 	}
 	Stream(session, identity, origin, i->second.reader.get());

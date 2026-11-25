@@ -106,7 +106,7 @@ if args.purge:
 if args.handoff:
     (work / 'archive-failure-toast.inc').write_text(extract(service, 'bool ArchiveFailureNeedsToast('))
     bodies = ''.join(extract(service, sign) for sign in ('void QueueArchiveRetentionGap(', 'void QueueArchiveJournalWrite(', 'void QueueArchiveLifecycleFact(', 'void QueueArchiveObservation('))
-    (work / 'archive-capture-queue.inc').write_text(bodies.replace('Main::Session', 'ProbeSession'))
+    (work / 'archive-capture-queue.inc').write_text(bodies.replace('Main::Session', 'ProbeSession').replace('crl::on_main', 'CaptureOnMain'))
     post = extract(service, 'bool Post(Task task, bool cleanup = false)')
     (work / 'archive-worker-post.inc').write_text(post.replace('bool Post(', 'bool ProbeWorker::Post(', 1).replace(' = false', ''))
     startup = extract(service, 'bool PostStartupCapture(ArchiveEvent event, int byteLimit)')
@@ -114,7 +114,7 @@ if args.handoff:
     execute = extract(service, 'void ExecuteArchivePurge(').replace('ExecuteArchivePurge(', 'NativeExecuteArchivePurge(', 1).replace('Main::Session', 'ProbeSession').replace('For(session)', 'NativeFor(session)').replace('crl::on_main', 'StartupOnMain')
     (work / 'archive-startup-purge.inc').write_text(execute)
     (work / 'archive-native-worker.inc').write_text(extract(service, 'class ArchiveWorker final').replace('ArchiveWorker', 'NativeStartupWorker') + ';\n')
-    (work / 'archive-native-capture-queue.inc').write_text(bodies.replace('Main::Session', 'ProbeSession').replace('QueueArchive', 'NativeQueueArchive').replace('For(session)', 'NativeFor(session)'))
+    (work / 'archive-native-capture-queue.inc').write_text(bodies.replace('Main::Session', 'ProbeSession').replace('crl::on_main', 'CaptureOnMain').replace('QueueArchive', 'NativeQueueArchive').replace('For(session)', 'NativeFor(session)'))
 if args.passive:
     acquired = (repo / 'Telegram/SourceFiles/purple/purple_archive_acquired_source.cpp').read_text()
     def adapt(text):

@@ -4,7 +4,6 @@
 #include "purple/purple_archive_files.h"
 #include "purple/purple_sync_json.h"
 #include <QtCore/QCryptographicHash>
-#include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFileInfo>
@@ -314,18 +313,10 @@ bool DesktopArchiveJournal::Drain(DesktopArchiveStore &store, int limit) {
 	if (DrainPending(store, limit)) {
 		return true;
 	}
-	auto reason = QString();
-	const auto storageFailure = store.failure();
-	{
-		const auto lock = std::lock_guard(_mutex);
-		if (_failure.isEmpty()) {
-			_failure = storageFailure.isEmpty() ? u"outbox-replay-held"_q : storageFailure;
-		}
-		reason = _failure;
+	const auto lock = std::lock_guard(_mutex);
+	if (_failure.isEmpty()) {
+		_failure = u"outbox-replay-held"_q;
 	}
-	const auto observedAt = int64(QDateTime::currentSecsSinceEpoch());
-	static_cast<void>(Attention(reason, observedAt));
-	static_cast<void>(store.Gap(u"capture-replay-held"_q, reason, observedAt));
 	return false;
 }
 
@@ -427,40 +418,49 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 			= message && !message->versions.empty()
 			  && event.origin == ArchiveOrigin::Baseline
 			  && event.observation.context.value(u"desktopLivePreimage"_q).toBool();
-		const auto committed
-			= (event.observation.context.value(u"desktopLifecycleFallback"_q).toBool() && !message)
-			  || preimageRetained
+		const auto fallbackWithoutTarget
+			= event.observation.context.value(u"desktopLifecycleFallback"_q).toBool() && !message;
+		auto purged = event.generation != ArchiveGenerationFor(slice->state, event.key.chat);
+		auto retained = fallbackWithoutTarget || purged || preimageRetained
 			  || (message
 				  && std::any_of(message->receipts.begin(), message->receipts.end(),
 					  [&](const auto &receipt) { return receipt.id == event.id; }));
-		if (!committed) {
-			auto captured = store.Capture(event);
+		if (!retained) {
+			auto captured = store.Capture(event, true);
 			if (captured.retryableObservationCommit) {
-				captured = store.Capture(event);
+				captured = store.Capture(event, true);
 			}
-			if (!captured.retained && captured.model != ArchivePlanStatus::Stale
-				&& captured.model != ArchivePlanStatus::Purged
-				&& captured.model != ArchivePlanStatus::NotFound) {
-				return false;
-			}
-			if (!captured.retained) {
-				LOG(("Purple Archive: stale capture, origin %1 model %2 lifecycle %3 send %4 preimage %5 message %6.").arg(
-					QString::number(int(event.origin)), QString::number(int(captured.model)),
-					QString::number(event.observation.context.contains(u"desktopLifecycle"_q) ? 1 : 0),
-					QString::number(event.observation.context.value(u"desktopSendMetadata"_q).toBool() ? 1 : 0),
-					QString::number(event.observation.context.value(u"desktopLivePreimage"_q).toBool() ? 1 : 0),
-					QString::number(message ? 1 : 0)));
-			}
-			if (!captured.retained
-				&& !store.Gap(
-					event.id, u"stale-capture"_q, event.observation.observedAt)) {
-				return false;
+			purged = captured.model == ArchivePlanStatus::Purged;
+			retained = captured.retained;
+			if (!captured.retained && !purged) {
+				const auto enrichment = event.origin == ArchiveOrigin::SendMetadata
+					|| event.origin == ArchiveOrigin::Hydration;
+				const auto superseded = enrichment && (captured.model == ArchivePlanStatus::Stale
+					|| captured.model == ArchivePlanStatus::NotFound);
+				if (!superseded) {
+					const auto reason = captured.status == DesktopArchiveStatus::RetentionGap
+						? captured.reason : (captured.model == ArchivePlanStatus::Stale
+							? u"stale-capture"_q : QString());
+					if (reason.isEmpty() || !store.Gap(event.id, reason, event.observation.observedAt)) {
+						return false;
+					}
+				}
 			}
 		}
-		if (event.observation.context.contains(u"desktopLifecycle"_q)
-			&& !store.CaptureLifecycle(event, _access.epoch)
-			&& !store.Gap(event.id + u":lifecycle-gap"_q, u"lifecycle-preimage-stale"_q, event.observation.observedAt)) {
-			return false;
+		if (retained && !purged && !fallbackWithoutTarget) {
+			if (event.observation.context.value(u"desktopSnapshotLimited"_q).toBool()
+				&& !store.Gap(event.id, u"snapshot-limited"_q, event.observation.observedAt)) {
+				return false;
+			}
+			if (event.observation.context.contains(u"desktopLifecycle"_q)) {
+				const auto lifecycle = store.CaptureLifecycle(event, _access.epoch);
+				if (lifecycle == DesktopArchiveLifecycleResult::Held
+					|| (lifecycle == DesktopArchiveLifecycleResult::Lost
+						&& !store.Gap(event.id + u":lifecycle-gap"_q, u"lifecycle-preimage-stale"_q,
+							event.observation.observedAt))) {
+					return false;
+				}
+			}
 		}
 		const auto lock = std::lock_guard(_mutex);
 		if (!_access.current()
@@ -472,13 +472,13 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 	return true;
 }
 
-bool DesktopArchiveJournal::Attention(const QString &reason, int64 observedAt) {
+bool DesktopArchiveJournal::Attention(const QString &reason, int64 observedAt, const QString &id) {
 	if (WriterRetired()) return false;
 	const auto lock = std::lock_guard(_mutex);
 	if (WriterRetired()) return false;
 	return _ready && _access.current && _access.current()
 		   && WriteDesktopArchiveAttention(
-			   _access.root, _access.epoch, _access.security, reason, observedAt)
+			   _access.root, _access.epoch, _access.security, reason, observedAt, id)
 		   && _access.current();
 }
 

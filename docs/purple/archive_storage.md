@@ -208,12 +208,17 @@ and [volume handles](https://learn.microsoft.com/en-us/windows/win32/api/fileapi
 
 Accepted edit/delete dispatch writes an encrypted, bounded outbox before
 upstream mutation. File publication, file sync and parent-directory sync form
-the write-ahead barrier. This is synchronous local IO of a bounded record, so a
-slow disk can delay that barrier. Updates continue after a failed barrier with
-a visible gap; they never wait for a database lock or queue retry. A generic
-encrypted attention marker preserves queue/append failures when its small write
-can succeed. Failure to retain even that marker remains visible for the session.
+the write-ahead barrier. The foreground waits briefly for the append result.
+A failed append records the lost observation when the worker can write, with
+an encrypted attention marker as a fallback. If neither path can write, the
+loss is still reported for the running session.
 
+An archive gap notice counts new losses by reason for the affected account.
+Durable gap IDs deduplicate retries and restarts. Existing gaps stay visible
+in History. A recoverable outbox replay hold, an observation retired by purge,
+or ordinary media playback without an archive binding does not generate a loss
+notice. Journal failures that block recovery remain visible as archive
+availability errors.
 One dedicated writer thread per session drains at most 64 queued observations.
 Its stable sequence is persisted before each entry and is replayed unchanged.
 Accepted pts, message identity and semantic content distinguish edit identities,

@@ -6,6 +6,7 @@
 #include "tests/archive_test_support.h"
 #include <QtCore/QCoreApplication>
 #include <QtCore/QTemporaryDir>
+#include <QtCore/QUuid>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
@@ -100,15 +101,13 @@ ProbeValue Value;
 std::set<ProbeSession*> Retired;
 AccountKey SessionAccountKey(not_null<ProbeSession*> session) { return session->account; }
 ProbeValue &For(not_null<ProbeSession*>) { return Value; }
-struct ChangePort { int count = 0; void fire(std::monostate) { ++count; } } Changes;
-namespace Core {
-struct Active { ProbeSession *maybeSession() { return nullptr; } };
-struct Domain { bool started() { return false; } Active active() { return {}; } };
-struct AppPort { Domain domain() { return {}; } };
-AppPort App() { return {}; }
+std::atomic<int> FallbackLosses = 0;
+void ReportArchiveCaptureLoss(ProbeSession*, const DesktopArchiveCaptureLosses &losses) {
+	for (const auto &[reason, count] : losses) {
+		FallbackLosses += int(count);
+	}
 }
-namespace tr { inline constexpr auto now = 0; QString lng_purple_archive_gap(int) { return {}; } }
-namespace Ui::Toast { void Show(const QString&) {} }
+void CaptureOnMain(Fn<void()> callback) { callback(); }
 #include "archive-failure-toast.inc"
 void QueueArchiveRetentionGap(not_null<ProbeSession*> session, QString reason);
 #include "archive-capture-queue.inc"
@@ -131,10 +130,11 @@ void HistoricalGapNotice() {
 	const auto current = u"outbox-append"_q;
 	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Ready, history, {}));
 	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Ready, {}, history));
-	CHECK(ArchiveFailureNeedsToast(DesktopArchiveStatus::RetentionGap, current, history));
-	CHECK(ArchiveFailureNeedsToast(DesktopArchiveStatus::Ready, current, history));
-	CHECK(ArchiveFailureNeedsToast(DesktopArchiveStatus::Unreadable, {}, history));
-	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::RetentionGap, current, current));
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::RetentionGap, current, history));
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Ready, current, history));
+	CHECK(ArchiveFailureNeedsToast(DesktopArchiveStatus::Unreadable, current, history));
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Unreadable, current, current));
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Maintenance, current, {}));
 }
 
 void Case(bool failed) {
@@ -174,7 +174,6 @@ void Case(bool failed) {
 	QueueArchiveObservation(&session, ordinary);
 	const auto foreground = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
 	CHECK(foreground < 100); CHECK(!GateReleased);
-	CHECK(failed || Value.failure.isEmpty());
 	for (auto i = 0; i != 10; ++i) {
 		auto extra = Event(Empty(), u"queued-"_q + QString::number(i), 0, u"bounded"_q,
 			ArchiveOrigin::Baseline, Key({0,123},45,1000+i));
@@ -182,14 +181,15 @@ void Case(bool failed) {
 		QueueArchiveObservation(&session, std::move(extra));
 		CHECK(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(100));
 	}
-	CHECK(!GateReleased); CHECK(Value.failure == u"capture-write-unavailable"_q);
+	CHECK(!GateReleased);
 
 	{
+		const auto before = FallbackLosses.load();
 		const auto lock = std::lock_guard(Value.worker->_state->mutex);
 		started = std::chrono::steady_clock::now();
 		QueueArchiveRetentionGap(&session, u"explicit-handoff-gap"_q);
 		CHECK(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(50));
-		CHECK(Value.failure == u"explicit-handoff-gap"_q);
+		CHECK(FallbackLosses == before + 1);
 		CHECK(!Value.worker->Post([](auto&) {}));
 	}
 	for (auto i = 0; i != 64; ++i) CHECK(Value.worker->Post([](auto&) {}) || !Value.worker->_state->tasks.empty());
@@ -214,7 +214,6 @@ void Case(bool failed) {
 		const auto attention = ReadDesktopArchiveAttention(store.directory(), store.epoch(), store.security());
 		CHECK(attention.valid && attention.present && attention.gap.reason == u"outbox-not-ready"_q);
 	}
-	CHECK(Changes.count > 0);
 	std::printf("bounded handoff error=%d initial=%lldms foreground=%lldms explicit-gap=1 ordinary-retained=1\n",
 		failed, static_cast<long long>(initial), static_cast<long long>(foreground));
 	Value = {};
@@ -601,7 +600,6 @@ void NativeStartupUnavailable() {
 		CHECK(!worker->StartupHeld());
 		CHECK(readyCount == 0);
 		NativeQueueArchiveObservation(&session, Event(Empty(), u"unavailable-late"_q, 0));
-		CHECK(NativeValue.failure == u"capture-write-unavailable"_q);
 		auto checked = std::promise<bool>();
 		auto checkedFuture = checked.get_future();
 		CHECK(worker->Post([&](DesktopArchiveStore &store) {

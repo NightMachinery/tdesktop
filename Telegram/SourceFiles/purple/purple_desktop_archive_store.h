@@ -7,6 +7,7 @@
 #include "purple/purple_archive_media_access.h"
 #include "purple/purple_archive_staging.h"
 #include "purple/purple_archive_sqlite.h"
+#include <map>
 #include <memory>
 
 namespace Purple {
@@ -92,6 +93,10 @@ struct DesktopArchiveOptions {
 	QByteArray loginAuthKeyId;
 	QByteArray loginAuthKeyIds;
 };
+using DesktopArchiveCaptureLosses = std::map<QString, uint64_t>;
+
+enum class DesktopArchiveLifecycleResult { Retained, Lost, Held };
+
 struct DesktopArchiveCaptureResult {
 	DesktopArchiveStatus status = DesktopArchiveStatus::Invalid;
 	ArchivePlanStatus model = ArchivePlanStatus::Invalid;
@@ -138,7 +143,7 @@ class DesktopArchiveStore final {
 	[[nodiscard]] const ArchiveStoreEpoch &epoch() const;
 	[[nodiscard]] const ArchiveSqlSecurity &security() const;
 	[[nodiscard]] QString directory() const;
-	[[nodiscard]] DesktopArchiveCaptureResult Capture(ArchiveEvent event);
+	[[nodiscard]] DesktopArchiveCaptureResult Capture(ArchiveEvent event, bool journaled = false);
 	[[nodiscard]] std::optional<ArchiveVersionSnapshot> ReadUnorderedObservation(
 		const ArchiveMessageKey &key, const QString &id);
 	[[nodiscard]] std::optional<ArchiveSqlSlice> ReadSlice(const ArchiveMessageKey &key,
@@ -174,7 +179,8 @@ class DesktopArchiveStore final {
 	[[nodiscard]] std::optional<QString> ObservedMediaVersion(
 		const ArchiveMessageKey &key, const QString &observationId,
 		const QString &contentHash, const QString &identity);
-	[[nodiscard]] bool CaptureLifecycle(const ArchiveEvent &preimage, const ArchiveStoreEpoch &captured);
+	[[nodiscard]] DesktopArchiveLifecycleResult CaptureLifecycle(
+		const ArchiveEvent &preimage, const ArchiveStoreEpoch &captured);
 	[[nodiscard]] std::optional<ArchiveStagingBinding> StageStream(const ArchiveMessageKey &key,
 		const QString &version, const QString &identity, uint64_t size);
 	[[nodiscard]] bool ResumeStreams(QString &cursor, bool &more);
@@ -204,6 +210,8 @@ class DesktopArchiveStore final {
 	void RefuseJournalRenewal(const QString &reason);
 	[[nodiscard]] bool UsageComplete() const;
 	[[nodiscard]] bool Gap(const QString &id, const QString &reason, int64 observedAt);
+	void NoteCaptureLoss(const QString &reason);
+	[[nodiscard]] DesktopArchiveCaptureLosses TakeCaptureLosses();
 	[[nodiscard]] std::optional<ArchiveUsage> Usage();
 	[[nodiscard]] bool Remove(int maximumActions = 4096);
 	[[nodiscard]] static bool Recover(const DesktopArchiveOptions &options);

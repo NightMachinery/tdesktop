@@ -1413,10 +1413,11 @@ void Journal() {
 	store.database().FailForTest(u"commit"_q);
 	CHECK(!journal.Drain(store));
 	CHECK(!journal.failure().isEmpty());
-	CHECK(!store.failure().isEmpty());
-	CHECK(store.Versions(Key()).hasGap);
+	CHECK(store.TakeCaptureLosses().empty());
+	CHECK(!store.Versions(Key()).hasGap);
 	CHECK(store.Versions(Key()).versions.size() == 1);
 	CHECK(journal.Drain(store));
+	CHECK(store.TakeCaptureLosses().empty());
 	CHECK(store.Versions(Key()).versions.size() == 3);
 	CHECK(journal.Append(b));
 	CHECK(journal.Drain(store));
@@ -2211,6 +2212,65 @@ void AttentionRecovery() {
 	CHECK(store.Versions(Key()).hasGap);
 	const auto gaps = store.database().Read(ArchiveSqlReadCaptureGaps(1));
 	CHECK(gaps.ok && gaps.rows.size() == 1);
+	const auto recovered = store.TakeCaptureLosses();
+	CHECK(recovered.size() == 1 && recovered.contains(u"queue-full"_q));
+	if (recovered.contains(u"queue-full"_q)) {
+		CHECK(recovered.at(u"queue-full"_q) == 1);
+	}
+	CHECK(store.TakeCaptureLosses().empty());
+	CHECK(store.Close());
+	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+	CHECK(store.TakeCaptureLosses().empty());
+	CHECK(store.Versions(Key()).hasGap);
+	CHECK(store.Remove());
+}
+
+void NewCaptureLosses() {
+	Section = "count new losses, dedupe replay and suppress old journal holds";
+	const auto temporary = QTemporaryDir();
+	const auto options = Options(temporary.path());
+	auto store = DesktopArchiveStore();
+	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+	CHECK(store.Gap(u"first"_q, u"outbox-full"_q, 42));
+	CHECK(store.Gap(u"first"_q, u"outbox-full"_q, 42));
+	CHECK(store.Gap(u"second"_q, u"outbox-full"_q, 42));
+	CHECK(store.Gap(u"third"_q, u"snapshot-limited"_q, 43));
+	const auto path = store.directory();
+	CHECK(WriteDesktopArchiveAttention(path, store.epoch(), store.security(), u"outbox-full"_q, 42));
+	const auto batch = store.TakeCaptureLosses();
+	CHECK(batch == (DesktopArchiveCaptureLosses{{u"outbox-full"_q, 2}, {u"snapshot-limited"_q, 1}}));
+	CHECK(store.TakeCaptureLosses().empty());
+	CHECK(WriteDesktopArchiveAttention(path, store.epoch(), store.security(), u"outbox-replay-held"_q, 50));
+	CHECK(store.Close());
+	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+	CHECK(store.TakeCaptureLosses().empty());
+	CHECK(!QFileInfo::exists(path + u"/retention-gap"_q));
+
+	const auto realLoss = QString(64, u'a');
+	CHECK(WriteDesktopArchiveAttention(path, store.epoch(), store.security(), u"outbox-full"_q, 42, realLoss));
+	CHECK(!WriteDesktopArchiveAttention(path, store.epoch(), store.security(), u"outbox-full"_q, 42, QString(64, u'b')));
+	CHECK(store.Close());
+	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+	CHECK(store.TakeCaptureLosses() == (DesktopArchiveCaptureLosses{{u"outbox-full"_q, 1}}));
+	CHECK(store.Gap(realLoss, u"outbox-full"_q, 42));
+	CHECK(store.TakeCaptureLosses().empty());
+	CHECK(store.Close());
+	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+	CHECK(store.TakeCaptureLosses().empty());
+	const auto access = store.JournalAccess();
+	CHECK(access);
+	if (access) {
+		auto journal = DesktopArchiveJournal(*access);
+		CHECK(journal.Open());
+		auto limited = Event(Empty(), u"limited-observation"_q, 0, u"fixture partial"_q);
+		limited.observation.context.insert(u"desktopSnapshotLimited"_q, true);
+		CHECK(journal.Append(limited) && journal.Drain(store));
+		CHECK(store.TakeCaptureLosses() == (DesktopArchiveCaptureLosses{{u"snapshot-limited"_q, 1}}));
+		CHECK(journal.Append(limited) && journal.Drain(store));
+		CHECK(store.TakeCaptureLosses().empty());
+	}
+	const auto rows = store.database().Read(ArchiveSqlReadCaptureGaps(16));
+	CHECK(rows.ok && rows.rows.size() == 5);
 	CHECK(store.Remove());
 }
 
@@ -2274,6 +2334,7 @@ int main(int argc, char** argv) {
 	ShortSendAcknowledgement();
 	ExplicitDiscardFixtures();
 	AttentionRecovery();
+	NewCaptureLosses();
 	PageDelivery();
 	SourceFiles();
 	Crypto();

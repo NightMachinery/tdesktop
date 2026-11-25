@@ -5,11 +5,12 @@ namespace Purple {
 struct DesktopArchiveAttention {
 	bool present = false;
 	bool valid = false;
+	bool legacy = false;
 	ArchiveCaptureGap gap;
 };
 [[nodiscard]] DesktopArchiveAttention ReadDesktopArchiveAttention(const QString &root,
 	const ArchiveStoreEpoch &epoch, const ArchiveSqlSecurity &security);
 [[nodiscard]] bool WriteDesktopArchiveAttention(const QString &root,
 	const ArchiveStoreEpoch &epoch, const ArchiveSqlSecurity &security,
-	const QString &reason, int64 time);
+	const QString &reason, int64 time, const QString &id = {});
 }

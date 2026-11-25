@@ -13,7 +13,7 @@ class DesktopArchiveJournal final {
 	[[nodiscard]] bool Open();
 	[[nodiscard]] static std::optional<uint64_t> PendingCaptureBytes(ArchiveEvent event);
 	[[nodiscard]] bool Append(ArchiveEvent event, int byteLimit = 0);
-	[[nodiscard]] bool Attention(const QString &reason, int64 observedAt);
+	[[nodiscard]] bool Attention(const QString &reason, int64 observedAt, const QString &id = {});
 	[[nodiscard]] bool Drain(DesktopArchiveStore &store, int limit = 64);
 	[[nodiscard]] bool RetireWriter();
 	[[nodiscard]] bool WriterRetired() const;

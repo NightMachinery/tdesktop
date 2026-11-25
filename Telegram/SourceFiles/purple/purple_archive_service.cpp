@@ -33,6 +33,7 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QLocale>
 #include <QtCore/QThread>
+#include <QtCore/QUuid>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -94,13 +95,12 @@ DesktopArchiveOptions Options(Main::Account &account) {
 
 bool ArchiveFailureNeedsToast(DesktopArchiveStatus status,
 		const QString &failure, const QString &previous) {
-	if (failure == u"capture-gap"_q && status == DesktopArchiveStatus::Ready) {
-		return false;
-	}
-	return (previous.isEmpty() || previous == u"capture-gap"_q)
-		&& (!failure.isEmpty()
-			|| (status != DesktopArchiveStatus::Ready
-				&& status != DesktopArchiveStatus::Disabled));
+	return status != DesktopArchiveStatus::Ready
+		&& status != DesktopArchiveStatus::Disabled
+		&& status != DesktopArchiveStatus::Maintenance
+		&& status != DesktopArchiveStatus::RemovalPending
+		&& status != DesktopArchiveStatus::RetentionGap
+		&& !failure.isEmpty() && failure != previous;
 }
 
 void ShowArchiveRemovalPending() {
@@ -275,10 +275,12 @@ class ArchiveWorker final {
 	using Task = std::function<void(DesktopArchiveStore &)>;
 	ArchiveWorker(DesktopArchiveOptions options,
 		Fn<void(DesktopArchiveStatus, QString, uint64_t)> report,
-		Fn<void(std::shared_ptr<DesktopArchiveJournal>)> ready)
+		Fn<void(std::shared_ptr<DesktopArchiveJournal>)> ready,
+		Fn<void(DesktopArchiveCaptureLosses)> captureLosses = {})
 		: _state(std::make_shared<State>()) {
 		_state->report = std::move(report);
 		_state->ready = std::move(ready);
+		_state->captureLosses = std::move(captureLosses);
 		options.revocableSecrets = _state->secrets;
 		options.active = [state = _state] { return !state->cancelled.load(); };
 		std::thread([state = _state, options = std::move(options)]() mutable {
@@ -356,9 +358,7 @@ class ArchiveWorker final {
 			}
 			const auto gap = [&](const QString &reason) {
 				if (!store.Gap(event.id, reason, event.observation.observedAt)) {
-					const auto status = store.status();
-					state->report(status == DesktopArchiveStatus::Ready
-						? DesktopArchiveStatus::RetentionGap : status, reason, 0);
+					store.NoteCaptureLoss(reason);
 				}
 			};
 			if (!journal) {
@@ -378,18 +378,10 @@ class ArchiveWorker final {
 			if (!journal->Append(event, byteLimit)) {
 				const auto reason = journal->failure().isEmpty()
 					? u"capture-startup-append"_q : journal->failure();
-				if (!journal->Attention(reason, event.observation.observedAt)) {
-					state->report(DesktopArchiveStatus::RetentionGap, reason, 0);
-				}
 				gap(reason);
 				return;
 			}
-			if (!journal->Drain(store)) {
-				gap(u"capture-startup-drain"_q);
-			}
-			if (event.observation.context.value(u"desktopSnapshotLimited"_q).toBool()) {
-				gap(u"snapshot-limited"_q);
-			}
+			static_cast<void>(journal->Drain(store));
 		}, *bytes});
 		_state->startupBytes += *bytes;
 		++_state->startupCount;
@@ -464,6 +456,7 @@ class ArchiveWorker final {
 	struct State {
 		Fn<void(DesktopArchiveStatus, QString, uint64_t)> report;
 		Fn<void(std::shared_ptr<DesktopArchiveJournal>)> ready;
+		Fn<void(DesktopArchiveCaptureLosses)> captureLosses;
 		std::mutex mutex;
 		std::condition_variable condition;
 		std::deque<QueuedTask> tasks;
@@ -546,7 +539,6 @@ class ArchiveWorker final {
 					} else {
 						journalFailure = journal->failure().isEmpty()
 							? u"capture-recovery-held"_q : journal->failure();
-						static_cast<void>(journal->Attention(journalFailure, base::unixtime::now()));
 					}
 				}
 			}
@@ -595,7 +587,22 @@ class ArchiveWorker final {
 				|| journalFailure.startsWith(u"capture-admission-"_q)) {
 				journalFailure.clear();
 			}
+			state->startupFailed = false;
 			state->ready(fresh);
+		};
+		const auto drainJournal = [&] {
+			if (!journal || journal->WriterRetired() || !store.Current() || !journal->access().current()) {
+				return;
+			}
+			if (journal->Drain(store)) {
+				journalFailure.clear();
+				if (state->startupFailed.exchange(false)) {
+					startupJournal = journal;
+					state->ready(journal);
+				}
+			} else if (journalFailure.isEmpty()) {
+				journalFailure = journal->failure();
+			}
 		};
 
 		auto usageBytes = uint64_t(0);
@@ -610,11 +617,13 @@ class ArchiveWorker final {
 			}
 			const auto now = std::chrono::steady_clock::now();
 			const auto failure = journalFailure.isEmpty() ? store.failure() : journalFailure;
-			if (now < nextReport && reportedStatus == store.status() && reportedFailure == failure) {
+			const auto status = !journalFailure.isEmpty() && store.status() == DesktopArchiveStatus::Ready
+				? DesktopArchiveStatus::Unreadable : store.status();
+			if (now < nextReport && reportedStatus == status && reportedFailure == failure) {
 				return;
 			}
 			nextReport = now + std::chrono::seconds(1);
-			reportedStatus = store.status();
+			reportedStatus = status;
 			reportedFailure = failure;
 			if (store.Current() && (!usageComplete || now >= nextUsage)) {
 				const auto usage = store.Usage();
@@ -622,13 +631,11 @@ class ArchiveWorker final {
 				usageComplete = usage && store.UsageComplete();
 				nextUsage = now + std::chrono::seconds(60);
 			}
-			if (journal && !journal->WriterRetired() && !journal->failure().isEmpty()) {
-				journalFailure = journal->failure();
+			auto losses = store.TakeCaptureLosses();
+			if (state->captureLosses && !losses.empty()) {
+				state->captureLosses(std::move(losses));
 			}
-			const auto gap = !journalFailure.isEmpty()
-				&& store.status() == DesktopArchiveStatus::Ready;
-			state->report(gap ? DesktopArchiveStatus::RetentionGap : store.status(),
-				journalFailure.isEmpty() ? store.failure() : journalFailure, usageBytes);
+			state->report(status, failure, usageBytes);
 		};
 		report();
 		auto streamCursor = QString();
@@ -696,6 +703,7 @@ class ArchiveWorker final {
 			}
 			if (idle) {
 				renewJournal();
+				drainJournal();
 				report();
 				continue;
 			}
@@ -725,9 +733,7 @@ class ArchiveWorker final {
 				garbageMore = false;
 			}
 			renewJournal();
-			if (journal && !journal->WriterRetired() && store.Current() && journal->access().current()) {
-				static_cast<void>(journal->Drain(store));
-			}
+			drainJournal();
 			report();
 		}
 		state->secrets->Revoke();
@@ -784,10 +790,40 @@ struct ArchiveSession {
 	DesktopArchiveStatus status = DesktopArchiveStatus::Disabled;
 	QString failure;
 	QString discardFailure;
+	DesktopArchiveCaptureLosses captureLosses;
 	uint64_t bytes = 0;
 };
 std::map<Main::Session*, ArchiveSession> Sessions;
 std::set<Main::Session*> Retired;
+
+QString CaptureLossDetails(const DesktopArchiveCaptureLosses &losses) {
+	auto detail = QStringList();
+	for (const auto &[reason, count] : losses) {
+		detail.push_back(reason + u": "_q + QLocale().toString(qulonglong(count)));
+	}
+	return detail.join(u", "_q);
+}
+
+void ReportArchiveCaptureLoss(Main::Session *session, const DesktopArchiveCaptureLosses &losses) {
+	const auto i = Sessions.find(session);
+	if (i == Sessions.end() || !i->second.routing->load() || Retired.contains(session)) {
+		return;
+	}
+	auto &reported = i->second.captureLosses;
+	for (const auto &[reason, count] : losses) {
+		reported[reason] += count;
+	}
+	LOG(("Purple Archive: observations lost (%1).").arg(CaptureLossDetails(losses)));
+	ShowPurpleNotice({
+		.session = session,
+		.scope = u"Local archive"_q,
+		.summary = tr::lng_purple_archive_gap(tr::now) + '\n' + CaptureLossDetails(reported),
+		.coalesceKey = u"archive:gap:"_q + PurpleNoticeAccountKey(session),
+		.severity = ModalNotices::NoticeSeverity::Warning,
+		.background = true,
+	});
+	Changes.fire({});
+}
 
 ArchiveSession &For(not_null<Main::Session*> session) {
 	auto &value = Sessions[session.get()];
@@ -850,26 +886,17 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 				}
 				const auto firstFailure = ArchiveFailureNeedsToast(status, failure, i->second.failure);
 				i->second.status = status;
-				if ((!failure.isEmpty() && (failure != u"capture-gap"_q || i->second.failure.isEmpty()))
-					|| (status == DesktopArchiveStatus::Ready && i->second.failure.startsWith(u"purge-"_q))) {
-					i->second.failure = failure;
-				}
+				i->second.failure = failure;
 				i->second.bytes = bytes;
-				if (firstFailure && status != DesktopArchiveStatus::RemovalPending
-					&& Core::App().domain().started()
+				if (firstFailure && Core::App().domain().started()
 					&& Core::App().domain().active().maybeSession() == live) {
-					const auto gap = status == DesktopArchiveStatus::Ready
-						|| status == DesktopArchiveStatus::RetentionGap;
-					const auto msg = gap ? tr::lng_purple_archive_gap(tr::now)
-						: tr::lng_purple_archive_unavailable(tr::now);
+					LOG(("Purple Archive: unavailable (%1).").arg(failure));
 					ShowPurpleNotice({
 						.session = live,
 						.scope = u"Local archive"_q,
-						.summary = msg,
-						.coalesceKey = (gap ? u"archive:gap:"_q : u"archive:unavailable:"_q) + accountKey,
-						.severity = gap
-							? ModalNotices::NoticeSeverity::Warning
-							: ModalNotices::NoticeSeverity::Error,
+						.summary = tr::lng_purple_archive_unavailable(tr::now) + u" ["_q + failure + ']',
+						.coalesceKey = u"archive:unavailable:"_q + accountKey,
+						.severity = ModalNotices::NoticeSeverity::Error,
 						.background = true,
 					});
 				}
@@ -892,6 +919,13 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 				}
 				i->second.journal = journal;
 				Changes.fire({});
+			});
+		},
+		[weak, routing](DesktopArchiveCaptureLosses losses) {
+			crl::on_main([weak, routing, losses = std::move(losses)] {
+				if (weak && routing->load()) {
+					ReportArchiveCaptureLoss(weak.get(), losses);
+				}
 			});
 		});
 	session->lifetime().add([pointer = session.get()] {
@@ -1067,26 +1101,16 @@ void QueueArchiveRetentionGap(not_null<Main::Session*> session, QString reason) 
 	if (Retired.contains(session.get())) {
 		return;
 	}
-	auto &value = For(session);
-	const auto firstFailure = ArchiveFailureNeedsToast(
-		DesktopArchiveStatus::RetentionGap, reason, value.failure);
-	value.failure = reason;
-	static_cast<void>(value.worker->Post([reason](DesktopArchiveStore &store) {
-		static_cast<void>(store.Gap(reason, reason, base::unixtime::now()));
-	}, true));
-	Changes.fire({});
-	if (firstFailure && Core::App().domain().started()
-		&& Core::App().domain().active().maybeSession() == session.get()) {
-		const auto msg = tr::lng_purple_archive_gap(tr::now);
-		const auto acctKey = PurpleNoticeAccountKey(session.get());
-		ShowPurpleNotice({
-			.session = session.get(),
-			.scope = u"Local archive"_q,
-			.summary = msg,
-			.coalesceKey = u"archive:gap:"_q + acctKey,
-			.severity = ModalNotices::NoticeSeverity::Warning,
-			.background = true,
-		});
+	const auto worker = For(session).worker;
+	const auto id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+	const auto time = base::unixtime::now();
+	const auto posted = worker->Post([reason, id, time](DesktopArchiveStore &store) {
+		if (!store.Gap(id, reason, time)) {
+			store.NoteCaptureLoss(reason);
+		}
+	}, true);
+	if (!posted) {
+		ReportArchiveCaptureLoss(session.get(), {{reason, 1}});
 	}
 }
 
@@ -1107,49 +1131,58 @@ void QueueArchiveJournalWrite(not_null<Main::Session*> session, ArchiveEvent eve
 	}
 	static auto writers = std::make_shared<std::atomic<int>>(0);
 	const auto slots = writers;
-	if (!journal || slots->fetch_add(1) >= 8) {
-		if (journal) {
-			slots->fetch_sub(1);
-		}
+	if (slots->fetch_add(1) >= 8) {
+		slots->fetch_sub(1);
 		QueueArchiveRetentionGap(session, u"capture-write-unavailable"_q);
 		return;
 	}
 	journal->BindCaptureGeneration(event);
-	const auto ack = std::make_shared<std::promise<bool>>();
+	const auto ack = std::make_shared<std::promise<void>>();
 	auto future = ack->get_future();
+	const auto weak = base::make_weak(session.get());
 	try {
-		std::thread([journal, worker, slots, ack, byteLimit, event = std::move(event)]() mutable {
+		std::thread([weak, journal, worker, slots, ack, byteLimit, event = std::move(event)]() mutable {
 			const auto release = gsl::finally([&] { slots->fetch_sub(1); });
 			const auto captured = journal->Append(event, byteLimit);
-			ack->set_value(captured);
-			auto reason = captured ? QString() : journal->failure();
-			if (!captured) {
-				if (reason.isEmpty()) {
-					reason = u"capture-journal-append"_q;
-				}
-				static_cast<void>(journal->Attention(reason, event.observation.observedAt));
-			}
-			static_cast<void>(worker->Post([journal, captured, reason, id = event.id,
-				time = event.observation.observedAt,
-				limited = event.observation.context.value(u"desktopSnapshotLimited"_q).toBool()](DesktopArchiveStore &store) {
-				if (captured) {
-					if (!journal->WriterRetired()) static_cast<void>(journal->Drain(store));
-					if (limited) {
-						static_cast<void>(store.Gap(id, u"snapshot-limited"_q, time));
+			ack->set_value();
+			if (captured) {
+				static_cast<void>(worker->Post([journal](DesktopArchiveStore &store) {
+					if (!journal->WriterRetired()) {
+						static_cast<void>(journal->Drain(store));
 					}
-				} else {
-					static_cast<void>(store.Gap(id + u":append"_q, reason, time));
+				}, true));
+				return;
+			}
+			if (journal->WriterRetired() || !journal->CaptureAllowed()) {
+				return;
+			}
+			auto reason = journal->failure();
+			if (reason.isEmpty()) {
+				reason = u"capture-journal-append"_q;
+			}
+			const auto id = QString::fromLatin1(QCryptographicHash::hash(
+				event.id.toUtf8() + "/append", QCryptographicHash::Sha256).toHex());
+			const auto time = event.observation.observedAt;
+			const auto marked = journal->Attention(reason, time, id);
+			const auto posted = worker->Post([journal, reason, id, time, marked](DesktopArchiveStore &store) {
+				if (!journal->WriterRetired() && !store.Gap(id, reason, time) && !marked) {
+					store.NoteCaptureLoss(reason);
 				}
-			}, true));
+			}, true);
+			if (!posted && !marked) {
+				crl::on_main([weak, reason] {
+					if (weak) {
+						ReportArchiveCaptureLoss(weak.get(), {{reason, 1}});
+					}
+				});
+			}
 		}).detach();
 	} catch (const std::system_error &) {
 		slots->fetch_sub(1);
 		QueueArchiveRetentionGap(session, u"capture-writer-unavailable"_q);
 		return;
 	}
-	if (future.wait_for(std::chrono::milliseconds(10)) == std::future_status::ready && !future.get()) {
-		QueueArchiveRetentionGap(session, u"capture-write-unavailable"_q);
-	}
+	static_cast<void>(future.wait_for(std::chrono::milliseconds(10)));
 }
 
 }
@@ -1217,13 +1250,14 @@ Fn<void(uint64_t, QByteArray)> ArchiveStreamSink(not_null<Main::Session*> sessio
 					}
 					version = resolve();
 				}
-				if (version) {
-					*binding = store.StageStream(observation.key, *version, observation.identity, size);
-					if (!*binding && store.ReadMedia(observation.key, *version, observation.identity,
-						[](const QByteArray &) { return true; })) {
-						*owned = true;
-						return;
-					}
+				if (!version) {
+					return;
+				}
+				*binding = store.StageStream(observation.key, *version, observation.identity, size);
+				if (!*binding && store.ReadMedia(observation.key, *version, observation.identity,
+					[](const QByteArray &) { return true; })) {
+					*owned = true;
+					return;
 				}
 			}
 			if (!*binding || !store.StreamPart(**binding, offset, bytes, streamActive)) {
@@ -1438,8 +1472,6 @@ void QueueArchiveAvailableMedia(not_null<Main::Session*> session, ArchiveMessage
 			const auto version
 				= store.ObservedMediaVersion(key, observationId, contentHash, identity);
 			if (!version) {
-				static_cast<void>(store.Gap(observationId + u"-media"_q,
-					u"media-observation-stale"_q, base::unixtime::now()));
 				return;
 			}
 			auto memory = QBuffer();
@@ -1483,8 +1515,7 @@ void QueueArchiveAvailableMedia(not_null<Main::Session*> session, ArchiveMessage
 			}
 		});
 	if (!accepted) {
-		value.failure = u"media-queue-full"_q;
-		Changes.fire({});
+		QueueArchiveRetentionGap(session, u"media-queue-full"_q);
 	}
 }
 
@@ -1520,14 +1551,13 @@ QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 	if (value.status == DesktopArchiveStatus::MaintenanceHeld || value.failure.startsWith(u"purge-"_q)) {
 		return tr::lng_purple_archive_purge_held(tr::now);
 	}
-	// WHY: a gap row is permanent, so showing only the gap text would hide the usage for the store's whole life.
 	const auto usage = [&] {
 		return tr::lng_purple_archive_usage(
 			tr::now, lt_size, FormatArchiveSize(value.bytes));
 	};
-	if (value.status == DesktopArchiveStatus::RetentionGap
-		|| (value.status == DesktopArchiveStatus::Ready && !value.failure.isEmpty())) {
-		return tr::lng_purple_archive_gap(tr::now) + u"\n"_q + usage();
+	if (!value.captureLosses.empty() && value.status == DesktopArchiveStatus::Ready) {
+		return tr::lng_purple_archive_gap(tr::now) + u"\n"_q
+			+ CaptureLossDetails(value.captureLosses) + u"\n"_q + usage();
 	}
 	if (value.status == DesktopArchiveStatus::Ready) {
 		return usage();
@@ -1635,10 +1665,7 @@ void OpenArchiveMedia(not_null<Main::Session*> session, ArchiveMediaRequest requ
 				static_cast<void>(worker->Post([bound, weak, leaseCommitted, leaseDelivery](DesktopArchiveStore &store) {
 					auto committed = ArchiveLeaseRevisionChange();
 					const auto sameEpoch = CanRunArchiveWork(bound.source.epoch, store.epoch());
-					if (!store.ReleaseMedia(bound, &committed) && store.Current()) {
-						static_cast<void>(store.Gap(bound.lease + u":release"_q,
-							u"media-reader-release-held"_q, base::unixtime::now()));
-					}
+					static_cast<void>(store.ReleaseMedia(bound, &committed));
 					if (sameEpoch && committed.leaseOnly && leaseCommitted) {
 						crl::on_main([weak, leaseCommitted, committed, leaseDelivery] {
 							if (weak && !Retired.contains(weak.get()) && leaseDelivery->load()) {
