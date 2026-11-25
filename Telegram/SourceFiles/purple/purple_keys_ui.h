@@ -95,12 +95,10 @@ protected:
 private:
 	[[nodiscard]] int computeColumns(int availWidth) const;
 	[[nodiscard]] int computeHeight(int availWidth, int maxHeight) const;
-	void computeColumnCapWidths();
 
 	WhichKeyState _state;
 	int _columns = 2;
 	int _columnWidth = 220;
-	std::vector<int> _colCapWidths;
 };
 
 struct HelpRow {

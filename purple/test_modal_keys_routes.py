@@ -135,6 +135,11 @@ ordered(classify, "if (!_normal)", "return KeyUse::Pass;",
 # Verify which-key merges duplicate actions and keeps groups/leaves separated cleanly.
 wk = between(keys, "void Keys::showWhichKey", "void Keys::stroke")
 ordered(wk, "leafIndexByAction", ".groups = std::move(groups)", ".leaves = std::move(leaves)")
+assert 'u"Unread unmuted chats"_q' in wk
+assert 'u"Unread unmuted chats (iBuffer)"_q' in commands
+which_key_paint = between(keys_ui, "void WhichKeyOverlay::paintEvent", "class CheatsheetGrid")
+ordered(which_key_paint, "MeasureWhichKeyCapsWidth(entry.keys", "std::max(28, capsW)", "arrowX")
+assert "_colCapWidths" not in keys_ui
 
 # Verify active-layer and prefix/which-key status bar cues replace Normal-mode cues.
 status_fn = between(keys, "void Keys::refreshStatusBar", "KeyUse Keys::classify")
@@ -151,7 +156,6 @@ assert "QApplication::isRightToLeft" not in keys_ui
 assert "return style::RightToLeft();" in keys_ui
 assert "MeasureTextWidth(" in keys_ui
 assert "ElideText(" in keys_ui
-assert "_colCapWidths" in keys_ui
 help_fn = between(keys, "void Keys::showHelpLayer", "void Keys::showDescribeKeyResult")
 ordered(help_fn, "b.viaLocalleader ? mapContextTag(b.sourceMap)",
         "Qt::Key_S, Qt::Key_T", "Available(b.action, target)",

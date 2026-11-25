@@ -561,33 +561,7 @@ int WhichKeyOverlay::computeHeight(int availWidth, int maxHeight) const {
 
 void WhichKeyOverlay::setState(WhichKeyState state) {
 	_state = std::move(state);
-	computeColumnCapWidths();
 	update();
-}
-
-void WhichKeyOverlay::computeColumnCapWidths() {
-	const auto st = CapStyle();
-	const auto sepFm = QFontMetrics(st::normalFont);
-	const auto cols = std::max(1, _columns);
-	_colCapWidths.assign(cols, 28);
-	const auto scanBlock = [&](const std::vector<WhichKeyEntry> &list) {
-		if (list.empty()) {
-			return;
-		}
-		const auto rows = (int(list.size()) + cols - 1) / cols;
-		for (auto i = 0; i < int(list.size()); ++i) {
-			const auto col = i / rows;
-			if (col >= 0 && col < cols) {
-				const auto w = MeasureWhichKeyCapsWidth(list[i].keys, st, sepFm);
-				_colCapWidths[col] = std::max(_colCapWidths[col], w);
-			}
-		}
-	};
-	scanBlock(_state.groups);
-	scanBlock(_state.leaves);
-	for (auto &w : _colCapWidths) {
-		w = std::clamp(w, 28, 108);
-	}
 }
 
 void WhichKeyOverlay::updateBounds(QRect availableAboveStatusBar) {
@@ -600,7 +574,6 @@ void WhichKeyOverlay::updateBounds(QRect availableAboveStatusBar) {
 	const auto drawerH = computeHeight(drawerW, maxH);
 	_columns = computeColumns(drawerW);
 	_columnWidth = std::max(1, (drawerW - 36 - (_columns - 1) * 18) / _columns);
-	computeColumnCapWidths();
 
 	const auto left = availableAboveStatusBar.x()
 		+ (availableAboveStatusBar.width() - drawerW) / 2;
@@ -714,23 +687,21 @@ void WhichKeyOverlay::paintEvent(QPaintEvent *) {
 			const auto midY = rowY + kRowH / 2;
 
 			const auto capsW = MeasureWhichKeyCapsWidth(entry.keys, st, sepFm);
-			const auto colCapW = (col < int(_colCapWidths.size()))
-				? std::max(_colCapWidths[col], capsW)
-				: std::max(28, capsW);
+			const auto capSlotWidth = std::max(28, capsW);
 			const auto capX = rtl
 				? (colX + _columnWidth - capsW)
 				: colX;
 			PaintWhichKeyCaps(p, entry.keys, capX, midY, st, sepFm);
 
 			const auto arrowX = rtl
-				? (colX + _columnWidth - colCapW - 18)
-				: (colX + colCapW + 6);
+				? (colX + _columnWidth - capSlotWidth - 18)
+				: (colX + capSlotWidth + 6);
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
 			p.drawText(QRect(arrowX, rowY, 14, kRowH), Qt::AlignCenter, arrowGlyph);
 
-			const auto labelW = std::max(24, _columnWidth - colCapW - 24);
-			const auto labelX = rtl ? colX : (colX + colCapW + 24);
+			const auto labelW = std::max(0, _columnWidth - capSlotWidth - 24);
+			const auto labelX = rtl ? colX : (colX + capSlotWidth + 24);
 			const auto text = entry.isGroup ? (u"+"_q + entry.label) : entry.label;
 			const auto &font = entry.isGroup ? st::semiboldFont : st::normalFont;
 			p.setFont(font);

@@ -3042,7 +3042,9 @@ void Keys::showWhichKey() {
 				leafIndexByAction.emplace(b.action, leaves.size());
 				leaves.push_back({
 					.keys = { keyLbl },
-					.label = FindCommand(b.action).label(),
+					.label = (b.action == Action::UnreadBuffer)
+						? u"Unread unmuted chats"_q
+						: FindCommand(b.action).label(),
 					.isGroup = false,
 				});
 			}
