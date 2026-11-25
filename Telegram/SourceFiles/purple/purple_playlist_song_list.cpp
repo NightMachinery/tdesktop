@@ -50,6 +50,10 @@ public:
 	[[nodiscard]] int reorderDelta(const QKeyEvent &event) const;
 	void moveSelected(int delta);
 	void navigate(TrackListAction action, int repeat);
+	void setRows(std::vector<PlaylistSongListRow> rows, uint64_t cursor);
+	void setKeyHandler(Fn<bool(QKeyEvent*)> handler);
+	void setContextActions(Fn<void(not_null<Ui::PopupMenu*>, uint64_t)> actions);
+	void showActions();
 	void setPlayback(uint64_t current, uint64_t checked, QString state, bool unavailable);
 	void setMusicPlayback(uint64_t current, MusicRowPlayback state, uint64_t loading);
 	void setVerifiedDownloads(std::set<uint64_t> documents);
@@ -96,6 +100,7 @@ private:
 	void updateDrag();
 	void autoscroll();
 	void submitMove(int from, int to);
+	bool showActionsFor(int index, QPoint globalPosition);
 
 	not_null<Ui::ScrollArea*> _scroll;
 	std::vector<PlaylistSongListRow> _data;
@@ -104,6 +109,8 @@ private:
 	Fn<void(uint64_t)> _toggle;
 	Fn<bool()> _playSelection;
 	Fn<void(uint64_t)> _copyOrgLink;
+	Fn<bool(QKeyEvent*)> _keyHandler;
+	Fn<void(not_null<Ui::PopupMenu*>, uint64_t)> _contextActions;
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 	std::set<uint64_t> _chosen;
 	Mode _mode = Mode::Playlist;
@@ -414,21 +421,35 @@ void PlaylistSongList::Rows::mouseDoubleClickEvent(QMouseEvent *e) {
 void PlaylistSongList::Rows::contextMenuEvent(QContextMenuEvent *e) {
 	const auto keyboard = e->reason() == QContextMenuEvent::Keyboard;
 	const auto index = keyboard ? _selected : hit(e->pos());
-	if (!_copyOrgLink || index < 0 || !isEnabled()) {
+	if (!showActionsFor(index, keyboard
+		? mapToGlobal(QPoint(0, (index + 1) * rowHeight()))
+		: e->globalPos())) {
 		RpWidget::contextMenuEvent(e);
 		return;
 	}
+	e->accept();
+}
+
+void PlaylistSongList::Rows::showActions() {
+	if (_selected >= 0) {
+		showActionsFor(_selected, mapToGlobal(QPoint(0, (_selected + 1) * rowHeight())));
+	}
+}
+
+bool PlaylistSongList::Rows::showActionsFor(int index, QPoint globalPosition) {
+	if ((!_copyOrgLink && !_contextActions) || index < 0 || !isEnabled()) return false;
 	const auto document = _data[index].documentId;
 	setFocus(Qt::OtherFocusReason);
 	select(index);
 	_contextMenu = base::make_unique_q<Ui::PopupMenu>(this, st::popupMenuWithIcons);
-	_contextMenu->addAction(tr::lng_purple_music_copy_org_link(tr::now),
-		[copy = _copyOrgLink, document] { copy(document); },
-		&st::menuIconCopy);
-	_contextMenu->popup(keyboard
-		? mapToGlobal(QPoint(0, (index + 1) * rowHeight()))
-		: e->globalPos());
-	e->accept();
+	if (_contextActions) _contextActions(_contextMenu.get(), document);
+	if (_copyOrgLink) {
+		_contextMenu->addAction(tr::lng_purple_music_copy_org_link(tr::now),
+			[copy = _copyOrgLink, document] { copy(document); },
+			&st::menuIconCopy);
+	}
+	_contextMenu->popup(globalPosition);
+	return true;
 }
 
 int PlaylistSongList::Rows::reorderDelta(const QKeyEvent &event) const {
@@ -492,6 +513,10 @@ void PlaylistSongList::Rows::navigate(TrackListAction action, int repeat) {
 
 void PlaylistSongList::Rows::keyPressEvent(QKeyEvent *e) {
 	if (!isEnabled()) return;
+	if (const auto handler = _keyHandler; handler && handler(e)) {
+		e->accept();
+		return;
+	}
 	if (_copyOrgLink && _selected >= 0 && e->matches(QKeySequence::Copy)) {
 		e->accept();
 		if (!e->isAutoRepeat()) {
@@ -529,6 +554,29 @@ void PlaylistSongList::Rows::keyPressEvent(QKeyEvent *e) {
 	}
 	e->accept();
 	if (*action != TrackListAction::Mark || !e->isAutoRepeat()) navigate(*action, 1);
+}
+
+void PlaylistSongList::Rows::setRows(
+		std::vector<PlaylistSongListRow> rows,
+		uint64_t cursor) {
+	cancelInteraction();
+	_contextMenu.reset();
+	_data = std::move(rows);
+	_hovered = -1;
+	const auto found = std::ranges::find(_data, cursor, &PlaylistSongListRow::documentId);
+	_selected = _data.empty() ? -1 : found == _data.end() ? 0 : int(found - _data.begin());
+	resizeToWidth(width());
+	if (_selected >= 0 && hasFocus()) accessibilityChildFocused(_selected);
+	update();
+}
+
+void PlaylistSongList::Rows::setKeyHandler(Fn<bool(QKeyEvent*)> handler) {
+	_keyHandler = std::move(handler);
+}
+
+void PlaylistSongList::Rows::setContextActions(
+		Fn<void(not_null<Ui::PopupMenu*>, uint64_t)> actions) {
+	_contextActions = std::move(actions);
 }
 
 void PlaylistSongList::Rows::focusInEvent(QFocusEvent *e) {
@@ -799,6 +847,28 @@ void PlaylistSongList::moveSelected(int delta) {
 
 void PlaylistSongList::navigate(TrackListAction action, int repeat) {
 	_rows->navigate(action, repeat);
+}
+
+void PlaylistSongList::setRows(
+		std::vector<PlaylistSongListRow> rows,
+		uint64_t cursor,
+		int scrollTop) {
+	_rows->setRows(std::move(rows), cursor);
+	_restoreScrollTop = scrollTop;
+	resizeToWidth(width());
+}
+
+void PlaylistSongList::setKeyHandler(Fn<bool(QKeyEvent*)> handler) {
+	_rows->setKeyHandler(std::move(handler));
+}
+
+void PlaylistSongList::setContextActions(
+		Fn<void(not_null<Ui::PopupMenu*>, uint64_t)> actions) {
+	_rows->setContextActions(std::move(actions));
+}
+
+void PlaylistSongList::showActions() {
+	_rows->showActions();
 }
 
 void PlaylistSongList::setPlayback(

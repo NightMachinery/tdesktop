@@ -78,3 +78,12 @@ saved for each account on this Desktop installation.
 Stock shared-media search cancels a delayed query when a cached query takes
 over. Clearing the filter restores the unfiltered list even if a search was
 still queued.
+
+In a chat or topic, `, u` opens **Music shared in this chat**. It uses
+Telegram's shared-media history and also works in chats outside the Music
+source folder. The filter matches title, artist, or filename in the loaded
+tracks. **Load more tracks** expands the history and keeps the filter applied.
+Use the arrows or `j` and `k` to move the cursor, and Alt+Up or Alt+Down to move
+by half a page. Press Escape to close the filter, then Escape to close the
+dialog. The **Actions** button or a right-click offers play, forward, go to
+message, add to playlist, and copy message link.

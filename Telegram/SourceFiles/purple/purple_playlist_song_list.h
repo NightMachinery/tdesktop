@@ -6,7 +6,7 @@
 #include <set>
 #include <vector>
 
-namespace Ui { class ScrollArea; }
+namespace Ui { class PopupMenu; class ScrollArea; }
 
 namespace Purple {
 
@@ -62,6 +62,10 @@ public:
 	[[nodiscard]] rpl::producer<> navigationEvents() const;
 	void moveSelected(int delta);
 	void navigate(TrackListAction action, int repeat = 1);
+	void setRows(std::vector<PlaylistSongListRow> rows, uint64_t cursor, int scrollTop);
+	void setKeyHandler(Fn<bool(QKeyEvent*)> handler);
+	void setContextActions(Fn<void(not_null<Ui::PopupMenu*>, uint64_t)> actions);
+	void showActions();
 	void setPlayback(uint64_t current, uint64_t checked, QString state, bool unavailable);
 	void setMusicPlayback(uint64_t current, MusicRowPlayback state, uint64_t loading = 0);
 	void setVerifiedDownloads(std::set<uint64_t> documents);

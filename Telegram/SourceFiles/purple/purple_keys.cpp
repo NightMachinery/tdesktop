@@ -54,6 +54,7 @@
 #include "purple/purple_keys_zen.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
+#include "purple/purple_chat_music.h"
 #include "purple/purple_playlist_song_list.h"
 #include "purple/purple_notices.h"
 #include "purple/purple_peek_controls.h"
@@ -1593,12 +1594,12 @@ bool Available(Action action, const Target &target) {
 	case Action::OpenChatInfo:
 	case Action::OpenPinnedMessages: return target.chat.thread() != nullptr;
 	case Action::OpenChatMedia:
-	case Action::OpenChatMusic:
 	case Action::OpenChatFiles:
 	case Action::OpenChatLinks:
 	case Action::OpenChatVoice:
 	case Action::OpenChatGifs:
 	case Action::OpenChatPolls: return target.chat.peer() != nullptr;
+	case Action::OpenChatMusic: return target.chat.thread() != nullptr;
 	case Action::AttachFiles: return bool(target.attach);
 	case Action::OpenHistoryCalendar: return bool(target.chat);
 	case Action::Search: return !target.messages.scheduled;
@@ -3817,8 +3818,11 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		clearPrefix();
 		target.attach();
 		break;
-	case Action::OpenChatMedia:
 	case Action::OpenChatMusic:
+		clearPrefix();
+		ShowChatMusicBox(current, target.chat.thread());
+		break;
+	case Action::OpenChatMedia:
 	case Action::OpenChatFiles:
 	case Action::OpenChatLinks:
 	case Action::OpenChatVoice:
