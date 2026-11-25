@@ -19,6 +19,7 @@
 #include "purple/purple_privacy_screen.h"
 #include "storage/storage_account.h"
 #include "ui/layers/generic_box.h"
+#include "window/window_controller.h"
 
 #include <QtCore/QPointer>
 #include <QtCore/QTimer>
@@ -114,11 +115,16 @@ void StartSession(not_null<Main::Session*> session) {
 			crl::on_main([=] {
 				const auto live = weak.get();
 				if (!live || Core::Quitting() || SessionLease(live) != route) return;
-				if (effect.stage == IncidentStage::Cleanup && effect.committed) {
+				if (effect.stage == IncidentStage::Cleanup && effect.committed && !live->account().loggingOut()) {
 					CloseViews(live);
 					CancelArchiveDownloads(live);
 					Accounts.erase(live);
 					StartSession(live);
+					if (effect) {
+						if (const auto window = PurpleNoticeWindow(live)) {
+							window->showToast(ArchiveCleanupText(tr::lng_purple_archive_v2_reset_done(tr::now), effect.reclaimed));
+						}
+					}
 				}
 				PublishIncident(live, effect, warning);
 			});
@@ -235,7 +241,9 @@ void PublishIncident(Main::Session *session, const StoreEffect &effect, ArchiveW
 	if (!session || Core::Quitting() || (effect && warning == ArchiveWarning::None)) return;
 	auto summary = warning == ArchiveWarning::MessageLost ? tr::lng_purple_archive_gap(tr::now)
 		: warning == ArchiveWarning::CapturePaused ? tr::lng_purple_archive_unavailable(tr::now)
-		: effect.reason.startsWith(u"discard-") ? u"Could not identify or delete this account’s previous archive."_q
+		: effect.stage == IncidentStage::Cleanup && effect.committed
+			? tr::lng_purple_archive_v2_reset_pending(tr::now)
+		: effect.reason.startsWith(u"discard-") ? tr::lng_purple_archive_v2_previous_failed(tr::now)
 		: tr::lng_purple_archive_discard_failed(tr::now);
 	summary += u" ("_q + effect.reason + u", "_q + QString::number(effect.count) + ')';
 	ShowPurpleNotice({

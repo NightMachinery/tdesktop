@@ -94,18 +94,22 @@ struct HistoryPage {
 	bool missingPreimage = false;
 	std::vector<HistoryVersion> rows;
 	int64 before = 0;
+	int64 statusAt = 0;
 };
 
 class TimelineCursor {
+public:
+	TimelineCursor() = default;
+private:
 	friend class Store;
 	TimelineCursor(int64 day, QByteArray message, QByteArray scope, QByteArray peer, bool deleted)
 		: activity(day), key(std::move(message)), store(std::move(scope)), chat(std::move(peer)), trash(deleted) {
 	}
-	int64 activity;
+	int64 activity = 0;
 	QByteArray key;
 	QByteArray store;
 	QByteArray chat;
-	bool trash;
+	bool trash = false;
 };
 
 struct TimelineEntry {
@@ -114,6 +118,7 @@ struct TimelineEntry {
 	int64 observedAt = 0;
 	std::optional<StoredBody> latest;
 	TimelineCursor cursor;
+	ChatClass kind = ChatClass::Unknown;
 };
 
 struct TimelinePage {

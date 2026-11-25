@@ -3,9 +3,9 @@
 #include "base/weak_ptr.h"
 #include "core/application.h"
 #include "data/data_session.h"
+#include "data/data_peer.h"
 #include "data/data_user.h"
 #include "history/history_item.h"
-#include "history/view/history_view_list_widget.h"
 #include "lang/lang_keys.h"
 #include "logs.h"
 #include "main/main_account.h"
@@ -30,6 +30,8 @@
 #include "window/window_session_controller.h"
 
 #include <QtCore/QSaveFile>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 
 namespace Purple {
 namespace {
@@ -48,12 +50,12 @@ struct Route {
 		const auto window = host.get();
 		const auto session = account.get();
 		return epoch == ViewEpoch() && lease && lease->live.load() && window && session && !Core::Quitting()
-			&& SessionLease(session) == lease && window->window().maybeSession() == session
+			&& SessionLease(session) == lease && !session->account().loggingOut() && window->window().maybeSession() == session
 			&& !window->window().locked() && !Core::App().screenIsLocked() && !PrivacyScreenActiveAny()
 			? session : nullptr;
 	}
 
-	void show(Fn<void(not_null<Ui::GenericBox*>)> fill) const {
+	void show(Fn<void(not_null<Ui::GenericBox*>)> fill, Ui::LayerOption option = Ui::LayerOption::CloseOther) const {
 		if (!current()) return;
 		const auto route = *this;
 		host->show(Box<Ui::GenericBox>([=](not_null<Ui::GenericBox*> box) {
@@ -61,7 +63,7 @@ struct Route {
 				RegisterView(live, box);
 				fill(box);
 			}
-		}), Ui::LayerOption::CloseOther);
+		}), option);
 	}
 
 	base::weak_ptr<Window::SessionController> host;
@@ -81,20 +83,22 @@ void Failed(const Route &route, QString reason) {
 }
 
 template <typename Work, typename Result>
-void Read(const Route &route, Work read, Result ready) {
+bool Read(const Route &route, Work read, Result ready) {
 	const auto live = route.current();
-	if (live && !Query(live, [=](Store &store) {
+	if (live && Query(live, [=](Store &store) {
 		if (route.epoch != ViewEpoch() || !route.lease->live.load()) return;
 		auto value = read(store);
 		crl::on_main([=, value = std::move(value)]() mutable {
 			if (route.current()) ready(std::move(value));
 		});
-	})) Failed(route, u"store_busy"_q);
+	})) return true;
+	Failed(route, u"store_busy"_q);
+	return false;
 }
 
-void Save(const Route &route, MessageIdentity item, int64 sequence, int64 ordinal) {
+void Save(const Route &route, MessageIdentity item, int64 sequence, int64 ordinal, QString name) {
 	FileDialog::GetWritePath(Core::App().getFileDialogParent(), tr::lng_save_file(tr::now),
-		FileDialog::AllFilesFilter(), u"attachment"_q, [=](QString &&path) {
+		FileDialog::AllFilesFilter(), name, [=](QString &&path) {
 			if (path.isEmpty()) return;
 			Read(route, [=](Store &store) {
 				auto file = QSaveFile(path);
@@ -104,30 +108,55 @@ void Save(const Route &route, MessageIdentity item, int64 sequence, int64 ordina
 						return route.epoch == ViewEpoch() && file.write(part) == part.size();
 					});
 				return saved && route.epoch == ViewEpoch() && store.current() && file.commit();
-			}, [=](bool ok) { if (!ok) Failed(route, u"copy_incomplete"_q); });
+			}, [=](bool ok) {
+				if (ok) route.host->showToast(tr::lng_purple_archive_attachment_saved(tr::now));
+				else Failed(route, u"copy_incomplete"_q);
+			});
 		});
 }
 
-void History(const Route &route, MessageIdentity item, int64 before = 0) {
-	Read(route, [=](Store &store) { return store.history(item, before, 12); }, [=](auto page) {
-		if (!page) return Failed(route, u"store_unreadable"_q);
+void History(const Route &route, MessageIdentity item, Ui::LayerOption layer = Ui::LayerOption::CloseOther) {
+	const auto load = [=](int64 cursor, Fn<void(std::optional<HistoryPage>)> done) {
+		if (!Read(route, [=](Store &store) { return store.history(item, cursor, 12); },
+				[=](auto page) { if (!page) Failed(route, u"store_unreadable"_q); done(std::move(page)); })) done({});
+	};
+	load(0, [=](auto page) {
+		if (!page) return;
 		route.show([=](not_null<Ui::GenericBox*> box) {
-			FillHistoryBox(box, *page, ArchivedText, [=] { return route.current() != nullptr; },
-				[=](int64 cursor) { History(route, item, cursor); }, {
-					.saving = [=](int64 seq, int64 slot) { return Saving(route.current(), item, seq, slot); },
-					.openSaved = [=](int64 seq, int64 slot) { Save(route, item, seq, slot); },
-				});
-		});
+			FillHistoryBox(box, *page, ArchivedText, [=] { return route.current() != nullptr; }, load, {
+				.saving = [=](int64 seq, int64 slot) { return Saving(route.current(), item, seq, slot); },
+				.openSaved = [=](int64 seq, int64 slot, QString name) { Save(route, item, seq, slot, std::move(name)); },
+			});
+		}, layer);
 	});
 }
 
-void Timeline(const Route &route, std::optional<PeerToken> peer, bool deleted,
-		std::optional<TimelineCursor> before = {}) {
-	Read(route, [=](Store &store) { return store.timeline(peer, deleted, before, 16); }, [=](auto page) {
-		if (!page) return Failed(route, u"store_unreadable"_q);
+QString TimelineName(not_null<Main::Session*> session, const TimelineEntry &entry) {
+	const auto token = entry.identity.peer;
+	const auto peerId = token.kind == PeerTokenKind::User ? peerFromUser(UserId(token.id))
+		: token.kind == PeerTokenKind::Chat ? peerFromChat(ChatId(token.id)) : peerFromChannel(ChannelId(token.id));
+	const auto chat = session->data().peerLoaded(peerId);
+	auto name = chat ? chat->name() : tr::lng_purple_archive_v2_unknown_chat(tr::now);
+	if (!entry.latest || (entry.kind != ChatClass::Group && Classify(chat) != ChatClass::Group)) return name;
+	const auto value = QJsonDocument::fromJson(entry.latest->body).object().value(u"sender"_q).toString().toULongLong();
+	if (value && value != peerId.value) {
+		if (const auto sender = session->data().peerLoaded(PeerId(PeerIdHelper(value)))) name += u" · "_q + sender->name();
+	}
+	return name;
+}
+
+void Timeline(const Route &route, std::optional<PeerToken> peer, bool deleted) {
+	const auto load = [=](std::optional<TimelineCursor> cursor, Fn<void(std::optional<TimelinePage>)> done) {
+		if (!Read(route, [=](Store &store) { return store.timeline(peer, deleted, cursor, 16); },
+				[=](auto page) { if (!page) Failed(route, u"store_unreadable"_q); done(std::move(page)); })) done({});
+	};
+	load({}, [=](auto page) {
+		if (!page) return;
 		route.show([=](not_null<Ui::GenericBox*> box) {
 			FillTimelineBox(box, *page, deleted, ArchivedText, [=] { return route.current() != nullptr; },
-				[=](TimelineCursor cursor) { Timeline(route, peer, deleted, cursor); });
+				[=](TimelineCursor cursor, Fn<void(std::optional<TimelinePage>)> done) { load(cursor, std::move(done)); },
+				[=](const TimelineEntry &entry) { return TimelineName(route.current(), entry); },
+				[=](MessageIdentity item) { History(route, item, Ui::LayerOption::KeepOther); });
 		});
 	});
 }
@@ -138,10 +167,26 @@ void Confirm(const Route &route, QString title, QString detail, Fn<void()> submi
 	});
 }
 
-void CleanupNext(const Route &route, CleanupTicket ticket) {
-	Read(route, [=](Store &store) { return store.cleanupPage(ticket); }, [=](CleanupResult result) {
+void ShowStorage(const Route &route);
+
+void CleanupNext(const Route &route, CleanupTicket ticket, std::optional<int64> before = {}) {
+	Read(route, [=](Store &store) {
+		const auto size = [&]() -> std::optional<int64> {
+			const auto usage = store.usage();
+			return usage ? std::optional(usage->physical()) : std::nullopt;
+		};
+		const auto start = before ? before : size();
+		const auto result = store.cleanupPage(ticket);
+		const auto after = result.complete ? size() : std::nullopt;
+		return std::tuple(result, start, start && after ? *start - *after : 0);
+	}, [=](auto outcome) {
+		const auto [result, start, reclaimed] = outcome;
 		if (!result.effect) Failed(route, result.effect.reason);
-		else if (!result.complete) CleanupNext(route, ticket);
+		else if (!result.complete) CleanupNext(route, ticket, start);
+		else {
+			ShowStorage(route);
+			route.host->showToast(ArchiveCleanupText(tr::lng_purple_archive_v2_cleanup_done(tr::now), reclaimed));
+		}
 	});
 }
 
@@ -186,7 +231,8 @@ void ShowStorage(const Route &route) {
 		}
 		return std::pair(summary, PreviousArchive::ReviewPreviousArchive(options));
 	}, [=](auto value) {
-		const auto &[summary, previous] = value;
+		const auto &summary = value.first;
+		const auto &previous = value.second;
 		const auto reviewPrevious = [=] {
 			if (!previous.review) {
 				Failed(route, previous.reason);
@@ -196,7 +242,11 @@ void ShowStorage(const Route &route) {
 				FillPreviousArchiveConfirm(box, label, previous.review->bytes(), [=] { return route.current() != nullptr; },
 					[=] {
 						Read(route, [=](Store &) { return PreviousArchive::DeletePreviousArchive(options, *previous.review); },
-							[=](auto result) { if (!result) Failed(route, result.reason); });
+							[=](auto result) {
+								if (!result) return Failed(route, result.reason);
+								ShowStorage(route);
+								route.host->showToast(ArchiveCleanupText(tr::lng_purple_archive_v2_previous_done(tr::now), previous.review->bytes()));
+							});
 					});
 			});
 		};
@@ -234,9 +284,9 @@ void ReviewArchiveReset(not_null<Window::SessionController*> window) {
 	});
 }
 
-void AddArchiveHistoryAction(not_null<Ui::PopupMenu*> menu, not_null<HistoryView::ListWidget*> list, FullMsgId id) {
+void AddArchiveHistoryAction(not_null<Ui::PopupMenu*> menu, not_null<Window::SessionController*> window, FullMsgId id) {
 	if (!id.peer || !IsServerMsgId(id.msg)) return;
-	const auto route = Route(list->controller());
+	const auto route = Route(window);
 	menu->addAction(tr::lng_purple_archive_history(tr::now), [=] {
 		if (route.current()) OpenArchiveHistory(route.host.get(), id);
 	}, &st::menuIconViewReplies);

@@ -35,6 +35,8 @@ if not exe.exists() or args.build_only:
         recipe[0], str(obj), str(build / target), *map(str, styles),
         str(products / "CMakeFiles/td_lang.dir/gen/lang_auto.cpp.o"),
         str(products / "CMakeFiles/td_lang.dir/SourceFiles/lang/lang_tag.cpp.o"),
+        str(products / "CMakeFiles/td_lang.dir/SourceFiles/lang/lang_keys.cpp.o"),
+        str(ui / "SourceFiles/ui/text/format_values.cpp.o"),
         str(products / "lib_ui/liblib_ui.a"), str(products / "lib_base/liblib_base.a"),
         "-L/opt/homebrew/opt/openssl@3/lib", "-lcrypto", "-L/opt/homebrew/opt/xxhash/lib", "-lxxhash",
         "-F", str(frameworks), f"-Wl,-rpath,{frameworks}", "-Wl,-dead_strip",
@@ -58,4 +60,4 @@ for scheme, colors in [("light", ""), ("dark", str(theme))]:
             directory.mkdir(exist_ok=True)
             subprocess.run([str(exe), str(directory), colors, str(width), direction], cwd=repo,
                            env=env, check=True)
-print("Rendered four native archive boxes at 500, 800 and 1300 px in light/dark and LTR/RTL.")
+print("Rendered five native archive boxes at 500, 800 and 1300 px in light/dark and LTR/RTL.")

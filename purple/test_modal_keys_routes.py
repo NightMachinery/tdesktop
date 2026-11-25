@@ -749,8 +749,14 @@ ordered(keys, '"archive-history"', '"archive-deleted"', '"archive-storage"',
 ordered(read("data/data_document_resolver.cpp"), "playPause", "ShowTTLMediaLayerWidget", "ObserveArchiveAttachment")
 ordered(read("media/view/media_view_overlay_widget.cpp"), "void OverlayWidget::show(OpenRequest",
         "displayDocument(", "ObserveArchiveAttachment")
-ordered(read("purple/purple_archive_v2_download.cpp"), "FileWrites.async", "file.write(bytes)",
+archive_download = read("purple/purple_archive_v2_download.cpp")
+ordered(archive_download, "void RecordFailure", "store.mediaSequence", "store.noteMediaFailure", "LogIncident")
+ordered(archive_download, "if (std::any_of(jobs.begin()", 'RecordFailure(session, request, u"media_queue_full"_q)')
+ordered(archive_download, "FileWrites.async", "file.write(bytes)",
         "destination->parts.count(false)", "Complete(Input")
+# Expired/consumed media may render as service items in either live history surface.
+for filename in ("history/history_inner_widget.cpp", "history/view/history_view_context_menu.cpp"):
+    assert "Purple::AddArchiveHistoryAction" in read(filename), filename
 assert "ObserveArchiveStream" not in read("data/data_streaming.cpp")
 topic_edit = read("boxes/peers/edit_forum_topic_box.cpp")
 ordered(topic_edit, "const auto refreshBotTopic", "bot ? peer->forum() : nullptr",

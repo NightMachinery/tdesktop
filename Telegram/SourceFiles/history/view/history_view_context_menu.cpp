@@ -1781,7 +1781,7 @@ void FillContextMenuItems(
 	const auto hasWhoReactedItem = item
 		&& Api::WhoReactedExists(item, Api::WhoReactedList::All);
 
-	Purple::AddArchiveHistoryAction(result, list, itemId);
+	Purple::AddArchiveHistoryAction(result, list->controller(), itemId);
 	AddReplyToMessageAction(result, request, list);
 	if (item) {
 		const auto media = item->media();

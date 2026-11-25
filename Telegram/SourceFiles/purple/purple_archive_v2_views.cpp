@@ -43,6 +43,7 @@ std::optional<HistoryPage> Store::history(const MessageIdentity &identity, int64
 	auto result = HistoryPage();
 	if (!head->head) return result;
 	result.status = head->head->status;
+	result.statusAt = head->observedAt;
 	result.missingPreimage = head->missingPreimage;
 	const auto ordered = _db.Read({ u"SELECT seq FROM versions WHERE message_key=? "
 		"AND (?=0 OR seq<?) ORDER BY seq DESC LIMIT ?"_q, { key, before, before, int64(limit)+1 }, kRows });
@@ -106,7 +107,7 @@ std::optional<TimelinePage> Store::timeline(std::optional<PeerToken> peer, bool 
 		if (!identity || (peer && identity->peer != *peer)) return std::nullopt;
 		auto latest = head->sequence ? body(*identity, head->sequence) : std::nullopt;
 		if (head->sequence && !latest) return std::nullopt;
-		result.rows.push_back({ *identity, head->head->status, head->observedAt, std::move(latest), TimelineCursor(*last, *message, id(), chat, deletedOnly) });
+		result.rows.push_back({ *identity, head->head->status, head->observedAt, std::move(latest), TimelineCursor(*last, *message, id(), chat, deletedOnly), ChatClass(head->kind) });
 	}
 	return current() ? std::optional(std::move(result)) : std::nullopt;
 }

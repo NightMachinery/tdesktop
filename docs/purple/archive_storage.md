@@ -5,7 +5,12 @@ quota and cleanup controls. Use the message context menu for that message's
 History or a chat's menu for its History and Deleted list. M-x provides
 `archive-history`, `archive-deleted` and `archive-storage`. History renders
 the saved text and formatting and can export a complete saved attachment.
-The records reflect observations delivered to this Desktop profile.
+Select a retained message in **Deleted messages** to open its History and
+export any saved file, including files from expired or consumed messages.
+In modal mode, use **j/k** to move, **Return** to open the focused row and
+**/** to filter the loaded rows. **Escape** clears the filter and restores
+row focus. **Older messages** appends to the list. The records reflect
+observations delivered to this Desktop profile.
 
 ## Policy
 
@@ -36,8 +41,9 @@ SQLite receives ciphertext for message data, descriptors and blob parts.
 An authenticated reference binds a saved copy to its specific version and media row.
 
 Reset reviews the account's active generation and measures its owned directory.
-Confirmation rechecks its identity and size before publishing a fresh
-generation. Logout publishes revocation without opening a replacement.
+Confirmation rechecks its identity and size before retiring the active
+generation. A fresh archive opens when the signed-in session resumes
+capture. Logout leaves any replacement unopened.
 Confirmed reset can retire an unreadable database when the profile can prove
 ownership of its pointer and directory. An early logout without a reported
 generation also proves it can unwrap that generation against its own login.
@@ -71,7 +77,8 @@ layout. Up to 4 MiB of measured file framing per bucket counts toward the
 shared headroom so a file can use its full default payload allowance. When
 fragmented pages leave too little space for a write, reclaim from that
 write's bucket. Storage shows actual physical usage alongside the allowance
-charges and overhead. Diagnostics records the individual file sizes.
+charges and overhead. Diagnostics records the individual file sizes. Successful manual cleanup
+refreshes Storage and reports physical bytes freed when measurable.
 
 Confirmed **Clear edit history** and **Empty deleted messages** use SQLite
 secure deletion and truncate the WAL after each write. If the selected

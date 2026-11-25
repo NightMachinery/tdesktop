@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
+#include "purple/purple_archive_v2_boxes.h"
 #include "purple/hooks/media_playback.h"
 #include "purple/purple_copy.h"
 #include "purple/purple_message_hints.h"
@@ -3023,6 +3024,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			e->accept();
 		}
 		return;
+	}
+	if (const auto item = _dragStateItem) {
+		Purple::AddArchiveHistoryAction(_menu.get(), _controller, item->fullId());
 	}
 	const auto importView = viewByItem(
 		session->data().message(importHit.containerId()));

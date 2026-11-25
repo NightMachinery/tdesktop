@@ -5,12 +5,11 @@
 
 namespace Window { class SessionController; }
 namespace Ui { class PopupMenu; }
-namespace HistoryView { class ListWidget; }
 
 namespace Purple {
 
 void AddArchiveHistoryAction(not_null<Ui::PopupMenu*> menu,
-	not_null<HistoryView::ListWidget*> list, FullMsgId item);
+	not_null<Window::SessionController*> window, FullMsgId item);
 void OpenArchiveHistory(not_null<Window::SessionController*> window, FullMsgId item);
 void OpenArchivedMessages(not_null<Window::SessionController*> window,
 	std::optional<PeerToken> peer, bool deleted);

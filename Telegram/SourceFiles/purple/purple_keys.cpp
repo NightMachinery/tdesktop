@@ -31,6 +31,7 @@
 #include "history/view/controls/history_view_compose_controls.h"
 #include "history/view/history_view_chat_section.h"
 #include "history/view/history_view_list_widget.h"
+#include "history/history_inner_widget.h"
 #include "history/view/history_view_pinned_section.h"
 #include "history/view/history_view_scheduled_section.h"
 #include "info/downloads/info_downloads_widget.h"
@@ -4941,10 +4942,17 @@ void Keys::dispatch(Action action, const Target &target, int count, ScrollPress 
 	case Action::OpenArchive:
 		launch(Native::ShowArchive);
 		break;
-	case Action::ArchiveHistory:
+	case Action::ArchiveHistory: {
 		clearPrefix();
-		OpenArchivedMessages(current, ArchiveV2::Peer(target.chat.peer()->id), false);
+		const auto selected = target.messages.main ? target.messages.main->getSelectedItems()
+			: target.messages.section ? target.messages.section->purpleSelectedIdsInOrder() : MessageIdsList();
+		if (selected.size() == 1 && IsServerMsgId(selected.front().msg)) {
+			OpenArchiveHistory(current, selected.front());
+		} else {
+			OpenArchivedMessages(current, ArchiveV2::Peer(target.chat.peer()->id), false);
+		}
 		break;
+	}
 	case Action::ArchiveDeleted:
 		clearPrefix();
 		OpenArchivedMessages(current, {}, true);
