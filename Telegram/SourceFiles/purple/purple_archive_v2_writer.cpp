@@ -142,8 +142,8 @@ bool Writer::drainUntil(std::chrono::steady_clock::time_point deadline) {
 }
 
 void Writer::stop(std::optional<QByteArray> logout) {
-	_state->lease->revoke();
 	const auto lock = std::lock_guard(_state->mutex);
+	_state->lease->revoke();
 	if (_state->stopped) return;
 	_state->stopped = true;
 	_state->logout = std::move(logout);
@@ -227,7 +227,7 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 						const auto guard = std::lock_guard(state->mutex);
 						return state->logout;
 					}();
-					if (logout) effect = store->logout({});
+					if (logout) (void)store->logout({});
 					store.reset();
 					report(std::move(effect), id, IncidentStage::Cleanup);
 					return;

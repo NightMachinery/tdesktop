@@ -369,7 +369,6 @@ StoreEffect Store::retire(const QByteArray &expectedId, const ResetReview *revie
 	next.wrapped.clear();
 	next.directory.clear();
 	next.initialized = false;
-	if (review && !makeActive(next)) return { u"key_unavailable"_q };
 	if (!review) _options.lease->revoke();
 	if (!publish(next)) {
 		if (!ownsPointer()) {
@@ -383,7 +382,8 @@ StoreEffect Store::retire(const QByteArray &expectedId, const ResetReview *revie
 	_options.lease->revoke();
 	_options.lease->crypto.Revoke();
 	if (!step(Phase::AfterPublish) || !_db.CloseFinal()) return { u"cleanup_pending"_q, true };
-	return { cleanup(), true };
+	const auto failure = cleanup();
+	return { .reason = failure, .committed = true, .reclaimed = review && failure.isEmpty() ? review->bytes() : 0 };
 }
 
 StoreEffect Store::reset(const ResetReview &review) {
@@ -392,6 +392,7 @@ StoreEffect Store::reset(const ResetReview &review) {
 
 StoreEffect Store::logout(const QByteArray &expectedId) {
 	if (!_lock && !_bound) _bindFailure = bind(false);
+	if (_bound && _pointer.id.isEmpty() && expectedId.isEmpty()) return recover();
 	if (!expectedId.isEmpty() || _options.profilePath.isEmpty()) return retire(expectedId, nullptr);
 	if (!_bound) return { _bindFailure.isEmpty() ? u"store_unreadable"_q : _bindFailure };
 	auto key = nativeWrap(_pointer.id, _pointer.wrapped);

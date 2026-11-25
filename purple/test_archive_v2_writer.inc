@@ -436,6 +436,40 @@ void UnreadableWriterControls() {
 	CHECK(Put(ActivePath(options, id) + u"/stale.fixture"_q, "size changed"));
 	CHECK(store.reset(*token).reason == u"reset_review_stale"_q && store.current());
 }
+void LogoutAtResetDelivery() {
+	Section = "v2 logout during delivery of the committed reset effect";
+	const auto temp = std::make_shared<QTemporaryDir>();
+	const auto options = Options(temp->path());
+	struct Signals {
+		std::promise<V2Store::ResetCheck> reviewed;
+		std::promise<QByteArray> delivered;
+		std::promise<void> resume;
+		std::promise<void> left;
+	};
+	const auto signals = std::make_shared<Signals>();
+	auto resumed = std::make_shared<std::future<void>>(signals->resume.get_future());
+	auto delivered = signals->delivered.get_future();
+	auto reviewed = signals->reviewed.get_future();
+	auto left = signals->left.get_future();
+	auto worker = Writer(options, [signals, resumed, temp](StoreEffect effect, QByteArray id) {
+		if (effect.stage != IncidentStage::Cleanup || !effect.committed) return;
+		signals->delivered.set_value(std::move(id));
+		resumed->wait_for(std::chrono::seconds(5));
+		signals->left.set_value();
+	});
+	CHECK(worker.query({}, [signals](V2Store &store) { signals->reviewed.set_value(store.reviewReset(store.id())); }));
+	if (reviewed.wait_for(std::chrono::seconds(5)) != std::future_status::ready) { CHECK(false); return; }
+	const auto review = reviewed.get();
+	const auto token = std::get_if<ResetReview>(&review);
+	CHECK(token && worker.reset(*token));
+	if (delivered.wait_for(std::chrono::seconds(5)) != std::future_status::ready) { CHECK(false); return; }
+	worker.logout({});
+	CHECK(delivered.get().isEmpty());
+	CHECK(QDir(AccountPath(options)).entryList({ u"store-*"_q, u"retired-*"_q }, QDir::Dirs).empty());
+	signals->resume.set_value();
+	CHECK(left.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+}
+
 void ActiveDirectorySubstitution() {
 	Section = "v2 authenticated active directory identity refuses a substituted tree";
 	const auto temp = QTemporaryDir();

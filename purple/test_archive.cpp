@@ -113,6 +113,7 @@ int main(int argc, char** argv) {
 	V2Fixtures::CorruptStoreRefuses();
 	V2Fixtures::UnreadableRetirement();
 	V2Fixtures::UnreadableWriterControls();
+	V2Fixtures::LogoutAtResetDelivery();
 	V2Fixtures::ActiveDirectorySubstitution();
 	V2Fixtures::QueueCancellation();
 	V2Fixtures::CutoverCredentialsAndQuit();

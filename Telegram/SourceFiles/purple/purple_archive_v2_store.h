@@ -45,6 +45,7 @@ struct StoreEffect {
 	bool committed = false;
 	IncidentStage stage = IncidentStage::Capture;
 	uint64_t count = 1;
+	int64 reclaimed = 0;
 	[[nodiscard]] explicit operator bool() const { return reason.isEmpty(); }
 };
 
