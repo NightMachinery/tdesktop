@@ -109,7 +109,7 @@ QString Store::openDatabase(const QByteArray &dataKey) {
 		if (!header) return u"key_unavailable"_q;
 		auto init = Schema();
 		init.statements.insert(init.statements.end() - 1,
-			{ u"INSERT INTO meta VALUES(2,?,?,0,0,0,0,0)"_q, { _pointer.id, *header }, kOne });
+			{ u"INSERT INTO meta VALUES(2,?,?,0,0,0,0,0,0)"_q, { _pointer.id, *header }, kOne });
 		if (!_db.Execute(init, [this] { return _options.lease->live.load(); }).committed) return u"store_unreadable"_q;
 	}
 	if (!captureSerial() || !totals(true)) return u"schema_unknown"_q;
@@ -118,6 +118,10 @@ QString Store::openDatabase(const QByteArray &dataKey) {
 	sweep.statements.push_back({ u"COMMIT"_q });
 	if (!_db.Execute(sweep, [this] { return _options.lease->live.load(); }).ok) return u"store_unreadable"_q;
 	_vacuumPending = pragma(u"PRAGMA freelist_count"_q).value_or(0) > 0;
+	const auto queued = pragma(u"SELECT EXISTS(SELECT 1 FROM blobs WHERE sealed_manifest=x'') FROM meta WHERE scrubbing=0"_q);
+	if (!queued) return u"store_unreadable"_q;
+	// The last scrub may have committed just before a crash, without reaching its checkpoint.
+	_scrubPending = !_db.CheckpointV2().ok || *queued != 0;
 	if (!_pointer.initialized) {
 		auto next = _pointer;
 		next.initialized = true;
@@ -469,6 +473,9 @@ StoreEffect Store::writeBlob(const BlobInput &input, const std::function<void()>
 	const auto parts = (input.size - 1) / kPartSize + 1;
 	const auto framing = parts * 3072 + 384;
 	const auto manifest = Number(input.size) + Number(parts) + input.digest;
+	if (_scrubPending) {
+		if (const auto result = scrubParts(true); !result) return result;
+	}
 	const auto previous = _db.Read({ u"SELECT size,sealed_manifest,timed FROM blobs WHERE blob_key=?"_q, { blob }, kRows });
 	if (!previous.ok) return { u"store_unreadable"_q };
 	auto charge = input.size;

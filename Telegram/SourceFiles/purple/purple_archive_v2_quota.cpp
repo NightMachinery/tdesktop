@@ -208,11 +208,12 @@ QString Store::reserve(int64 logical, int64 framing, bool timed, const QByteArra
 }
 
 bool Store::maintenancePending() const {
-	return current() && (_trimPending || _vacuumPending || _lastTrimDay != today());
+	return current() && (_trimPending || _vacuumPending || _scrubPending || _lastTrimDay != today());
 }
 
 StoreEffect Store::maintain() {
 	if (!current()) return { u"scope_retired"_q };
+	if (_scrubPending) return scrubParts(false);
 	if (!Valid(_options.policy)) return { u"policy_invalid"_q };
 	const auto day = today();
 	if (_lastTrimDay != day) {

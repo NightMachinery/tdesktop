@@ -10,7 +10,7 @@ ArchiveSqlProgram Schema() {
 			store_id BLOB NOT NULL, sealed_header BLOB NOT NULL, serial INTEGER NOT NULL CHECK(serial>=0),
 			ordinary INTEGER NOT NULL CHECK(ordinary>=0), timed INTEGER NOT NULL CHECK(timed>=0),
 			ordinary_framing INTEGER NOT NULL CHECK(ordinary_framing>=0),
-			timed_framing INTEGER NOT NULL CHECK(timed_framing>=0)
+			timed_framing INTEGER NOT NULL CHECK(timed_framing>=0), scrubbing INTEGER NOT NULL CHECK(scrubbing IN (0,1))
 		) STRICT)sql"_q },
 		{ uR"sql(CREATE TABLE messages (
 			message_key BLOB PRIMARY KEY NOT NULL, chat_key BLOB NOT NULL,
@@ -58,6 +58,7 @@ ArchiveSqlProgram Schema() {
 		{ u"CREATE INDEX messages_lookup ON messages(nonchannel_lookup) WHERE nonchannel_lookup IS NOT NULL"_q },
 		{ u"CREATE INDEX media_blob ON media(blob_key) WHERE blob_key IS NOT NULL"_q },
 		{ u"CREATE INDEX blobs_bucket ON blobs(timed,blob_key)"_q },
+		{ u"CREATE INDEX blobs_scrub ON blobs(blob_key) WHERE sealed_manifest=x''"_q },
 		{ u"CREATE INDEX versions_cleanup ON versions(serial,message_key,seq)"_q },
 		{ u"CREATE INDEX messages_cleanup ON messages(serial,message_key) WHERE status<>0 AND head_seq IS NOT NULL"_q },
 		{ u"CREATE INDEX messages_age ON messages(last_activity,message_key)"_q },
@@ -86,9 +87,11 @@ ArchiveSqlProgram Schema() {
 	for (const auto &op : { u"DELETE"_q, u"UPDATE OF blob_key"_q }) {
 		plan.statements.push_back({ u"CREATE TRIGGER media_release_%1 AFTER %2 ON media "
 			"WHEN OLD.blob_key IS NOT NULL BEGIN "
-			"DELETE FROM blobs WHERE blob_key=OLD.blob_key "
+			"UPDATE blobs SET sealed_manifest=x'' WHERE blob_key=OLD.blob_key AND (SELECT scrubbing FROM meta)=1 "
 			"AND NOT EXISTS(SELECT 1 FROM media WHERE blob_key=OLD.blob_key); "
-			"UPDATE blobs SET timed=0 WHERE blob_key=OLD.blob_key AND timed=1 "
+			"DELETE FROM blobs WHERE blob_key=OLD.blob_key AND sealed_manifest IS NOT x'' "
+			"AND NOT EXISTS(SELECT 1 FROM media WHERE blob_key=OLD.blob_key); "
+			"UPDATE blobs SET timed=0 WHERE blob_key=OLD.blob_key AND timed=1 AND sealed_manifest IS NOT x'' "
 			"AND NOT EXISTS(SELECT 1 FROM media WHERE blob_key=OLD.blob_key AND timed=1); END"_q
 				.arg(op.left(6), op) });
 	}

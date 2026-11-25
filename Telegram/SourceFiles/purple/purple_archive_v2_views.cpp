@@ -121,9 +121,46 @@ std::optional<CleanupTicket> Store::prepareCleanup(CleanupKind kind, std::option
 	return CleanupTicket{ id(), std::move(chat), kind, *serial };
 }
 
+StoreEffect Store::secureWrite(ArchiveSqlProgram program) {
+	if (const auto failure = physicalLimit(5 * kMiB, true); !failure.isEmpty()) return { failure };
+	if (pragma(u"PRAGMA secure_delete=ON"_q) != 1) return { u"cleanup_blocked"_q };
+	program.statements.insert(program.statements.begin() + 1, ArchiveSqlStatement{ u"UPDATE meta SET scrubbing=1"_q, {}, kOne });
+	program.statements.push_back({ u"UPDATE meta SET scrubbing=0"_q, {}, kOne });
+	const auto result = write(std::move(program));
+	const auto restored = pragma(u"PRAGMA secure_delete=OFF"_q) == 0;
+	if (!result) return { result.reason == u"disk_full"_q ? result.reason : u"cleanup_blocked"_q };
+	_scrubPending = _vacuumPending = true;
+	return { step(Phase::CleanupCommit) && _db.CheckpointV2().ok && restored
+		? QString() : u"cleanup_pending"_q, true };
+}
+
+StoreEffect Store::scrubParts(bool drain) {
+	do {
+		const auto next = _db.Read({ u"SELECT blob_key FROM blobs WHERE sealed_manifest=x'' LIMIT 1"_q, {}, kRows });
+		if (!next.ok) return { u"cleanup_pending"_q };
+		if (next.rows.empty()) {
+			if (_scrubPending && !_db.CheckpointV2().ok) return { u"cleanup_pending"_q };
+			_scrubPending = false;
+			return {};
+		}
+		const auto &key = next.rows.front().front();
+		auto plan = Begin();
+		plan.statements.push_back({ u"DELETE FROM blob_parts WHERE blob_key=? AND part_no IN "
+			"(SELECT part_no FROM blob_parts WHERE blob_key=? ORDER BY part_no LIMIT 4)"_q, { key, key }, kChanges });
+		plan.statements.push_back({ u"DELETE FROM blobs WHERE blob_key=? AND sealed_manifest=x'' "
+			"AND NOT EXISTS(SELECT 1 FROM blob_parts WHERE blob_key=?)"_q, { key, key }, kChanges });
+		if (const auto result = secureWrite(std::move(plan)); !result) return result;
+	} while (drain);
+	return {};
+}
+
 CleanupResult Store::cleanupPage(const CleanupTicket &ticket) {
 	if (!current() || ticket.store != id()) return { .effect = { u"scope_retired"_q } };
-	if (const auto failure = physicalLimit(0); !failure.isEmpty()) return { .effect = { failure } };
+	if (const auto failure = physicalLimit(0, true); !failure.isEmpty()) return { .effect = { failure } };
+	if (!_db.CheckpointV2().ok) return { .effect = { u"cleanup_pending"_q } };
+	if (_scrubPending) {
+		if (const auto result = scrubParts(true); !result) return { .effect = result };
+	}
 	const auto edit = ticket.kind == CleanupKind::EditHistory;
 	const auto entries = edit
 		? _db.Read({ u"SELECT v.message_key,v.seq FROM versions v JOIN messages m USING(message_key) "
@@ -136,48 +173,73 @@ CleanupResult Store::cleanupPage(const CleanupTicket &ticket) {
 	const auto count = std::min<size_t>(kPage, entries.rows.size());
 	if (!count) return { .complete = true };
 	if (!std::exchange(*ticket.started, true)) _options.lease->mediaRevision.fetch_add(1);
-	auto program = Begin();
+	auto progress = CleanupResult();
+	const auto failed = [&](StoreEffect effect) {
+		effect.committed |= progress.effect.committed;
+		return CleanupResult{ effect, progress.removed };
+	};
 	for (auto i = size_t(0); i != count; ++i) {
+		auto program = Begin();
 		const auto &selected = entries.rows[i];
 		const auto key = selected.empty() ? nullptr : std::get_if<QByteArray>(&selected.front());
-		if (!key) return { .effect = { u"cleanup_blocked"_q } };
+		if (!key) return failed({ u"cleanup_blocked"_q });
 		auto row = readHead(*key, {});
-		if (!row || !row->head) return { .effect = { u"cleanup_blocked"_q } };
+		if (!row || !row->head) return failed({ u"cleanup_blocked"_q });
 		if (!ticket.chat.isEmpty()) {
 			const auto identity = ParseIdentity(row->identity);
 			const auto peer = identity ? PeerTokenText(identity->peer) : std::nullopt;
 			if (!peer || token("chat", peer->toLatin1()) != ticket.chat) {
-				return { .effect = { u"cleanup_blocked"_q } };
+				return failed({ u"cleanup_blocked"_q });
 			}
 		}
 		if (edit) {
 			const auto seq = selected.size() == 2 ? std::get_if<int64>(&selected.back()) : nullptr;
-			if (!seq || *seq == row->sequence) return { .effect = { u"cleanup_blocked"_q } };
+			if (!seq || *seq == row->sequence) return failed({ u"cleanup_blocked"_q });
 			program.statements.push_back({ u"INSERT INTO purged_edits SELECT event_key,message_key FROM versions "
 				"WHERE message_key=? AND seq=? AND serial<=?"_q, { *key, *seq, ticket.cutoff }, kOne });
 			program.statements.push_back({ u"DELETE FROM versions WHERE message_key=? AND seq=? AND serial<=?"_q,
 				{ *key, *seq, ticket.cutoff }, kOne });
 		} else {
 			if (row->serial > ticket.cutoff || row->head->status == MessageStatus::Live) {
-				return { .effect = { u"cleanup_blocked"_q } };
+				return failed({ u"cleanup_blocked"_q });
+			}
+			const auto size = _db.Read({ u"SELECT coalesce(sum(length(sealed_body)),0) FROM versions WHERE message_key=?"_q,
+				{ *key }, ArchiveSqlExpectation::OneRow });
+			if (!size.ok || !std::holds_alternative<int64>(size.rows.front().front())) return failed({ u"cleanup_blocked"_q });
+			auto bytes = std::get<int64>(size.rows.front().front());
+			while (bytes > 4 * kMiB) {
+				const auto cut = _db.Read({ u"SELECT seq,length(sealed_body) FROM versions WHERE message_key=? AND seq<>? "
+					"AND serial<=? ORDER BY seq LIMIT 1"_q, { *key, row->sequence, ticket.cutoff }, kRows });
+				if (!cut.ok) return failed({ u"cleanup_blocked"_q });
+				if (cut.rows.empty()) break;
+				const auto amount = std::get_if<int64>(&cut.rows.front()[1]);
+				if (!amount || *amount <= 0) return failed({ u"cleanup_blocked"_q });
+				auto part = Begin();
+				part.statements.push_back({ u"DELETE FROM versions WHERE message_key=? AND seq=?"_q,
+					{ *key, cut.rows.front()[0] }, kOne });
+				const auto result = secureWrite(std::move(part));
+				if (!result) return failed(result);
+				progress.effect.committed = true;
+				bytes -= *amount;
 			}
 			row->head->bodyTag.clear();
 			row->sequence = 0;
 			row->emptied = true;
 			const auto sealed = sealMessage(*key, *row);
-			if (!sealed) return { .effect = { u"cleanup_blocked"_q } };
+			if (!sealed) return failed({ u"cleanup_blocked"_q });
 			program.statements.push_back({ u"UPDATE messages SET head_seq=NULL,sealed_identity=?,cleared=1 WHERE message_key=?"_q,
 				{ *sealed, *key }, kOne });
 			program.statements.push_back({ u"DELETE FROM versions WHERE message_key=? AND serial<=?"_q,
 				{ *key, ticket.cutoff }, kChanges });
 		}
+		const auto result = secureWrite(std::move(program));
+		progress.removed += result.committed;
+		if (!result) return failed(result);
+		progress.effect.committed = true;
 	}
-	program.statements.push_back({ u"COMMIT"_q });
-	const auto result = _db.Execute(program, [this] { return current(); });
-	if (!result.committed) {
-		return { .effect = { result.diskFull() ? u"disk_full"_q : u"cleanup_blocked"_q } };
-	}
-	return { .effect = { {}, true }, .removed = int(count), .complete = count == entries.rows.size() };
+	if (const auto result = scrubParts(true); !result) return failed(result);
+	progress.complete = count == entries.rows.size();
+	return progress;
 }
 
 }

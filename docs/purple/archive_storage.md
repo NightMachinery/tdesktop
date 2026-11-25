@@ -64,6 +64,13 @@ fragmented pages leave too little space for a write, reclaim from that
 write's bucket. Storage shows actual physical usage alongside the allowance
 charges and overhead. Diagnostics records the individual file sizes.
 
+Confirmed **Clear edit history** and **Empty deleted messages** use SQLite
+secure deletion and truncate the WAL after each write. If the selected
+versions are the last references to a saved file, its parts are scrubbed in
+bounded transactions. Pending scrubs survive restart. A shared file with a
+remaining reference stays readable. Automatic eviction keeps the cheaper
+SQLite deletion mode.
+
 ## Stream retirement wakeups
 
 Retirement sets the cleanup predicate and notifies under the worker wait mutex.

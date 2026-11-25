@@ -12,7 +12,7 @@ namespace Purple::ArchiveV2 {
 
 enum class Phase {
 	BeforeSqlCommit, AfterSqlCommit, BlobPart, BeforePublish, AfterPublish,
-	BeforeDetach, AfterDetach, BeforeUnlink, AfterUnlink,
+	BeforeDetach, AfterDetach, BeforeUnlink, AfterUnlink, CleanupCommit,
 };
 
 struct Lease {
@@ -277,6 +277,8 @@ private:
 	[[nodiscard]] std::optional<int64> captureSerial();
 	[[nodiscard]] QString openDatabase(const QByteArray &dataKey);
 	[[nodiscard]] StoreEffect write(ArchiveSqlProgram program);
+	[[nodiscard]] StoreEffect secureWrite(ArchiveSqlProgram program);
+	[[nodiscard]] StoreEffect scrubParts(bool drain);
 	[[nodiscard]] StoreEffect captureOne(const CapturedEvent &event);
 	[[nodiscard]] std::optional<std::pair<int64, int64>> totals(bool budget = false);
 	[[nodiscard]] QString reserve(int64 logical, int64 framing, bool timed, const QByteArray &keep,
@@ -306,6 +308,7 @@ private:
 	int64 _pageLimit = 0;
 	bool _trimPending = true;
 	bool _vacuumPending = false;
+	bool _scrubPending = false;
 	QByteArray _mediaKeep;
 	const DesktopArchiveSqlite::Write *_batch = nullptr;
 };

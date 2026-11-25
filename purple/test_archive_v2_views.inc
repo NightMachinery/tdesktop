@@ -101,6 +101,156 @@ void HistoryAndCleanup() {
 	CHECK(stats && stats->active.database > 0 && !stats->overLimit);
 }
 
+void ConfirmedCleanupScrubsFiles() {
+	Section = "v2 confirmed cleanup scrubs removed ciphertext and truncates WAL";
+	for (const auto kind : { CleanupKind::EditHistory, CleanupKind::DeletedMessages }) {
+		const auto temp = QTemporaryDir();
+		const auto options = Options(temp.path());
+		auto store = V2Store(options);
+		CHECK(store.open());
+		const auto id = store.id();
+		const auto path = ActivePath(options, id) + u"/archive.sqlite"_q;
+		auto event = Sample(id, "first", QByteArray(180, 'A'));
+		CHECK(store.capture(event).committed);
+		CHECK(store.writeBlob(SampleBlob(id, QByteArray(220, 'B'))).committed);
+		event.eventId = "second";
+		event.body = QByteArray(160, 'C');
+		event.event = kind == CleanupKind::EditHistory ? Observation::Edit : Observation::Delete;
+		CHECK(store.capture(event).committed);
+		auto removed = std::vector<QByteArray>();
+		{
+			auto probe = DesktopArchiveSqlite();
+			CHECK(probe.Open(path, false).ok);
+			for (const auto &query : { u"SELECT sealed_body FROM versions WHERE seq=1"_q,
+					u"SELECT sealed_descriptor FROM media WHERE seq=1"_q, u"SELECT sealed_bytes FROM blob_parts"_q }) {
+				const auto row = probe.Read({ query, {}, ArchiveSqlExpectation::OneRow });
+				CHECK(row.ok);
+				if (!row.ok) continue;
+				const auto bytes = std::get_if<QByteArray>(&row.rows.front().front());
+				CHECK(bytes && bytes->size() > 32);
+				if (bytes && bytes->size() > 32) removed.push_back(*bytes);
+			}
+			CHECK(probe.CheckpointV2().ok);
+		}
+		const auto present = [&](const QByteArray &bytes, const QString &suffix) { return Read(path + suffix).contains(bytes); };
+		CHECK(removed.size() == 3);
+		for (const auto &bytes : removed) CHECK(present(bytes, {}) || present(bytes, u"-wal"_q));
+		const auto ticket = store.prepareCleanup(kind);
+		CHECK(ticket);
+		if (!ticket) continue;
+		{
+			auto reader = DesktopArchiveSqlite();
+			CHECK(reader.Open(path, false, true).ok && reader.BeginRead());
+			CHECK(reader.Read({ u"SELECT count(*) FROM versions"_q, {}, ArchiveSqlExpectation::OneRow }).ok);
+			auto unrelated = Sample(id, "snapshot", "another live message");
+			unrelated.identity.message += 1;
+			CHECK(store.capture(unrelated).committed);
+			const auto blocked = store.cleanupPage(*ticket);
+			CHECK(blocked.effect.reason == u"cleanup_pending"_q && !blocked.effect.committed);
+			CHECK(reader.EndRead());
+		}
+		CHECK(store.cleanupPage(*ticket).effect);
+		for (const auto &bytes : removed) CHECK(!present(bytes, {}) && !present(bytes, u"-wal"_q));
+		CHECK(QFileInfo(path + u"-wal"_q).size() == 0);
+		if (kind == CleanupKind::EditHistory) CHECK(store.body(event.identity, 2));
+	}
+}
+
+void ConfirmedLargeScrubResumes() {
+	Section = "v2 confirmed large-file scrub resumes after interruption with bounded WAL";
+	const auto temp = QTemporaryDir();
+	auto path = QString();
+	auto id = QByteArray();
+	auto markers = std::vector<QByteArray>();
+	auto walPeak = int64(0);
+	auto cut = true;
+	auto cutLast = false;
+	const auto configure = [&] {
+		auto options = Options(temp.path());
+		options.checkpoint = [&](Phase step) {
+			if (step != Phase::CleanupCommit) return true;
+			walPeak = std::max(walPeak, QFileInfo(path + u"-wal"_q).size());
+			if (cutLast && Count(path, u"SELECT count(*) FROM blob_parts"_q) == 0) {
+				cutLast = false;
+				return false;
+			}
+			return !std::exchange(cut, false);
+		};
+		return options;
+	};
+	{
+		const auto options = configure();
+		auto store = V2Store(options);
+		CHECK(store.open());
+		id = store.id();
+		path = ActivePath(options, id) + u"/archive.sqlite"_q;
+		auto event = Sample(id);
+		CHECK(store.capture(event).committed);
+		CHECK(store.writeBlob(SampleBlob(id, QByteArray(21 * kMiB, 'W'))).committed);
+		{
+			auto probe = DesktopArchiveSqlite();
+			CHECK(probe.Open(path, false, true).ok);
+			const auto parts = probe.Read({ u"SELECT substr(sealed_bytes,1,32) FROM blob_parts ORDER BY part_no"_q,
+				{}, ArchiveSqlExpectation::Rows });
+			CHECK(parts.ok && parts.rows.size() == 21);
+			if (parts.ok) for (const auto &part : parts.rows) markers.push_back(std::get<QByteArray>(part.front()));
+		}
+		event.event = Observation::Edit;
+		event.eventId = "new-head";
+		event.body = "kept version";
+		CHECK(store.capture(event).committed);
+		const auto ticket = store.prepareCleanup(CleanupKind::EditHistory);
+		CHECK(ticket);
+		if (!ticket) return;
+		const auto interrupted = store.cleanupPage(*ticket);
+		CHECK(interrupted.effect.committed && interrupted.effect.reason == u"cleanup_pending"_q && !interrupted.complete);
+		CHECK(!store.body(event.identity, 1));
+		CHECK(Count(path, u"SELECT count(*) FROM blobs WHERE sealed_manifest=x''"_q) == 1);
+	}
+	const auto saved = Read(path);
+	CHECK(!markers.empty() && std::any_of(markers.begin(), markers.end(), [&](const auto &mark) { return saved.contains(mark); }));
+	auto reopened = V2Store(configure());
+	CHECK(reopened.open() && reopened.id() == id);
+	cutLast = true;
+	auto tailInterrupted = false;
+	for (auto i = 0; i != 128 && Count(path, u"SELECT count(*) FROM blob_parts"_q) > 0; ++i) {
+		const auto result = reopened.maintain();
+		if (!result) {
+			CHECK(result.reason == u"cleanup_pending"_q && result.committed);
+			tailInterrupted = true;
+		}
+	}
+	CHECK(tailInterrupted && !cutLast && reopened.maintain());
+	CHECK(Count(path, u"SELECT count(*) FROM blobs"_q) == 0);
+	CHECK(Count(path, u"SELECT count(*) FROM blob_parts"_q) == 0);
+	const auto disk = Read(path);
+	const auto wal = Read(path + u"-wal"_q);
+	for (const auto &mark : markers) CHECK(!disk.contains(mark) && !wal.contains(mark));
+	CHECK(wal.isEmpty() && walPeak > 0 && walPeak <= kWalHeadroom);
+	CHECK(reopened.body(Sample(id).identity, 2));
+	auto deleted = Sample(id);
+	deleted.identity.message += 1;
+	deleted.attachments.clear();
+	for (auto i = 0; i != 9; ++i) {
+		deleted.eventId = QByteArray::number(i);
+		deleted.body = QByteArray(kMiB, char(i + 1));
+		deleted.event = i ? Observation::Edit : Observation::Baseline;
+		CHECK(reopened.capture(deleted).committed);
+	}
+	deleted.eventId = "terminal";
+	deleted.event = Observation::Delete;
+	CHECK(reopened.capture(deleted).committed);
+	const auto trash = reopened.prepareCleanup(CleanupKind::DeletedMessages);
+	CHECK(trash);
+	if (trash) {
+		const auto result = reopened.cleanupPage(*trash);
+		CHECK(result.effect && result.complete && result.removed == 1);
+	}
+	CHECK(!reopened.body(deleted.identity, 1) && !reopened.body(deleted.identity, 9));
+	CHECK(QFileInfo(path + u"-wal"_q).size() == 0 && walPeak <= kWalHeadroom);
+	std::printf("V2 confirmed scrub peak WAL: %lld bytes\n", static_cast<long long>(walPeak));
+}
+
 void PendingBytesAndMediaOutcome() {
 	Section = "v2 row-level failed media outcome and published retirement size";
 	const auto temp = QTemporaryDir();
