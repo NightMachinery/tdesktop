@@ -40,11 +40,14 @@ def inspect(values):
     require('chat-pickup-own-filter', 'SyncAutoPickupNeeded' in pickup and 'SyncAutoEvent::ChatUpdated' in pickup)
     require('chat-pickup-debounce', 'if (!_pickup.isActive())' in auto and '_pickup.callOnce(500)' in auto)
     magic = values['purple_sync_magic_service.cpp']
-    toast = values['purple_sync_magic_box.cpp'].split('void ToastSyncMagicProblem(', 1)[1].split('void SyncMagicChatBox(', 1)[0]
-    require('magic-problem-toast', 'last.kind == SyncMagicResult::Kind::Problem && last.show' in magic
+    notice = values['purple_sync_magic_box.cpp'].split('void ToastSyncMagicProblem(', 1)[1].split('void SyncMagicChatBox(', 1)[0]
+    require('magic-problem-notice', 'last.kind == SyncMagicResult::Kind::Problem && last.show' in magic
         and 'ToastSyncMagicProblem(session);' in magic
-        and 'chat->shown();' in toast and toast.index('chat->shown();') < toast.index('showToast(')
-        and 'SyncMagicChatBox' in toast)
+        and all(marker in notice for marker in ('chat->shown();', 'ShowPurpleNotice({',
+            '.session = session', '.background = true', '.run = openSettings',
+            'SyncMagicChatBox', '&own->session() == weakSession.get()', '!host->locked()',
+            '!PrivacyScreenActiveAny()'))
+        and notice.index('chat->shown();') < notice.index('ShowPurpleNotice({'))
     telegram = values['purple_sync_magic_telegram.cpp']
     lists = telegram.split('void loadLists(std::optional<PeerToken> bound,', 1)[-1].split('void fullInfo(', 1)[0]
     require('magic-lists-early', 'bound && data.channelLoaded(ChannelId(bound->id)) != nullptr' in lists
@@ -228,12 +231,14 @@ def inspect(values):
         and all(marker not in first for marker in ['ConfirmAction(', 'showBox(', 'Ui::show(', 'uiShow(']))
     require('first-use-auto-status', 'first->outcome == SyncFirstUseOutcome::Asking) { return tr::lng_purple_auto_first_ask(tr::now); }' in auto
         and 'first->outcome == SyncFirstUseOutcome::Waiting) { return tr::lng_purple_auto_first_wait(tr::now); }' in auto)
-    settings = values['purple_settings_section.cpp']
-    row = settings.split('.id = u"advanced/purple_sync_setup"_q,', 1)[-1].split('.keywords =', 1)[0]
+    settings = values['purple_settings_section.cpp'].split('void BuildPurpleAccountsSettings(', 1)[1]
+    account, row = settings.split('.id = u"advanced/purple_sync_setup"_q,', 1)
+    row = row.split('.keywords =', 1)[0]
     require('advanced-sync-enabled', '.label = rpl::single(rpl::empty)' in row
         and '| rpl::then(AutomaticSettingsSyncChanges())' in row
+        and 'const auto live = base::make_weak(builder.session().get());' in account
+        and 'const auto session = live.get();' in row
         and 'session && AutomaticSettingsSyncEnabled(session)' in row
-        and 'base::make_weak(session.get())' in row
         and '? tr::lng_settings_cloud_password_on(tr::now)' in row
         and ': tr::lng_settings_cloud_password_off(tr::now)' in row)
     return failures
@@ -326,7 +331,7 @@ negative = [
     ('purple_sync_auto_service.cpp', 'self->_store.get() == store && self->_sessionId == owner', 'true', 'borrowed-proof-run'),
     ('purple_sync_auto_service.cpp', 'store->Current() && self->Resolved()', 'store->Current() && SyncChatSelfResolved(self->_session.get()) && self->Resolved()', 'borrowed-proof-observer-free'),
     ('purple_sync_auto_service.cpp', 'DesktopSyncChatInventoryMatches(inventory, origin, chat)', 'true', 'auto-typed-inventory'),
-    ('purple_sync_magic_service.cpp', 'ToastSyncMagicProblem(session);', '', 'magic-problem-toast'),
+    ('purple_sync_magic_service.cpp', 'ToastSyncMagicProblem(session);', '', 'magic-problem-notice'),
     ('purple_sync_magic_telegram.cpp', '\t\t\tsession->data().chatsListChanges(),\n', '', 'magic-lists-early'),
     ('purple_sync_magic_telegram.cpp', 'bound && data.channelLoaded(ChannelId(bound->id)) != nullptr', 'false', 'magic-lists-early'),
     ('purple_sync_magic_telegram.cpp', 'namespace Purple {', 'namespace Purple {\nconstexpr auto kOld = mtpTypeId(0x875f74be);', 'no-hand-rolled-tl'),
@@ -339,7 +344,7 @@ negative = [
     ('purple_sync_config_publish_flow.cpp', 'record.header && record.header->space == *space;', 'record.header;', 'magic-join-selected-space'),
     ('purple_sync_setup_box.cpp', '\tMoveSyncStateToBoundChat(session);\n', '', 'magic-manual-check'),
     ('purple_sync_auto_service.cpp', '\t\t\tFor(session).MoveToBound();\n', '', 'magic-move-unbound-auto'),
-    ('purple_sync_magic_box.cpp', '\tchat->shown();\n\tconst auto weak = base::make_weak(controller);', '\tconst auto weak = base::make_weak(controller);', 'magic-problem-toast'),
+    ('purple_sync_magic_box.cpp', '\tchat->shown();\n\tconst auto statusText = SyncMagicStatusText(session, frame);', '\tconst auto statusText = SyncMagicStatusText(session, frame);', 'magic-problem-notice'),
 ]
 for name, before, after, expected in negative:
     mutated = dict(files)
