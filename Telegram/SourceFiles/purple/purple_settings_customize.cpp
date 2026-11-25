@@ -15,6 +15,7 @@
 #include "purple/purple_privacy_screen.h"
 #include "purple/purple_settings_collection_ui.h"
 #include "purple/purple_settings_editor.h"
+#include "purple/purple_settings_focus.h"
 #include "purple/purple_settings_draft.h"
 #include "purple/purple_settings_structures.h"
 #include "purple/purple_settings_tree.h"
@@ -330,6 +331,15 @@ public:
 		_coverClose->installEventFilter(this);
 		connect(_coverClose, &QPushButton::clicked, this, [this] { back(); });
 		setupBrowser();
+		connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *now) {
+			if (!now) return;
+			if (_browser->isAncestorOf(now)) {
+				_browserFocus = now;
+			} else if (!_formExit && (now == _line || now == _multi || now == _choice
+				|| (_bool && qobject_cast<QRadioButton*>(now) && _sheet->isAncestorOf(now)))) {
+				_lastField = now;
+			}
+		});
 
 		connect(_filter, &QLineEdit::textChanged, this, [this] {
 			_anchor.clear();
@@ -540,7 +550,7 @@ private:
 		} else if (!visibleContent()) {
 			if (_pages->currentWidget() == _sheetPage && !_editingKey.isEmpty()) {
 				_pausedForm = true;
-				_formFocus = QApplication::focusWidget();
+				_formFocus = SettingsFocus(QApplication::focusWidget());
 				if (_choice) _choice->hidePopup();
 			}
 			_coverMessage->setText(u"Settings hidden while locked"_q);
@@ -566,7 +576,7 @@ private:
 					} else if (_pausedForm && SettingsDraft::CanRestoreForm(sameSession(), !_draftStale)) {
 						_pausedForm = false;
 						_pages->setCurrentWidget(_sheetPage);
-						if (_formFocus && _sheet->isAncestorOf(_formFocus)) _formFocus->setFocus();
+						if (!_formFocus.restore(_sheet)) _sheetPage->setFocus();
 					} else {
 						_pages->setCurrentWidget(_browser);
 						_tree->setFocus();
@@ -963,7 +973,9 @@ private:
 		_applyMessage.clear();
 		_reviewPages.clear();
 		_pausedForm = false;
-		_formFocus.clear();
+		_formFocus = SettingsFocus();
+		_exitFocus = SettingsFocus();
+		_lastField.clear();
 		_formExit.clear();
 		_formBaseline.reset();
 		_editingKey.clear();
@@ -995,8 +1007,9 @@ private:
 			_coverClose->setFocus();
 			return;
 		}
+		const auto previous = SettingsFocus(_browserFocus);
 		_pages->setCurrentWidget(_browser);
-		_tree->setFocus();
+		if (!previous.restore(_browser)) _tree->setFocus();
 		if (_needsRefresh || _draftStale) refreshFromDisk();
 	}
 
@@ -1443,7 +1456,7 @@ private:
 	}
 
 	void pickBudgetChat(Row row) {
-		if (!visibleContent() || !_line || !_opening.globalSource) return;
+		if (!visibleContent() || !_line || !_opening.globalSource || _sheetBack) return;
 		const auto session = LiveSessionFor(_opening.globalSource->file.account);
 		const auto choices = PeerCatalogue(session, PeerField::Budget);
 		if (choices.empty()) {
@@ -1457,7 +1470,23 @@ private:
 			item->setData(Qt::UserRole, choice.literal);
 		}
 		addSheetWidget(list);
-		connect(list, &QListWidget::itemActivated, this, [this, list, choices, key = row.key](QListWidgetItem *item) {
+		const auto cancel = Button(_sheet, u"Back to field"_q);
+		addSheetWidget(cancel);
+		const auto focus = SettingsFocus(_line);
+		const auto close = [this, list = QPointer(list), cancel = QPointer(cancel), focus] {
+			_sheetBack = {};
+			_catalogueLifetime.destroy();
+			for (const auto child : { QPointer<QWidget>(list.data()), QPointer<QWidget>(cancel.data()) }) {
+				if (child) {
+					child->hide();
+					child->deleteLater();
+				}
+			}
+			if (!focus.restore(_sheet)) _sheetPage->setFocus();
+		};
+		_sheetBack = close;
+		connect(cancel, &QPushButton::clicked, this, close);
+		connect(list, &QListWidget::itemActivated, this, [this, list, choices, key = row.key, close](QListWidgetItem *item) {
 			if (!visibleContent() || _editingKey != key || !_line) return;
 			const auto id = item->data(Qt::UserRole).toString();
 			const auto choice = std::find_if(choices.begin(), choices.end(), [&](const auto &entry) {
@@ -1469,9 +1498,9 @@ private:
 				return;
 			}
 			_line->setText(id);
-			list->hide();
-			list->deleteLater();
-			_line->setFocus();
+			const auto guard = QPointer(this);
+			close();
+			if (guard && _line) _line->end(false);
 		});
 		const auto weakList = QPointer(list);
 		session->data().sessionDataAboutToBeCleared() | rpl::on_next([weakList] {
@@ -1648,11 +1677,13 @@ private:
 			return;
 		}
 		if (_formExit) {
-			_formExit->hide();
-			_formExit->deleteLater();
-			_formExit.clear();
+			const auto prompt = std::exchange(_formExit, {});
+			prompt->hide();
+			prompt->deleteLater();
+			if (!_exitFocus.restore(_sheet)) _sheetPage->setFocus();
 			return;
 		}
+		_exitFocus = SettingsFocus(_lastField ? _lastField.data() : QApplication::focusWidget());
 		const auto panel = new QWidget(_sheet);
 		const auto layout = new QVBoxLayout(panel);
 		layout->addWidget(Label(panel, u"Discard the text in this form?"_q));
@@ -1974,7 +2005,10 @@ private:
 	QLabel *_formStatus = nullptr;
 	QPushButton *_record = nullptr;
 	QPushButton *_cancelCapture = nullptr;
-	QPointer<QWidget> _formFocus;
+	SettingsFocus _formFocus;
+	SettingsFocus _exitFocus;
+	QPointer<QWidget> _browserFocus;
+	QPointer<QWidget> _lastField;
 	QPointer<QWidget> _formExit;
 	QPointer<QWidget> _collection;
 	rpl::lifetime _catalogueLifetime;

@@ -86,6 +86,8 @@ assert command_ids["CustomizeSettings"] == "customize-settings"
 ordered(keys, "case Action::CustomizeSettings:", "ShowCustomizeSettings")
 ordered(keys, ".onPick = [guard", "Available(action, restoredTarget)", "guard->dispatch(action, restored, 1)")
 customize = read("purple/purple_settings_customize.cpp")
+ordered(customize, "void closeForm()", "_exitFocus.restore(_sheet)", "SettingsFocus(_lastField")
+ordered(customize, "void returnToTree()", "SettingsFocus(_browserFocus)", "previous.restore(_browser)")
 ordered(customize, "sessionDataAboutToBeCleared()", "retire()", "PrivacyScreenChanges()")
 ordered(customize, "void protectionChanged()", "setCurrentWidget(_covered)",
         "refreshFromDisk()", "_resumeRefused = _draftStale", "_coverClose->show()",

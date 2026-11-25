@@ -2,6 +2,7 @@
 
 #include "purple/purple_keys_mx.h"
 #include "purple/purple_settings_tree.h"
+#include "purple/purple_settings_focus.h"
 
 #include <QtCore/QPointer>
 #include <QtCore/QSignalBlocker>
@@ -115,6 +116,15 @@ public:
 				});
 			});
 		setFocusProxy(_list);
+		connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *now) {
+			if (!now) return;
+			if (_main->isAncestorOf(now)) {
+				_mainFocus = now;
+			} else if (_form->isAncestorOf(now) && !_exitPrompt
+				&& !qobject_cast<QPushButton*>(now)) {
+				_formField = now;
+			}
+		});
 		if (!_config.seed.empty()) {
 			const auto result = ApplySettingsEdits(_candidate, MapSettingsSource(_candidate).revision, _config.seed);
 			if (result.ok()) {
@@ -129,6 +139,7 @@ public:
 	void back() {
 		if (_parts->currentWidget() == _form) {
 			if (_formInput && _formInput() != _formBaseline && !_exitPrompt) {
+				_exitFocus = SettingsFocus(_formField ? _formField.data() : QApplication::focusWidget());
 				const auto prompt = new QWidget(_form);
 				const auto layout = new QHBoxLayout(prompt);
 				layout->addWidget(new QLabel(u"Discard unsubmitted input?"_q, prompt));
@@ -248,6 +259,8 @@ private:
 	void clearForm() {
 		_accept.clear();
 		_exitPrompt.clear();
+		_formField.clear();
+		_exitFocus = SettingsFocus();
 		_formInput = {};
 		_formBaseline.clear();
 		while (const auto item = _formLayout->takeAt(0)) {
@@ -265,13 +278,14 @@ private:
 			_exitPrompt->deleteLater();
 			_exitPrompt.clear();
 		}
-		if (_accept) _accept->setFocus();
+		if (!_exitFocus.restore(_form) && _accept) _accept->setFocus();
 	}
 
 	void mainPage() {
 		clearForm();
+		const auto focus = SettingsFocus(_mainFocus);
 		_parts->setCurrentWidget(_main);
-		_list->setFocus();
+		if (!focus.restore(_main)) _list->setFocus();
 	}
 
 	const SettingsPeerChoice *peer(const QString &id) const {
@@ -698,6 +712,9 @@ private:
 	QLabel *_status;
 	QPointer<QPushButton> _accept;
 	QPointer<QWidget> _exitPrompt;
+	QPointer<QWidget> _formField;
+	QPointer<QWidget> _mainFocus;
+	SettingsFocus _exitFocus;
 	Fn<QStringList()> _formInput;
 	QStringList _formBaseline;
 	QSet<QObject*> _preedit;
