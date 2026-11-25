@@ -6,6 +6,13 @@
 
 namespace Purple {
 
+[[nodiscard]] inline QPoint MessageHintLeaderEnd(QPoint from, QRect link) {
+	const auto edge = link.adjusted(-1, -1, 1, 1);
+	return QPoint(
+		std::clamp(from.x(), edge.left(), edge.right()),
+		std::clamp(from.y(), edge.top(), edge.bottom()));
+}
+
 [[nodiscard]] inline QRect MessageHintBadgeRect(
 		QRect bubble,
 		int anchorY,

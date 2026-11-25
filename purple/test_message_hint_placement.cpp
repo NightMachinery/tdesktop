@@ -27,5 +27,8 @@ int main() {
 	check(MessageHintBadgeRect(wide, 24, badge, viewport, gap, false) == QRect(0, 16, 24, 16), "straddles corner when both sides are tight");
 	check(viewport.contains(MessageHintBadgeRect(clipped, 0, badge, viewport, gap, true)), "clipped top corner stays visible");
 	check(MessageHintBadgeRect(both, 45, badge, viewport, gap, false).y() == 45, "link aligns with its own line");
-	std::cout << "7 checks, 0 failures\n";
+	const auto link = QRect(32, 42, 88, 18);
+	check(Purple::MessageHintLeaderEnd(QPoint(15, 64), link) == QPoint(31, 60), "leader stops before near corner");
+	check(Purple::MessageHintLeaderEnd(QPoint(140, 50), link) == QPoint(120, 50), "leader stops before right edge");
+	std::cout << "9 checks, 0 failures\n";
 }

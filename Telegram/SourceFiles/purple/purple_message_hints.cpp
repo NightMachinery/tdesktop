@@ -218,9 +218,9 @@ protected:
 				badges.push_back(placed);
 			}
 			if (matches) {
-				if (placed != box) {
+				if (placed != box && !placed.intersects(anchor)) {
 					p.setPen(QPen(QColor(0xb8, 0x92, 0x00), 1.5));
-					p.drawLine(placed.center(), anchor.center());
+					p.drawLine(placed.center(), MessageHintLeaderEnd(placed.center(), anchor));
 				}
 				auto hq = PainterHighQualityEnabler(p);
 				p.setPen(QPen(QColor(0xb8, 0x92, 0x00), 1));
