@@ -57,7 +57,6 @@ struct DesktopArchiveDiscardToken {
 	QString profile;
 	QByteArray profileIdentity;
 	QByteArray directoryIdentity;
-	QByteArray detachedIdentity;
 	QByteArray recordDigest;
 	QByteArray fenceStamp;
 	QByteArray intentStamp;
@@ -72,6 +71,7 @@ struct DesktopArchiveDiscardPreparation {
 
 struct DesktopArchiveDiscardResult {
 	QString reason;
+	bool retryable = false;
 	[[nodiscard]] explicit operator bool() const { return reason.isEmpty(); }
 };
 
@@ -135,6 +135,8 @@ class DesktopArchiveStore final {
 		const DesktopArchiveOptions &options);
 	[[nodiscard]] static DesktopArchiveDiscardResult DiscardAccount(
 		const DesktopArchiveOptions &options, const DesktopArchiveDiscardToken &token);
+	[[nodiscard]] static DesktopArchiveDiscardResult ResumeDiscard(
+		const DesktopArchiveOptions &options, const std::function<void()> &pending = {});
 	[[nodiscard]] bool Current() const;
 	[[nodiscard]] bool MemoryCurrent() const;
 	[[nodiscard]] DesktopArchiveStagingCounters StagingCountersForTest() const;

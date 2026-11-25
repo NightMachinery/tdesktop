@@ -432,7 +432,7 @@ void ExplicitDiscardRecovery() {
 
 void ExplicitDiscardFixtures() {
 	for (const auto condition : {"locked", "held", "corrupt", "oversized", "gap",
-			"journal-pending", "large", "detached"}) {
+			"journal-pending", "large", "prepared", "detached", "cleanup"}) {
 		Section = condition;
 		const auto temporary = QTemporaryDir();
 		auto options = Options(temporary.path());
@@ -494,15 +494,67 @@ void ExplicitDiscardFixtures() {
 				CHECK(file.open(QIODevice::WriteOnly));
 				CHECK(file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner));
 			}
-		} else if (!std::strcmp(condition, "detached")) {
-			CHECK(QDir().rename(account, account + u".discard"_q));
-			CHECK(store.Open(options) == DesktopArchiveStatus::RemovalPending);
-			CHECK(store.Close());
+		}
+		const auto detached = account + u".discard"_q;
+		const auto marker = account + u".discard.json"_q;
+		const auto beforeMove = !std::strcmp(condition, "prepared");
+		const auto afterMove = !std::strcmp(condition, "detached");
+		const auto duringCleanup = !std::strcmp(condition, "cleanup");
+		const auto badFile = u"/blobs/cleanup-held"_q;
+		if (duringCleanup) {
+			const auto path = root + badFile;
+			CHECK(DesktopArchiveWrite(path, QByteArray("fixture")));
+			CHECK(QFile::setPermissions(path, QFileDevice::ReadOwner));
 		}
 		const auto token = DesktopArchiveStore::PrepareDiscard(options).token;
-		CHECK(token && DesktopArchiveStore::DiscardAccount(options, *token));
+		CHECK(token);
+		if (!token) {
+			continue;
+		}
+		auto calls = 0;
+		if (beforeMove || afterMove) {
+			options.maintenanceAllowed = [&] { return ++calls <= (beforeMove ? 1 : 2); };
+		}
+		const auto discarded = DesktopArchiveStore::DiscardAccount(options, *token);
+		options.maintenanceAllowed = {};
+		if (beforeMove || afterMove || duringCleanup) {
+			CHECK(!discarded);
+			CHECK(discarded.reason == (duringCleanup
+				? u"discard-detached-cleanup-failed"_q : u"discard-cancelled"_q));
+			CHECK(QFileInfo::exists(marker));
+			CHECK(QFileInfo::exists(account) == beforeMove);
+			CHECK(QFileInfo::exists(detached) != beforeMove);
+			CHECK(store.Open(options) == DesktopArchiveStatus::RemovalPending);
+			CHECK(store.Close());
+			CHECK(DesktopArchiveStore::ResumeDiscard(other));
+			CHECK(QFileInfo::exists(marker));
+			CHECK(held.tryLock(0));
+			const auto busy = DesktopArchiveStore::ResumeDiscard(options);
+			CHECK(!busy && busy.retryable && busy.reason == u"discard-account-lock-unavailable"_q);
+			held.unlock();
+			if (beforeMove) {
+				auto wrong = options;
+				wrong.loginAuthority = QByteArray(32, 'z');
+				CHECK(DesktopArchiveStore::ResumeDiscard(wrong).reason == u"discard-login-changed-before-detach"_q);
+				CHECK(QFileInfo::exists(database));
+				const auto original = account + u".fixture"_q;
+				CHECK(QDir().rename(account, original));
+				CHECK(DesktopArchiveDirectory(account));
+				CHECK(DesktopArchiveStore::ResumeDiscard(options).reason == u"discard-directory-changed"_q);
+				CHECK(QDir().rmdir(account));
+				CHECK(QDir().rename(original, account));
+			}
+			if (duringCleanup) {
+				const auto path = detached + '/' + QFileInfo(root).fileName() + badFile;
+				CHECK(QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+			}
+			CHECK(DesktopArchiveStore::ResumeDiscard(options));
+		} else {
+			CHECK(discarded);
+		}
 		CHECK(!QFileInfo::exists(root));
-		CHECK(!QFileInfo::exists(account + u".discard"_q));
+		CHECK(!QFileInfo::exists(detached));
+		CHECK(!QFileInfo::exists(marker));
 		CHECK(!QFileInfo::exists(intent));
 		options.loginAuthority = QByteArray(32, 'b');
 		CHECK(store.Open(options) == DesktopArchiveStatus::Ready);

@@ -11,6 +11,7 @@
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QLockFile>
 #include "purple/purple_archive_attention.h"
 #include <future>
 #include <thread>
@@ -306,6 +307,7 @@ void RenewalWriterHandoff() {
 
 void StartupActorCases();
 void StartupReadyOrder();
+void NativeStartupDiscard();
 void NativeStartupInflight();
 void NativeStartupUnavailable();
 void NativeStartupPurgeRenewal();
@@ -318,6 +320,7 @@ int main(int argc, char **argv) {
 	RenewalWriterHandoff();
 	StartupActorCases();
 	StartupReadyOrder();
+	NativeStartupDiscard();
 	NativeStartupInflight();
 	NativeStartupUnavailable();
 	NativeStartupPurgeRenewal();
@@ -470,6 +473,71 @@ DesktopArchiveOptions StartupOptions(const QString &path) {
 	options.loginAuthority = QByteArray(32,'a');
 	options.loginAuthKeyId = options.loginAuthKeyIds = QByteArray(16,'1');
 	return options;
+}
+
+void NativeStartupDiscard() {
+	Section = "startup worker resumes a committed discard after the account lock clears";
+	auto temporary = QTemporaryDir();
+	auto options = StartupOptions(temporary.path());
+	auto initial = DesktopArchiveStore();
+	CHECK(initial.Open(options) == DesktopArchiveStatus::Ready);
+	if (!initial.Current()) {
+		return;
+	}
+	CHECK(initial.Capture(Event(Empty(), u"old-archive"_q, 1, u"fixture"_q)).retained);
+	const auto oldEpoch = initial.epoch();
+	const auto oldRoot = initial.directory();
+	const auto account = QFileInfo(oldRoot).absolutePath();
+	const auto profile = QFileInfo(QFileInfo(account).absolutePath()).absolutePath();
+	const auto detached = account + u".discard"_q;
+	const auto marker = account + u".discard.json"_q;
+	CHECK(initial.Close());
+	const auto token = DesktopArchiveStore::PrepareDiscard(options).token;
+	CHECK(token);
+	if (!token) {
+		return;
+	}
+	auto checks = 0;
+	options.maintenanceAllowed = [&] { return ++checks <= 2; };
+	CHECK(!DesktopArchiveStore::DiscardAccount(options, *token));
+	options.maintenanceAllowed = {};
+	CHECK(QFileInfo::exists(detached) && QFileInfo::exists(marker));
+	auto accountLock = QLockFile(profile + u"/locks/0-123.lock"_q);
+	CHECK(accountLock.tryLock(0));
+	auto waiting = std::promise<void>();
+	auto ready = std::promise<ArchiveStoreEpoch>();
+	const auto waitingFuture = waiting.get_future();
+	auto readyFuture = ready.get_future();
+	auto reported = false;
+	auto worker = std::make_shared<NativeStartupWorker>(options,
+		[&](DesktopArchiveStatus status, QString reason, uint64_t) {
+			if (status == DesktopArchiveStatus::RemovalPending
+				&& reason == u"discard-account-lock-unavailable"_q
+				&& !std::exchange(reported, true)) {
+				waiting.set_value();
+			}
+		}, [&](auto journal) { ready.set_value(journal->access().epoch); });
+	CHECK(waitingFuture.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+	CHECK(QFileInfo::exists(detached) && QFileInfo::exists(marker));
+	accountLock.unlock();
+	if (readyFuture.wait_for(std::chrono::seconds(15)) == std::future_status::ready) {
+		const auto epoch = readyFuture.get();
+		CHECK(epoch.account == oldEpoch.account && epoch.storeId != oldEpoch.storeId);
+		CHECK(!QFileInfo::exists(detached) && !QFileInfo::exists(marker) && !QFileInfo::exists(oldRoot));
+		auto empty = std::promise<bool>();
+		auto emptyFuture = empty.get_future();
+		CHECK(worker->Post([&](DesktopArchiveStore &store) {
+			empty.set_value(store.Versions(Key()).versions.empty());
+		}));
+		const auto checked = emptyFuture.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+		CHECK(checked && emptyFuture.get());
+		CHECK(worker->Stop(false));
+		CHECK(worker->WaitForStopped(std::chrono::seconds(5)));
+	} else {
+		CHECK(false);
+		CHECK(worker->Stop(false));
+		CHECK(worker->WaitForStopped(std::chrono::seconds(5)));
+	}
 }
 
 void NativeStartupInflight() {

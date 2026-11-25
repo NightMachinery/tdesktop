@@ -139,15 +139,18 @@ callback refuses. On confirmation the old worker is stopped, its keys and
 pending deliveries are revoked immediately. A background task waits for the
 worker to close. Under the account and catalogue locks, discard checks the
 profile and account-directory identities, exact account record, fence and
-pending intent again. It renames only the derived account directory to a
-private sibling before changing the account's metadata. That rename detaches
-all of the account's files at once. It does not read the database or replay the
-journal. The detached directory blocks creation of a replacement until cleanup
-finishes.
+pending logout intent again. The worker records those checks and the replacement
+generation before renaming the derived account directory to a private sibling.
+The rename detaches all of the account's files at once, including a corrupt
+database or pending journal. The discard marker blocks archive admission until
+cleanup finishes.
 
 Cleanup pages run off the main thread without the logout time or page budget.
-If interrupted after detachment, the same action resumes cleanup of the
-detached directory. Failures give a specific reason in Settings and the log.
+On restart, the affected account's startup worker resumes the recorded discard
+and waits for transient account and catalogue locks. A changed login cannot
+detach an archive that was still in place. Once detached, cleanup requires the
+original directory identity and the recorded metadata. Failures give a
+specific reason in Settings and the log.
 A corrupt or oversized per-account file can be discarded. Unsafe paths or an
 unreadable shared profile catalogue still refuse, so other accounts keep their
 existing binding and data.

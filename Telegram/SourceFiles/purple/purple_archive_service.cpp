@@ -513,12 +513,33 @@ class ArchiveWorker final {
 			}
 		}
 		options.authorityReady = {};
+		auto discard = DesktopArchiveDiscardResult();
+		auto showingDiscard = false;
+		while (authorityReady && !state->cancelled) {
+			discard = DesktopArchiveStore::ResumeDiscard(options, [&] {
+				if (!std::exchange(showingDiscard, true)) {
+					state->report(DesktopArchiveStatus::RemovalPending, u"discard-cleanup-pending"_q, 0);
+				}
+			});
+			if (!discard.retryable) {
+				break;
+			}
+			state->report(DesktopArchiveStatus::RemovalPending, discard.reason, 0);
+			auto lock = std::unique_lock(state->mutex);
+			state->condition.wait_for(lock, std::chrono::seconds(1),
+				[&] { return state->cancelled.load(); });
+		}
 		if (!state->cancelled) {
 			if (!authorityReady) {
 				state->startupFailed = true;
 				state->startupHeld = true;
 				startupHeld = true;
 				state->report(DesktopArchiveStatus::Unreadable, u"login-authority-held"_q, 0);
+			} else if (!discard) {
+				state->startupFailed = true;
+				state->startupHeld = true;
+				startupHeld = true;
+				state->report(DesktopArchiveStatus::Unreadable, discard.reason, 0);
 			} else if (!DesktopArchiveStore::Recover(options)) {
 				state->startupFailed = true;
 				state->startupHeld = true;
@@ -870,7 +891,7 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 				if (!app) {
 					return;
 				}
-				if (status == DesktopArchiveStatus::RemovalPending) {
+				if (status == DesktopArchiveStatus::RemovalPending && !failure.startsWith(u"discard-"_q)) {
 					ShowArchiveRemovalPending();
 				}
 				if (!routing->load()) {
@@ -1053,6 +1074,10 @@ Fn<void()> ArchiveDiscardAction(not_null<Main::Session*> session) {
 					result = prepared.token
 						? DesktopArchiveStore::DiscardAccount(options, *prepared.token)
 						: DesktopArchiveDiscardResult{prepared.reason};
+					while (result.retryable && active->load()) {
+						std::this_thread::sleep_for(std::chrono::seconds(1));
+						result = DesktopArchiveStore::DiscardAccount(options, *prepared.token);
+					}
 				}
 				crl::on_main([weak, worker, options, active, result = std::move(result)] {
 					const auto live = weak.get();
@@ -1544,6 +1569,12 @@ QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 	if (!value.discardFailure.isEmpty()) {
 		return tr::lng_purple_archive_discard_failed(tr::now)
 			+ u" ["_q + value.discardFailure + ']';
+	}
+	if (value.failure.startsWith(u"discard-"_q) || value.failure == u"explicit-discard"_q) {
+		const auto text = value.status == DesktopArchiveStatus::RemovalPending
+			? tr::lng_purple_archive_removal_pending(tr::now)
+			: tr::lng_purple_archive_discard_failed(tr::now);
+		return text + u" ["_q + value.failure + ']';
 	}
 	if (value.status == DesktopArchiveStatus::Maintenance) {
 		return tr::lng_purple_archive_purge_running(tr::now);
