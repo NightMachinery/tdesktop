@@ -2548,6 +2548,9 @@ int main(int argc, char** argv) {
 	V2Fixtures::KeysAndIsolation();
 	V2Fixtures::LogoutAndOwnership();
 	V2Fixtures::CorruptStoreRefuses();
+	V2Fixtures::UnreadableRetirement();
+	V2Fixtures::UnreadableWriterControls();
+	V2Fixtures::ActiveDirectorySubstitution();
 	V2Fixtures::QueueCancellation();
 	V2Fixtures::MediaGate();
 	V2Fixtures::SeparatePressure();

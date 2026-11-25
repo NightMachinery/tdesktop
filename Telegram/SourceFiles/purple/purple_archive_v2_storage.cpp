@@ -120,16 +120,16 @@ QString Store::readPointer() {
 	if (!bytes || bytes->size() < 38 || !bytes->startsWith(kMagic)) return u"store_unreadable"_q;
 	const auto json = bytes->mid(36);
 	const auto mac = DesktopArchiveCrypto::Hmac(_manifestKey, json);
-	if (!mac || *mac != bytes->mid(4, 32)) return u"key_unavailable"_q;
+	if (!mac || *mac != bytes->mid(4, 32)) return u"pointer_authentication_failed"_q;
 	const auto object = QJsonDocument::fromJson(json).object();
 	const auto generation = object.value(u"generation"_q).toString();
 	const auto initialized = object.value(u"initialized"_q);
 	auto next = Pointer{ Bytes(object.value(u"id"_q)), Bytes(object.value(u"wrapped"_q)),
-		generation.toLongLong(), initialized.toBool(), {} };
+		Bytes(object.value(u"directory"_q)), generation.toLongLong(), initialized.toBool(), {} };
 	const auto list = object.value(u"retired"_q);
-	if (object.size() != 5 || next.generation <= 0 || generation != QString::number(next.generation)
-		|| !initialized.isBool() || !list.isArray() || (next.id.isEmpty() ? !next.wrapped.isEmpty() || next.initialized
-			: next.id.size() != 16 || next.wrapped.size() != 60)) {
+	if (object.size() != 6 || next.generation <= 0 || generation != QString::number(next.generation)
+		|| !initialized.isBool() || !list.isArray() || (next.id.isEmpty() ? !next.wrapped.isEmpty() || !next.directory.isEmpty()
+			: next.id.size() != 16 || next.wrapped.size() != 60) || (next.initialized && next.directory.isEmpty())) {
 		return u"store_unreadable"_q;
 	}
 	for (const auto &value : list.toArray()) {
@@ -163,6 +163,7 @@ bool Store::publish(const Pointer &next) {
 	}
 	const auto json = QJsonDocument(QJsonObject{
 		{ u"id"_q, Hex(next.id) }, { u"wrapped"_q, Hex(next.wrapped) },
+		{ u"directory"_q, Hex(next.directory) },
 		{ u"generation"_q, QString::number(next.generation) }, { u"initialized"_q, next.initialized },
 		{ u"retired"_q, retired },
 	}).toJson(QJsonDocument::Compact);
@@ -189,10 +190,11 @@ bool Store::makeActive(Pointer &next) {
 }
 
 StoreEffect Store::open() {
-	if (_lock || !_options.lease || !_options.lease->live.load() || _options.loginSecret.size() != 32) {
-		return { u"key_unavailable"_q };
-	}
-	if (const auto failure = bind(true); !failure.isEmpty()) return { failure };
+	if (_lock || !_options.lease || !_options.lease->live.load()) return { u"key_unavailable"_q };
+	const auto hasLogin = _options.loginSecret.size() == 32;
+	_bindFailure = bind(hasLogin);
+	if (!_bindFailure.isEmpty()) return { _bindFailure };
+	if (!hasLogin) return { u"key_unavailable"_q };
 	if (const auto pending = cleanup(); !pending.isEmpty()) return { pending };
 	if (_pointer.id.isEmpty()) {
 		if (_pointer.generation == std::numeric_limits<int64>::max()) return { u"store_unreadable"_q };
@@ -276,22 +278,44 @@ StoreEffect Store::recover() {
 	return { cleanup() };
 }
 
-StoreEffect Store::retire(const QByteArray &expectedId, bool replace) {
-	if (!_ready || (replace && !current()) || expectedId.size() != 16 || expectedId != _pointer.id
+Store::ResetCheck Store::reviewReset(const QByteArray &expectedId) const {
+	if (!_bound) return _bindFailure.isEmpty() ? u"store_unreadable"_q : _bindFailure;
+	if (!ownsPointer()) return u"pointer_changed"_q;
+	if (expectedId.size() != 16 || expectedId != _pointer.id) return u"scope_retired"_q;
+	const auto path = directory();
+	if (!Exists(path)) return ResetReview(expectedId, {}, 0);
+	const auto identity = DesktopArchivePersistentIdentity(path);
+	const auto bytes = DesktopArchiveMeasureTree(path);
+	if (identity.isEmpty() || identity != _pointer.directory || !bytes || DesktopArchivePersistentIdentity(path) != identity
+		|| !ownsPointer()) return u"cleanup_blocked"_q;
+	return ResetReview(expectedId, identity, *bytes);
+}
+
+StoreEffect Store::retire(const QByteArray &expectedId, const ResetReview *review) {
+	if (!_bound) return { _bindFailure.isEmpty() ? u"store_unreadable"_q : _bindFailure };
+	if (!ownsPointer()) return { u"pointer_changed"_q };
+	if ((review && !_options.lease->live.load()) || expectedId.size() != 16 || expectedId != _pointer.id
 		|| _pointer.generation == std::numeric_limits<int64>::max()) return { u"scope_retired"_q };
 	auto next = _pointer;
 	const auto path = directory();
-	if (Exists(path)) {
-		const auto identity = DesktopArchivePersistentIdentity(path);
-		if (identity.isEmpty() || !DesktopArchivePrivate(path, true)) return { u"cleanup_blocked"_q };
-		next.retired.push_back({ _pointer.id, identity });
+	const auto exists = Exists(path);
+	const auto identity = exists ? DesktopArchivePersistentIdentity(path) : QByteArray();
+	if (exists && (identity.isEmpty() || identity != _pointer.directory || !DesktopArchivePrivate(path, true))) {
+		return { u"cleanup_blocked"_q };
 	}
+	if (review) {
+		const auto bytes = exists ? DesktopArchiveMeasureTree(path) : std::optional<int64>(0);
+		if (!bytes || *bytes != review->_bytes || identity != review->_directory
+			|| (exists && DesktopArchivePersistentIdentity(path) != identity)) return { u"reset_review_stale"_q };
+	}
+	if (exists) next.retired.push_back({ _pointer.id, identity });
 	++next.generation;
 	next.id.clear();
 	next.wrapped.clear();
+	next.directory.clear();
 	next.initialized = false;
-	if (replace && !makeActive(next)) return { u"key_unavailable"_q };
-	if (!replace) _options.lease->revoke();
+	if (review && !makeActive(next)) return { u"key_unavailable"_q };
+	if (!review) _options.lease->revoke();
 	if (!publish(next)) {
 		if (!ownsPointer()) {
 			_ready = false;
@@ -307,12 +331,13 @@ StoreEffect Store::retire(const QByteArray &expectedId, bool replace) {
 	return { cleanup(), true };
 }
 
-StoreEffect Store::reset(const QByteArray &expectedId) {
-	return retire(expectedId, true);
+StoreEffect Store::reset(const ResetReview &review) {
+	return retire(review._id, &review);
 }
 
 StoreEffect Store::logout(const QByteArray &expectedId) {
-	return retire(expectedId, false);
+	if (!_lock && !_bound) _bindFailure = bind(false);
+	return retire(expectedId, nullptr);
 }
 
 QByteArray Store::id() const {

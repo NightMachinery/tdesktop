@@ -167,6 +167,19 @@ struct StorageSummary {
 	bool overLimit = false;
 };
 
+class ResetReview {
+	friend class Store;
+	ResetReview(QByteArray id, QByteArray identity, int64 size)
+	: _id(std::move(id)), _directory(std::move(identity)), _bytes(size) {
+	}
+	QByteArray _id;
+	QByteArray _directory;
+	int64 _bytes;
+
+public:
+	[[nodiscard]] int64 bytes() const { return _bytes; }
+};
+
 class Store final {
 public:
 	explicit Store(StoreOptions options);
@@ -177,7 +190,9 @@ public:
 	[[nodiscard]] StoreEffect open();
 	[[nodiscard]] StoreEffect capture(const CapturedEvent &event);
 	[[nodiscard]] StoreEffect writeBlob(const BlobInput &input);
-	[[nodiscard]] StoreEffect reset(const QByteArray &expectedId);
+	using ResetCheck = std::variant<ResetReview, QString>;
+	[[nodiscard]] ResetCheck reviewReset(const QByteArray &expectedId) const;
+	[[nodiscard]] StoreEffect reset(const ResetReview &review);
 	[[nodiscard]] StoreEffect logout(const QByteArray &expectedId);
 	[[nodiscard]] StoreEffect recover();
 	[[nodiscard]] std::optional<StoredBody> body(const MessageIdentity &identity, int64 sequence);
@@ -206,6 +221,7 @@ private:
 	struct Pointer {
 		QByteArray id;
 		QByteArray wrapped;
+		QByteArray directory;
 		int64 generation = 0;
 		bool initialized = false;
 		std::vector<Retired> retired;
@@ -229,7 +245,7 @@ private:
 	[[nodiscard]] bool publish(const Pointer &next);
 	[[nodiscard]] bool makeActive(Pointer &next);
 	[[nodiscard]] QString cleanup();
-	[[nodiscard]] StoreEffect retire(const QByteArray &expectedId, bool replace);
+	[[nodiscard]] StoreEffect retire(const QByteArray &expectedId, const ResetReview *review);
 	[[nodiscard]] QString archivePath(const QByteArray &id, bool detached = false) const;
 	[[nodiscard]] QString pointerPath() const;
 	[[nodiscard]] QString directory() const;
@@ -270,6 +286,7 @@ private:
 	DesktopArchiveSqlite _db;
 	bool _ready = false;
 	bool _bound = false;
+	QString _bindFailure;
 	int64 _lastTrimDay = -1;
 	int64 _reclaimed = 0;
 };

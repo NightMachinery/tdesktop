@@ -28,7 +28,7 @@ struct Writer::State {
 		QByteArray generation;
 		ReadOrCleanup operation;
 	};
-	using Job = std::variant<CapturedEvent, QByteArray, Query>;
+	using Job = std::variant<CapturedEvent, ResetReview, Query>;
 	std::mutex mutex;
 	std::condition_variable changed;
 	std::deque<Job> jobs;
@@ -95,10 +95,10 @@ bool Writer::query(QByteArray expectedId, ReadOrCleanup operation) {
 	return true;
 }
 
-bool Writer::reset(QByteArray expectedId) {
+bool Writer::reset(ResetReview review) {
 	const auto lock = std::lock_guard(_state->mutex);
 	if (_state->stopped || !_state->lease->live.load() || _state->jobs.size() == kEvents) return false;
-	_state->jobs.emplace_back(std::move(expectedId));
+	_state->jobs.emplace_back(std::move(review));
 	_state->changed.notify_one();
 	return true;
 }
@@ -123,15 +123,7 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 	};
 	auto opened = store->open();
 	const auto initial = store->id();
-	if (!opened) {
-		store.reset();
-		report(std::move(opened), initial);
-		return;
-	}
-	if (state->lease->live.load()) {
-		const auto limit = store->maintain();
-		report(limit ? std::move(opened) : limit, initial);
-	}
+	if (state->lease->live.load()) report(std::move(opened), initial);
 	for (;;) {
 		auto lock = std::unique_lock(state->mutex);
 		const auto ready = state->changed.wait_for(lock, std::chrono::minutes(1),
@@ -174,11 +166,11 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 			auto effect = store->capture(*event);
 			if (state->lease->live.load()) report(std::move(effect), store->id());
 		} else if (const auto query = std::get_if<State::Query>(&job)) {
-			if (store->current() && query->generation == store->id()) query->operation(*store);
+			if (query->generation == store->id()) query->operation(*store);
 		} else {
-			auto effect = store->reset(std::get<QByteArray>(job));
+			auto effect = store->reset(std::get<ResetReview>(job));
 			const auto id = store->id();
-			if (!store->current()) {
+			if (effect.committed || !state->lease->live.load()) {
 				store.reset();
 				report(std::move(effect), id);
 				return;

@@ -5,6 +5,7 @@
 #include "purple/purple_archive_v2_media.h"
 
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QDir>
 #include <QtCore/QFileInfo>
 #include <QtCore/QtEndian>
 #include <algorithm>
@@ -76,10 +77,19 @@ QString Store::openDatabase(const QByteArray &dataKey) {
 	}
 	const auto root = directory();
 	const auto path = root + u"/archive.sqlite"_q;
-	if ((_pointer.initialized && !QFileInfo(path).exists()) || !DesktopArchiveDirectory(root)) {
-		return u"store_unreadable"_q;
+	const auto identity = DesktopArchivePersistentIdentity(root);
+	if (!_pointer.directory.isEmpty()) {
+		if (identity != _pointer.directory || !DesktopArchivePrivate(root, true)) return u"store_unreadable"_q;
+	} else {
+		if (!DesktopArchiveDirectory(root) || !QDir(root).isEmpty(
+				QDir::AllEntries | QDir::System | QDir::Hidden | QDir::NoDotAndDotDot)) {
+			return u"store_unreadable"_q;
+		}
+		auto next = _pointer;
+		next.directory = DesktopArchivePersistentIdentity(root);
+		if (next.directory.isEmpty() || !publish(next)) return u"store_unreadable"_q;
 	}
-	if (!QFileInfo(path).exists() && !DesktopArchiveWrite(path, {})) return u"store_unreadable"_q;
+	if (!QFileInfo(path).exists() && (_pointer.initialized || !DesktopArchiveWrite(path, {}))) return u"store_unreadable"_q;
 	for (const auto &suffix : { QString(), u"-wal"_q, u"-shm"_q, u"-journal"_q }) {
 		const auto info = QFileInfo(path + suffix);
 		if ((info.exists() || info.isSymLink()) && !DesktopArchivePrivate(info.filePath(), false)) {

@@ -118,7 +118,7 @@ void PendingBytesAndMediaOutcome() {
 	const auto described = store.media(event.identity, 1);
 	CHECK(described && described->size() == 1 && !described->front().savedBytes
 		&& described->front().reason == u"copy_incomplete"_q);
-	const auto reset = store.reset(id);
+	const auto reset = ConfirmReset(store, id);
 	CHECK(reset.committed && reset.reason == u"cleanup_pending"_q);
 	const auto pending = store.pendingBytes();
 	CHECK(pending && *pending > 0);
@@ -225,7 +225,7 @@ void PreviousArchiveRemoval() {
 			auto store = V2Store(v2);
 			CHECK(store.open());
 			CHECK(store.capture(Sample(store.id())).committed);
-			CHECK(store.reset(store.id()).committed);
+			CHECK(ConfirmReset(store, store.id()).committed);
 		}
 		{
 			auto fresh = V2Store(Options(temp.path()));

@@ -76,6 +76,12 @@ int64 Count(const QString &path, QString sql) {
 	return value ? *value : -1;
 }
 
+StoreEffect ConfirmReset(V2Store &store, const QByteArray &id) {
+	auto review = store.reviewReset(id);
+	const auto token = std::get_if<ResetReview>(&review);
+	return token ? store.reset(*token) : StoreEffect{ std::get<QString>(review) };
+}
+
 int CrashChild(const QString &root, const QString &mode, Phase phase) {
 	const auto marker = root + '/' + QString::fromLatin1(kMarker);
 	if (QFileInfo(root).canonicalFilePath() != root || Read(marker) != "archive-v2-writer-fixture-only") return 2;
@@ -94,7 +100,7 @@ int CrashChild(const QString &root, const QString &mode, Phase phase) {
 		event.event = Observation::Edit;
 		static_cast<void>(store.capture(event));
 	} else if (mode == u"reset"_q) {
-		static_cast<void>(store.reset(store.id()));
+		static_cast<void>(ConfirmReset(store, store.id()));
 	} else if (mode == u"blob"_q) {
 		static_cast<void>(store.writeBlob(SampleBlob(store.id(), QByteArray(2 * kChunk, 'f'))));
 	}
@@ -206,7 +212,7 @@ void KeysAndIsolation() {
 		auto wrong = Options(temp.path());
 		wrong.profileKey = QByteArray(32, 'x');
 		auto store = V2Store(std::move(wrong));
-		CHECK(store.open().reason == u"key_unavailable"_q);
+		CHECK(store.open().reason == u"pointer_authentication_failed"_q);
 	}
 	{
 		auto changed = V2Store(Options(temp.path(), 17, 'p', 'w'));
@@ -220,11 +226,11 @@ void KeysAndIsolation() {
 		auto store = V2Store(std::move(correct));
 		CHECK(store.open() && store.id() == id);
 		allow = false;
-		CHECK(!store.reset(id).committed && store.current());
+		CHECK(!ConfirmReset(store, id).committed && store.current());
 		const auto retained = store.body(event.identity, 1);
 		CHECK(Read(pointer) == published && retained && retained->body == event.body);
 		allow = true;
-		CHECK(store.reset(id).committed && !store.current());
+		CHECK(ConfirmReset(store, id).committed && !store.current());
 		CHECK(!store.body(event.identity, 1));
 	}
 	auto fresh = V2Store(Options(temp.path()));
@@ -322,6 +328,131 @@ void CorruptStoreRefuses() {
 	}
 	CHECK(Read(pointer) == published);
 	CHECK(Read(path) == "corrupt initialized fixture");
+}
+
+void UnreadableRetirement() {
+	Section = "v2 authenticated unreadable generations can be reset and retired on logout";
+	for (auto mode = 0; mode != 4; ++mode) {
+		for (const auto logout : { false, true }) {
+			const auto temp = QTemporaryDir();
+			const auto natural = Options(temp.path());
+			auto id = QByteArray();
+			{
+				auto store = V2Store(Options(temp.path()));
+				CHECK(store.open());
+				id = store.id();
+				CHECK(store.capture(Sample(id)).committed);
+			}
+			const auto directory = ActivePath(natural, id);
+			const auto path = directory + u"/archive.sqlite"_q;
+			const auto pointer = AccountPath(natural) + u"/active.v2"_q;
+			auto options = Options(temp.path());
+			if (mode == 0) options.loginSecret = QByteArray(32, 'w');
+			if (mode == 1) CHECK(Put(path, "truncated initialized fixture"));
+			if (mode == 2) {
+				auto database = DesktopArchiveSqlite();
+				CHECK(database.Open(path, false).ok);
+				CHECK(database.Read({ u"DROP TABLE meta"_q }).ok);
+			}
+			if (mode == 3) {
+				auto bytes = Read(pointer);
+				CHECK(bytes.size() > 4);
+				bytes[4] = char(bytes[4] ^ 1);
+				CHECK(Put(pointer, bytes));
+			}
+			const auto published = Read(pointer);
+			auto store = V2Store(std::move(options));
+			CHECK(!store.open());
+			const auto effect = logout ? store.logout(id) : ConfirmReset(store, id);
+			CHECK(effect.committed == (mode != 3));
+			if (mode == 3) CHECK(effect.reason == u"pointer_authentication_failed"_q);
+			CHECK(QFileInfo::exists(directory) == (mode == 3));
+			CHECK((Read(pointer) == published) == (mode == 3));
+		}
+	}
+}
+
+void UnreadableWriterControls() {
+	Section = "v2 worker remains available for confirmed reset and logout after open failure";
+	for (const auto byLogout : { false, true }) {
+		const auto temp = std::make_shared<QTemporaryDir>();
+		const auto normal = Options(temp->path());
+		auto id = QByteArray();
+		{
+			auto store = V2Store(Options(temp->path()));
+			CHECK(store.open());
+			id = store.id();
+			CHECK(store.capture(Sample(id)).committed);
+		}
+		const auto path = ActivePath(normal, id);
+		struct Signals {
+			std::promise<std::pair<StoreEffect, QByteArray>> opened;
+			std::promise<StoreEffect> retired;
+			std::promise<V2Store::ResetCheck> review;
+		};
+		auto signals = std::make_shared<Signals>();
+		auto opened = signals->opened.get_future();
+		auto retired = signals->retired.get_future();
+		auto review = signals->review.get_future();
+		auto worker = Writer(Options(temp->path(), 17, 'p', 'n'), [signals, temp, first = true](StoreEffect e, QByteArray actual) mutable {
+			if (std::exchange(first, false)) signals->opened.set_value({ e, actual });
+			else signals->retired.set_value(e);
+		});
+		CHECK(opened.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+		if (opened.wait_for(std::chrono::seconds(0)) != std::future_status::ready) continue;
+		const auto [failure, actual] = opened.get();
+		CHECK(failure.reason == u"key_unavailable"_q && actual == id);
+		if (byLogout) {
+			worker.logout(id);
+		} else {
+			CHECK(worker.query(id, [=](V2Store &store) { signals->review.set_value(store.reviewReset(id)); }));
+			CHECK(review.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+			if (review.wait_for(std::chrono::seconds(0)) != std::future_status::ready) continue;
+			const auto check = review.get();
+			const auto token = std::get_if<ResetReview>(&check);
+			CHECK(token && token->bytes() > 0 && worker.reset(*token));
+		}
+		CHECK(retired.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+		if (retired.wait_for(std::chrono::seconds(0)) != std::future_status::ready) continue;
+		CHECK(retired.get().committed && !QFileInfo::exists(path));
+		auto fresh = V2Store(Options(temp->path(), 17, 'p', 'n'));
+		CHECK(fresh.open() && fresh.id() != id);
+	}
+
+	const auto temp = QTemporaryDir();
+	const auto options = Options(temp.path());
+	auto store = V2Store(Options(temp.path()));
+	CHECK(store.open());
+	const auto id = store.id();
+	const auto review = store.reviewReset(id);
+	const auto token = std::get_if<ResetReview>(&review);
+	CHECK(token);
+	if (!token) return;
+	CHECK(Put(ActivePath(options, id) + u"/stale.fixture"_q, "size changed"));
+	CHECK(store.reset(*token).reason == u"reset_review_stale"_q && store.current());
+}
+void ActiveDirectorySubstitution() {
+	Section = "v2 authenticated active directory identity refuses a substituted tree";
+	const auto temp = QTemporaryDir();
+	const auto options = Options(temp.path());
+	auto id = QByteArray();
+	{
+		auto store = V2Store(Options(temp.path()));
+		CHECK(store.open());
+		id = store.id();
+		CHECK(store.capture(Sample(id)).committed);
+	}
+	const auto active = ActivePath(options, id);
+	const auto original = temp.filePath(u"original.fixture"_q);
+	CHECK(QDir().rename(active, original));
+	CHECK(DesktopArchiveDirectory(active));
+	CHECK(Put(active + u"/untouched.fixture"_q, "substituted directory"));
+	auto store = V2Store(Options(temp.path()));
+	CHECK(store.open().reason == u"store_unreadable"_q && store.id() == id);
+	CHECK(ConfirmReset(store, id).reason == u"cleanup_blocked"_q);
+	CHECK(store.logout(id).reason == u"cleanup_blocked"_q);
+	CHECK(Read(active + u"/untouched.fixture"_q) == "substituted directory");
+	CHECK(QFileInfo::exists(original + u"/archive.sqlite"_q));
 }
 
 struct Signals {
