@@ -55,6 +55,9 @@ the numbers.
   clears OS Now Playing metadata without stopping playback, hides tray account
   actions, and disables macOS global menu actions while Purple's privacy screen
   is active.
+- `window/window_session_controller.cpp`: records chat visits for the local
+  recency palette. `boxes/peer_list_box.*` allows the palette to sort search
+  results while preserving the selected row.
 - `core/shortcuts.h`: declares the existing pause-aware dispatch overload so
   modal commands can use Telegram's contextual shortcut handlers.
 - `dialogs/dialogs_widget.*` and `history/history_widget.*`: focus eligibility

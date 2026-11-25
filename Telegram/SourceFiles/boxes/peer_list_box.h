@@ -765,6 +765,7 @@ public:
 	bool trackRowPressFromGlobal(QPoint globalPosition);
 
 	void setSearchMode(PeerListSearchMode mode);
+	void sortSearchRows(Fn<bool(const PeerListRow&, const PeerListRow&)> compare);
 	void changeCheckState(
 		not_null<PeerListRow*> row,
 		bool checked,

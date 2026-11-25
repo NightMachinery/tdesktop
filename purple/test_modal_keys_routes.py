@@ -338,7 +338,7 @@ for action, chord in (
     ("Run", "SPC SPC"),
     ("ChatPalette", "SPC ,"),
     ("ChatPalette", "SPC RET"),
-    ("ChatPalette", "SPC b b"),
+    ("RecentChatPalette", "SPC b b"),
     ("Backgrounds", "SPC t b"),
     ("ToggleNightMode", "SPC t n"),
     ("OpenChatInfo", "SPC b i"),

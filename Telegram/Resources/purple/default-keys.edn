@@ -48,7 +48,7 @@
   "SPC RET" :chat-palette
   "SPC u"   :unread-chats-buffer
   "SPC z"   :toggle-privacy-screen
-  "SPC b b" :chat-palette
+  "SPC b b" :recent-chat-palette
   "SPC b I" :unread-chats-buffer
 
   ; Navigation and scrolling.

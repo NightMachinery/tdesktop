@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_session_controller.h"
 
+#include "purple/purple_chat_palette.h"
 #include "purple/purple_window_session_controller.h"
 #include "purple/purple_chat_background.h"
 
@@ -2387,6 +2388,9 @@ void SessionController::setActiveChatEntry(Dialogs::RowDescriptor row) {
 		_invitePeekTimer.cancel();
 	}
 	_activeChatEntry = row;
+	if (row.key.peer() && row.key.peer() != was.key.peer()) {
+		Purple::RecordChatPaletteVisit(row.key.peer());
+	}
 	if (nowHistory) {
 		nowHistory->setFakeUnreadWhileOpened(true);
 		if (const auto channel = nowHistory->peer->asChannel()

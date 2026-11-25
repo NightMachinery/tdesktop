@@ -43,6 +43,7 @@ PRIVATE
     purple/purple_music_bookmark.h
     purple/purple_chat_palette.cpp
     purple/purple_chat_palette.h
+    purple/purple_chat_palette_search.h
     purple/purple_exact_search.h
     purple/purple_control_endpoint.cpp
     purple/purple_control_endpoint.h

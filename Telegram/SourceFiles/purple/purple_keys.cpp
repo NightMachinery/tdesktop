@@ -280,6 +280,7 @@ enum class Action {
 	NextChat,
 	OpenChat,
 	ChatPalette,
+	RecentChatPalette,
 	UnreadBuffer,
 	ToggleZenMode,
 	ToggleZenChats,
@@ -399,6 +400,8 @@ const Command kCommands[] = {
 		[] { return tr::lng_purple_keys_chat_open(tr::now); } },
 	{ Action::ChatPalette, "chat-palette", "chats", "",
 		[] { return tr::lng_purple_chat_palette(tr::now); } },
+	{ Action::RecentChatPalette, "recent-chat-palette", "chats", "",
+		[] { return u"Switch to a recently viewed chat"_q; } },
 	{ Action::UnreadBuffer, "unread-chats-buffer", "chats", "",
 		[] { return u"Unread unmuted chats (iBuffer)"_q; } },
 	{ Action::ToggleZenMode, "toggle-chat-zen-mode", "window", "Needs an open chat",
@@ -3700,8 +3703,9 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		current->showSettings();
 		break;
 	case Action::ChatPalette:
+	case Action::RecentChatPalette:
 		clearPrefix();
-		ShowChatPalette(current);
+		ShowChatPalette(current, action == Action::RecentChatPalette);
 		break;
 	case Action::UnreadBuffer:
 		clearPrefix();

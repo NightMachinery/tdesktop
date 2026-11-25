@@ -69,7 +69,7 @@ with at most four strokes per chord:
   folders.
 - **Leader (`SPC`):**
   - `SPC SPC`, `M-x`, `:`, `SPC :`: command palette (`M-x`).
-  - `SPC ,`, `SPC RET`, `SPC b b`: chat switcher palette.
+  - `SPC ,`, `SPC RET`: chat switcher palette. `SPC b b`: recently viewed chats.
   - `SPC u`, `SPC b I`: unread unmuted chats buffer (iBuffer).
   - `SPC z`, `SPC t p`: privacy screen across all Purple windows.
   - `SPC b`: active chat (`b i` info, `b m` chat menu, `b p` pinned, `b v`
@@ -339,6 +339,14 @@ on the modal status line and cheatsheet footer.
 
 ## Open chats with the keyboard
 
-`SPC ,`, `SPC RET`, or `SPC b b` opens the chat palette. Search chats, archived
-chats, channels, and contacts by name, username, phone number, or contact note.
-Use Up or Down to move and Enter to open the highlighted chat.
+Open the chat palette with `SPC ,` or `SPC RET` to browse chats, archived
+chats, channels, and contacts in their usual order. `SPC b b` starts with the
+most recently viewed chats and puts the current chat last among equal matches.
+Both respect Work Mode visibility. Recency stays in encrypted per-account
+storage and clears on logout.
+
+Every query word must match. Literal name matches rank first, followed by name
+matches using the other keyboard layout, username or phone, then contact note.
+Persian and US QWERTY layout conversion works in either direction for names.
+The palettes dim and elide contact notes and highlight matching text. Use
+Up or Down to move and Enter to open the selected chat.

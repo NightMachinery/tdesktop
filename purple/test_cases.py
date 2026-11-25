@@ -20,6 +20,11 @@ from voice_queue_fixture import voice_queue_include
 
 CORE = 'purple_core'
 CASES = {
+    'chat-palette': {
+        'program': 'chat_palette_cases.cpp',
+        'units': [],
+        'frameworks': ['QtCore'],
+    },
     'playlist-managed-cache': {
         'program': 'playlist_managed_cache_cases.cpp',
         'units': [
