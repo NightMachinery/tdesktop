@@ -1839,14 +1839,17 @@ private:
 			const auto button = Button(_sheet, delta < 0 ? u"Decrease"_q : u"Increase"_q);
 			addSheetWidget(button);
 			connect(button, &QPushButton::clicked, this, [this, descriptor = row.descriptor, delta] {
+				if (descriptor->codec == SettingCodec::Duration) {
+					if (const auto stepped = SettingsTree::StepDurationField(*descriptor, _line->text(), delta)) {
+						_line->setText(*stepped);
+					}
+					return;
+				}
 				const auto value = SettingsTree::Decode(*descriptor, _line->text());
 				if (!value) return;
-				const auto current = std::get_if<int64>(&*value)
-					? QVariant::fromValue(std::get<int64>(*value))
-					: QVariant(ParseDuration(std::get<QString>(*value)).value_or(0));
+				const auto current = QVariant::fromValue(std::get<int64>(*value));
 				if (const auto stepped = SettingsTree::Step(*descriptor, current, delta)) {
-					_line->setText(std::get_if<int64>(&*stepped)
-						? QString::number(std::get<int64>(*stepped)) : std::get<QString>(*stepped));
+					_line->setText(QString::number(std::get<int64>(*stepped)));
 				}
 			});
 		}

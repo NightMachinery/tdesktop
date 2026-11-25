@@ -94,6 +94,16 @@ int main() {
 	Check(Step(retention, QVariant(0), 1) == SettingScalar(QStringLiteral("3600s"))
 		&& Step(retention, QVariant(3600), -1) == SettingScalar(QStringLiteral("off")),
 		"duration stepping skips unsupported values between off and the minimum");
+	const auto &nudge = DescribeSetting(SettingId::LongNudge);
+	Check(StepDurationField(nudge, QStringLiteral("30m"), 1) == QStringLiteral("31m"),
+		"minute units step one minute and keep their suffix");
+	Check(StepDurationField(nudge, QStringLiteral("2h"), -1) == QStringLiteral("1h"),
+		"hour units step one hour and keep their suffix");
+	Check(StepDurationField(nudge, QStringLiteral("1m"), -1) == QStringLiteral("off")
+		&& StepDurationField(nudge, QStringLiteral("off"), 1) == QStringLiteral("60s"),
+		"stepping across the minimum can turn a duration off and back on");
+	Check(!StepDurationField(nudge, QStringLiteral("2147483647s"), 1)
+		&& !StepDurationField(nudge, QStringLiteral("0.5h"), 1), "invalid or overflowing steps refuse");
 	Check(Decode(DescribeSetting(SettingId::ReplyText), QStringLiteral(" a \n "))
 		== SettingScalar(QStringLiteral(" a \n ")), "preserves native multiline text");
 	Check(!Decode(DescribeSetting(SettingId::ReplyText), QStringLiteral(" \n ")), "blank reply refuses");

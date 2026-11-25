@@ -492,6 +492,28 @@ std::optional<SettingScalar> Step(const SettingDescriptor &descriptor, const QVa
 	return (next >= 0 && next < options.size()) ? Decode(descriptor, options[next]) : std::nullopt;
 }
 
+std::optional<QString> StepDurationField(
+		const SettingDescriptor &descriptor,
+		const QString &text,
+		int delta) {
+	const auto value = Duration(descriptor, text);
+	if (!value || (!*value && delta < 0)) {
+		return std::nullopt;
+	}
+	const auto last = text.trimmed().back().toLower();
+	const auto step = (last == u'm') ? 60 : (last == u'h') ? 3600 : (last == u'd') ? 86400 : 1;
+	const auto minimum = DurationMinimum(descriptor.id);
+	const auto next = *value
+		? qlonglong(*value) + (delta > 0 ? step : -step)
+		: qlonglong((minimum + step - 1) / step) * step;
+	if (next > INT_MAX) {
+		return std::nullopt;
+	}
+	const auto result = (next < minimum) ? u"off"_q
+		: QString::number(next / step) + ((step == 1) ? QChar(u's') : last);
+	return Duration(descriptor, result) ? std::make_optional(result) : std::nullopt;
+}
+
 EditorKey ShouldHandleEditorKey(bool preedit, bool submit, bool singleLineOrExplicitSubmit, bool back) {
 	if (preedit) return EditorKey::Native;
 	if (back) return EditorKey::Back;

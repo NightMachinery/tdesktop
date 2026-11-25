@@ -72,6 +72,10 @@ struct VisibleRows {
 	const SettingDescriptor &descriptor,
 	const QVariant &effective,
 	int delta);
+[[nodiscard]] std::optional<QString> StepDurationField(
+	const SettingDescriptor &descriptor,
+	const QString &text,
+	int delta);
 
 enum class EditorKey { Native, Stage, Back };
 [[nodiscard]] EditorKey ShouldHandleEditorKey(
