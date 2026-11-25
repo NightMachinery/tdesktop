@@ -137,7 +137,7 @@ namespace {
 
 	const auto machine = MachineId();
 	if (machine.isEmpty()) {
-		LOG(("Purple: no machine id on this platform, "
+		LOG(("Purple Settings: no machine id on this platform, "
 			"so rulesets naming a device will not match."));
 		return result;
 	}

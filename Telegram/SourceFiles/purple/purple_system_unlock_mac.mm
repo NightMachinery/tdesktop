@@ -1,6 +1,7 @@
 #include "purple/purple_system_unlock.h"
 
 #include "base/platform/mac/base_utilities_mac.h"
+#include "core/application.h"
 #include "lang/lang_keys.h"
 
 #include <AppKit/AppKit.h>
@@ -65,7 +66,9 @@ void Finish(
 	[prompt->context invalidate];
 	const auto sheet = prompt->alert.window;
 	[sheet.sheetParent endSheet:sheet];
-	prompt->done(result);
+	if (!Core::Quitting()) {
+		prompt->done(result);
+	}
 }
 
 } // namespace
@@ -75,6 +78,9 @@ void SuggestSystemUnlock(
 		const QString &text,
 		Fn<void(base::SystemUnlockResult)> done,
 		Fn<void()> usePasscode) {
+	if (Core::Quitting()) {
+		return;
+	}
 	if (ActivePrompt || SystemPromptPending || !KeyWindow(parent)) {
 		done(Result::Cancelled);
 		return;
@@ -116,6 +122,8 @@ void SuggestSystemUnlock(
 	const auto passcode = [alert addButtonWithTitle:Q2NSString(
 		tr::lng_purple_unlock_use_passcode(tr::now))];
 	passcode.keyEquivalent = @"\033";
+	// Let AppKit consult Qt's normal quit handler while the sheet is open.
+	alert.window.preventsApplicationTerminationWhenModal = NO;
 	const auto weak = std::weak_ptr(prompt);
 	prompt->destroyed = QObject::connect(parent.get(), &QObject::destroyed, [weak] {
 		if (const auto strong = weak.lock()) {
@@ -147,12 +155,20 @@ void SuggestSystemUnlock(
 		if (const auto strong = weak.lock(); strong && strong == ActivePrompt) {
 			Finish(strong, Result::Cancelled);
 			if (response == NSAlertFirstButtonReturn) {
-				crl::on_main(usePasscode);
+				crl::on_main([usePasscode] {
+					if (!Core::Quitting()) {
+						usePasscode();
+					}
+				});
 			}
 		}
 	}];
 	crl::on_main([weak, text] {
 		if (const auto strong = weak.lock(); strong && strong == ActivePrompt) {
+			if (Core::Quitting()) {
+				Finish(strong, Result::Cancelled);
+				return;
+			}
 			[strong->context evaluatePolicy:policy localizedReason:Q2NSString(text)
 				reply:^(BOOL success, NSError *error) {
 					const auto result = success

@@ -53,8 +53,7 @@ void UpdateTranslationOffer(
 void SetChatTranslationExcluded(not_null<PeerData*> peer, bool excluded);
 void AddTranslateBarExcludeAction(
 	not_null<Ui::PopupMenu*> menu,
-	not_null<PeerData*> peer,
-	Fn<void(TextWithEntities, const QString&, Fn<void()>)> showToast);
+	not_null<PeerData*> peer);
 void AddExcludedTranslationChatsRow(
 	not_null<Ui::VerticalLayout*> container,
 	not_null<Window::SessionController*> controller);

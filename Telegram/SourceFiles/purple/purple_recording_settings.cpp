@@ -130,7 +130,6 @@ void SetKeepDiscarded(bool value) {
 
 void BuildMediaRecordingSettings(::Settings::Builder::SectionBuilder &builder) {
 	const auto controller = builder.controller();
-	builder.addDivider();
 	builder.addSkip();
 	builder.addSubsectionTitle({
 		.id = u"advanced/purple_media_recording"_q,

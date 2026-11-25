@@ -1451,6 +1451,29 @@ immutable stages, retry/notice persistence and the current Saved Messages limit.
 ## Desktop Settings entry
 
 Purple has its own section directly under Settings. It uses Telegram's stock
-section navigation and settings controls. Purple rows are indexed under this
-section for search and no longer appear inside Advanced. Their stored settings
-and existing row identifiers are unchanged.
+section navigation and settings controls. **Customize settings…** comes first,
+followed by **Archive & storage**, **Work Mode & activity**, **Media**,
+**Privacy & controls**, **Accounts, files & sync**, and **Diagnostics & logs**.
+The archive row shows this account's measured size. A trailing `+` marks a
+scan still in progress. The archive page includes the full storage summary,
+cleanup reviews, and Telegram's separate media cache.
+
+Search at the top of the Purple page covers Purple and its subpages. Global
+Settings search covers them as well. Selecting a search result opens its page
+and highlights its control. Destructive actions require a separate activation
+and confirmation.
+
+## Diagnostics
+
+Under **Purple → Diagnostics & logs**, use **Export diagnostic log…** or
+**Clear diagnostic log…**. In M-x, use
+`:log-export` and `:log-clear`.
+
+- Purple keeps timestamps, subsystem labels, reason codes, and diagnostic
+  values in two rotating segments of up to 1 MiB each under its working
+  directory. The files use owner-only permissions on POSIX.
+- Export writes both segments, the Purple, Telegram Desktop, and Qt versions,
+  and up to 32 recent notices from the opening account and the app. It masks
+  recognized credentials and contact details, abbreviates home paths, and
+  assigns short pseudonyms to numeric peer and message IDs.
+- Clear asks for confirmation and truncates the two diagnostic segments.

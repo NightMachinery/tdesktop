@@ -479,14 +479,7 @@ void TranslateBar::showMenu(base::unique_qptr<Ui::PopupMenu> menu) {
 			addToIgnoreList,
 			&st::menuIconBlock);
 	}
-	Purple::AddTranslateBarExcludeAction(
-		_menu.get(),
-		history->peer,
-		[=](TextWithEntities text, const QString &button, Fn<void()> cb) {
-			if (guard) {
-				showToast(std::move(text), button, std::move(cb));
-			}
-		});
+	Purple::AddTranslateBarExcludeAction(_menu.get(), history->peer);
 	const auto hideBar = [=] {
 		showHiddenToast(history->peer);
 

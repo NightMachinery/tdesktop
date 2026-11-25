@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_translation_policy.h"
+#include "purple/purple_notices.h"
 
 #include "base/algorithm.h"
 #include "base/debug_log.h"
@@ -229,17 +230,15 @@ void UpdateTranslationOffer(
 	}
 	const auto now = history->translateOfferedFrom();
 	if (now != was) {
-		LOG(("Purple: %1 translation of %2 - %3 of %4 messages recognised, "
-			"threshold %5."
+		LOG(("Purple Translation: %1 translation for peer=%2; recognized=%3 total=%4 threshold=%5."
 			).arg(QString::fromLatin1(now ? "offering" : "withdrawing")
-			).arg(history->peer->name()
+			).arg(QString::number(history->peer->id.value)
 			).arg(translatable
 			).arg(count
 			).arg(threshold));
 	} else if (!now && count >= kEnoughForTranslation && !languages.empty()) {
-		LOG(("Purple: not offering translation of %1 - %2 of %3 messages "
-			"recognised, need %4."
-			).arg(history->peer->name()
+		LOG(("Purple Translation: not offering translation for peer=%1; recognized=%2 total=%3 threshold=%4."
+			).arg(QString::number(history->peer->id.value)
 			).arg(translatable
 			).arg(count
 			).arg(threshold));
@@ -301,20 +300,34 @@ void SetChatTranslationExcluded(not_null<PeerData*> peer, bool excluded) {
 
 void AddTranslateBarExcludeAction(
 		not_null<Ui::PopupMenu*> menu,
-		not_null<PeerData*> peer,
-		Fn<void(TextWithEntities, const QString&, Fn<void()>)> showToast) {
+		not_null<PeerData*> peer) {
+	const auto session = base::make_weak(&peer->session());
+	const auto id = peer->id;
 	menu->addAction(
 		tr::lng_purple_translate_dont_chat(tr::now),
 		[=] {
-			SetChatTranslationExcluded(peer, true);
-			if (showToast) {
-				showToast(
-					tr::lng_purple_translate_excluded_toast(
-						tr::now,
-						tr::marked),
-					tr::lng_translate_undo(tr::now),
-					[=] { SetChatTranslationExcluded(peer, false); });
+			const auto live = session.get();
+			const auto peer = live ? live->data().peerLoaded(id) : nullptr;
+			if (!peer) {
+				return;
 			}
+			SetChatTranslationExcluded(peer, true);
+			ShowPurpleNotice({
+				.session = live,
+				.scope = u"Translation"_q,
+				.summary = tr::lng_purple_translate_excluded_toast(tr::now),
+				.coalesceKey = u"translation:excluded:"_q + QString::number(id.value),
+				.primaryAction = PurpleNoticeAction{
+					.label = tr::lng_translate_undo(tr::now),
+					.run = [=](not_null<Window::Controller*>) {
+						if (const auto live = session.get()) {
+							if (const auto peer = live->data().peerLoaded(id)) {
+								SetChatTranslationExcluded(peer, false);
+							}
+						}
+					},
+				},
+			});
 		},
 		&st::menuIconBlock);
 }

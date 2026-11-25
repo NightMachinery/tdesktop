@@ -13,6 +13,7 @@
 #include "data/data_chat.h"
 #include "data/data_document.h"
 #include "data/data_folder.h"
+#include "data/data_changes.h"
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
 #include "data/data_session.h"
@@ -44,6 +45,7 @@
 #include "purple/purple_chat_background.h"
 #include "purple/purple_chat_palette.h"
 #include "purple/purple_config.h"
+#include "purple/purple_diagnostics_ui.h"
 #include "purple/purple_exact_search.h"
 #include "purple/purple_keys_mx.h"
 #include "purple/purple_keys_ui.h"
@@ -292,6 +294,8 @@ enum class Action {
 	OpenMainMenu,
 	OpenSettings,
 	CustomizeSettings,
+	LogExport,
+	LogClear,
 	OpenSavedMessages,
 	OpenArchive,
 	OpenContacts,
@@ -418,6 +422,10 @@ const Command kCommands[] = {
 		[] { return tr::lng_menu_settings(tr::now); } },
 	{ Action::CustomizeSettings, "customize-settings", "files", "Needs an unlocked account window",
 		[] { return u"Customize Purple settings"_q; } },
+	{ Action::LogExport, "log-export", "files", "Needs an unlocked account window",
+		[] { return u"Export Purple diagnostics"_q; } },
+	{ Action::LogClear, "log-clear", "files", "Needs an unlocked account window",
+		[] { return u"Clear Purple diagnostics"_q; } },
 	{ Action::OpenSavedMessages, "open-saved-messages", "open", "",
 		[] { return tr::lng_saved_messages(tr::now); } },
 	{ Action::OpenArchive, "open-archived-chats", "open", "",
@@ -1088,7 +1096,7 @@ KeymapData LoadKeymapData() {
 		return candidate;
 	}
 	defaults.error = userErr;
-	LOG(("Purple modal keys: invalid keys.edn (%1), using built-in defaults.").arg(userErr));
+	LOG(("Purple Settings: invalid keys.edn, using built-in defaults."));
 	return defaults;
 }
 
@@ -1515,6 +1523,9 @@ bool Available(Action action, const Target &target) {
 		return target.controller && !target.controller->session().supportMode();
 	case Action::CustomizeSettings:
 		return target.controller && CanCustomizeSettings(&target.controller->window());
+	case Action::LogExport:
+	case Action::LogClear:
+		return target.controller && Diagnostics::CanManage(&target.controller->window());
 	case Action::OpenScheduled: return target.chatActions;
 	case Action::OpenChatMenu: return target.list || target.chatActions;
 	case Action::TogglePlayback:
@@ -2485,10 +2496,15 @@ void Keys::showTopicPicker(bool unreadOnly, const Target &target) {
 	const auto weakCtrl = base::make_weak(current);
 	const auto weakSession = base::make_weak(&current->session());
 	const auto peerId = forum->peer()->id;
+	using TopicFlag = Data::TopicUpdate::Flag;
 	auto updates = rpl::merge(
 		forum->topicDestroyed() | rpl::to_empty,
 		forum->topicsList()->unreadStateChanges() | rpl::to_empty,
-		forum->topicsList()->fullSize().changes() | rpl::to_empty);
+		forum->topicsList()->fullSize().changes() | rpl::to_empty,
+		current->session().changes().topicUpdates(TopicFlag::Title | TopicFlag::IconId)
+			| rpl::filter([peerId](const Data::TopicUpdate &update) {
+				return update.topic->peer()->id == peerId;
+			}) | rpl::to_empty);
 	_activeLayer = ActiveLayer::TopicPicker;
 	auto layer = ModalUi::CreateTopicPickerLayer({
 		.session = weakSession,
@@ -3483,6 +3499,14 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 		clearPrefix();
 		ShowCustomizeSettings(&_window->controller());
 		break;
+	case Action::LogExport:
+		clearPrefix();
+		Diagnostics::ShowExport(&_window->controller());
+		break;
+	case Action::LogClear:
+		clearPrefix();
+		Diagnostics::ShowClear(&_window->controller());
+		break;
 	case Action::OpenDownloads:
 		clearPrefix();
 		current->showSection(Info::Downloads::Make(current->session().user()));
@@ -4340,6 +4364,7 @@ int CalendarDayKeyOffset(const QKeyEvent &event) {
 }
 
 void EnsureModalKeysAttached(not_null<MainWindow*> window) {
+	InitPurpleNoticeDelivery();
 	EnsureKeys(window);
 }
 
@@ -4411,7 +4436,7 @@ void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder) {
 		.title = tr::lng_purple_keys_settings(),
 		.st = &st::settingsButtonNoIcon,
 		.toggled = rpl::single(Enabled()) | rpl::then(EnabledChanges.events()),
-		.keywords = { u"keyboard"_q, u"modal"_q, u"evil"_q, u"leader"_q },
+		.keywords = { u"keyboard"_q, u"modal"_q, u"evil"_q, u"leader"_q, u"keybindings"_q, u"shortcuts"_q },
 	});
 	if (toggle) {
 		toggle->toggledValue() | rpl::on_next([](bool enabled) {
@@ -4484,7 +4509,10 @@ void ShowModalNoticeLayer(
 		not_null<MainWindow*> window,
 		std::unique_ptr<Ui::LayerWidget> layer,
 		bool isHistory) {
-	if (const auto keys = EnsureKeys(window)) {
+	if (!ModalKeysEnabled()) {
+		window->showOrHideBoxOrLayer(
+			std::move(layer), Ui::LayerOption::KeepOther, anim::type::normal);
+	} else if (const auto keys = EnsureKeys(window)) {
 		keys->showNoticeLayer(std::move(layer), isHistory);
 	}
 }

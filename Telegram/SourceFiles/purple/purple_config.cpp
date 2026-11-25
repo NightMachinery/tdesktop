@@ -70,7 +70,7 @@ void ShowAccountListReloadNotices();
 bool WriteConfigFile(const QString &path, const QString &text) {
 	auto file = QSaveFile(path);
 	if (!file.open(QIODevice::WriteOnly)) {
-		LOG(("Purple Error: Could not write %1.").arg(path));
+		LOG(("Purple Settings: open for write failed; file=%1 error=%2.").arg(path).arg(int(file.error())));
 		return false;
 	}
 	const auto bytes = text.toUtf8();
@@ -79,7 +79,7 @@ bool WriteConfigFile(const QString &path, const QString &text) {
 		return false;
 	}
 	if (!file.commit()) {
-		LOG(("Purple Error: Could not commit %1.").arg(path));
+		LOG(("Purple Settings: commit failed; file=%1 error=%2.").arg(path).arg(int(file.error())));
 		return false;
 	}
 	return true;
@@ -349,7 +349,7 @@ hide_invisible_p = true
 	if (!file.exists()) {
 		return std::nullopt;
 	} else if (!file.open(QIODevice::ReadOnly)) {
-		LOG(("Purple Error: Could not read %1.").arg(path));
+		LOG(("Purple Settings: Error: Could not read %1.").arg(path));
 		return std::nullopt;
 	}
 	return QString::fromUtf8(file.readAll());
@@ -509,7 +509,7 @@ void Config::applySettings(Settings settings, const QString &path) {
 	// One line per load, so "the toggle looks off" can be answered from the log
 	// instead of from a rebuild. The file is hand-edited and lives outside
 	// tdata, so which one we actually read is worth stating too.
-	LOG(("Purple: %1, %2 lists, %3 presets, read from %4."
+	LOG(("Purple Settings: %1, %2 lists, %3 presets, read from %4."
 		).arg(_settings.premium.enabled
 			? u"local premium ON"_q
 			: u"local premium OFF"_q
@@ -769,8 +769,8 @@ WriteResult Config::write(
 	const auto result = AccountRouting().writeSettingsEdit(*input,
 		[&](const QString &text) { return op(text); }, current);
 	if (!result.ok) {
-		LOG(("Purple Error: Could not write %1 to %2: %3."
-			).arg(what, input->destination.file.path, result.error));
+		LOG(("Purple Settings: account settings write refused; role=%1."
+			).arg(int(input->destination.role)));
 		return { .error = result.error };
 	}
 	if (result.changed) {
@@ -865,7 +865,7 @@ void Config::updateState(Fn<void(State&)> apply) {
 	// costs the user a preset to re-pick after a restart, nothing more.
 	if (!QDir().mkpath(ConfigDirectory())
 		|| !WriteConfigFile(StateFilePath(), _stateText)) {
-		LOG(("Purple Error: Could not save %1.").arg(StateFilePath()));
+		LOG(("Purple Settings: Error: Could not save %1.").arg(StateFilePath()));
 	}
 	if (_globalChoiceApplying) { _globalChoiceStatePending = true; }
 	else { _stateChanges.fire({}); }

@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_birthday_reminders.h"
 #include "purple/purple_account_appwide_removal.h"
 #include "purple/purple_device.h"
+#include "purple/purple_diagnostics_ui.h"
 #include "purple/purple_emoji_export.h"
 #include "purple/purple_control.h"
 #include "purple/purple_last_seen.h"
@@ -47,15 +48,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_builder.h"
 #include "settings/settings_common_session.h"
 #include "settings/sections/settings_main.h"
+#include "settings/sections/settings_local_storage.h"
+#include "settings/settings_search.h"
 #include "ui/layers/generic_box.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
 #include <QtCore/QPointer>
 #include <memory>
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "styles/style_menu_icons.h"
+#include "styles/style_layers.h"
 #include "styles/style_settings.h"
 
 namespace Purple {
@@ -182,7 +187,7 @@ void BuildAccountSettingsRow(
 	}
 	AddAccountScopeCaption(builder, row);
 	// The two last-seen rows sit together, so only the second offers it.
-	if (controller && row != AccountSettingsRow::LastSeenReasons) {
+	if (row != AccountSettingsRow::LastSeenReasons) {
 		AddSettingsOwnerLink(builder, id, row);
 	}
 	if (row == AccountSettingsRow::SendAfterSave) { return; }
@@ -232,7 +237,6 @@ void BuildAccountSettingsRow(
 
 void BuildPurpleSettingsFiles(SectionBuilder &builder) {
 	const auto controller = builder.controller();
-	if (!controller) { return; }
 	const auto weakController = base::make_weak(controller);
 	const auto weakSession = base::make_weak(builder.session().get());
 	const auto windowCurrent = [=] {
@@ -268,7 +272,7 @@ void BuildPurpleSettingsFiles(SectionBuilder &builder) {
 	for (const auto role : { SettingsOpenRole::Own, SettingsOpenRole::AppWide }) {
 		const auto target = [=] {
 			const auto live = weakSession.get();
-			return windowCurrent() ? AccountSettingsOpenTargetFor(live, role) : std::nullopt;
+			return live ? AccountSettingsOpenTargetFor(live, role) : std::nullopt;
 		};
 		const auto label = [=] {
 			const auto selected = target();
@@ -283,7 +287,7 @@ void BuildPurpleSettingsFiles(SectionBuilder &builder) {
 					? tr::lng_purple_settings_open_appwide(tr::now, lt_account, name)
 					: tr::lng_purple_settings_open_own(tr::now, lt_account, name);
 			}
-			const auto global = windowCurrent() ? AppWideSettingsAccount(live) : std::nullopt;
+			const auto global = live ? AppWideSettingsAccount(live) : std::nullopt;
 			const auto account = global
 				? AccountKeyText(global->environment, global->userId) : std::nullopt;
 			return tr::lng_purple_settings_open_appwide(tr::now, lt_account,
@@ -295,6 +299,7 @@ void BuildPurpleSettingsFiles(SectionBuilder &builder) {
 			.title = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map(title),
 			.label = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map(label),
 			.onClick = [=] {
+				if (!windowCurrent()) { return; }
 				const auto selected = target();
 				if (!selected) {
 					if (const auto window = weakController.get(); window && AccountSettingsNeedOwner()) {
@@ -328,7 +333,7 @@ void BuildPurpleSettingsFiles(SectionBuilder &builder) {
 			.keywords = { u"purple"_q, u"settings"_q, u"file"_q, u"open"_q, u"account"_q },
 			.shown = rpl::single(rpl::empty) | rpl::then(SettingsChanges()) | rpl::map([=] {
 				const auto live = weakSession.get();
-				const auto global = windowCurrent() ? AppWideSettingsAccount(live) : std::nullopt;
+				const auto global = live ? AppWideSettingsAccount(live) : std::nullopt;
 				return role == SettingsOpenRole::Own
 					|| !global || (live && SessionAccountKey(live) != *global);
 			}),
@@ -360,18 +365,17 @@ void BuildPurpleSettingsFiles(SectionBuilder &builder) {
 // Purple Telegram, not upstream. Why a coarse "last seen" is coarse, and the
 // one-off peek that reads an exact one. See docs/purple/work_mode.md.
 void BuildPurpleLastSeenSection(SectionBuilder &builder) {
-	const auto controller = builder.controller();
-	const auto session = builder.session();
+	const auto window = base::make_weak(builder.controller());
 	builder.addDivider();
 	builder.addSkip();
 	builder.addSubsectionTitle({
 		.id = u"advanced/purple_last_seen"_q,
-		.title = rpl::single(u"Last seen"_q),
+		.title = tr::lng_purple_settings_last_seen(),
 		.keywords = { u"purple"_q, u"last"_q, u"seen"_q, u"online"_q },
 	});
 
 	BuildAccountSettingsRow(builder, u"advanced/purple_last_seen_reasons"_q,
-		rpl::single(u"Say why a last seen is hidden"_q), AccountSettingsRow::LastSeenReasons);
+		tr::lng_purple_settings_last_seen_reasons(), AccountSettingsRow::LastSeenReasons);
 	BuildAccountSettingsRow(builder, u"advanced/purple_last_seen_peek"_q,
 		tr::lng_lastseen_peek_setting(), AccountSettingsRow::LastSeenPeek);
 
@@ -398,13 +402,15 @@ void BuildPurpleLastSeenSection(SectionBuilder &builder) {
 		}, confirm->lifetime());
 	}
 
-	if (controller) {
+	{
 		builder.addButton({
 			.id = u"advanced/purple_last_seen_peeks"_q,
 			.title = tr::lng_lastseen_peeks_title(),
 			.st = &st::settingsButtonNoIcon,
 			.onClick = [=] {
-				controller->show(Box(Purple::LastSeenPeeksBox, session));
+				if (const auto live = window.get()) {
+					live->show(Box(Purple::LastSeenPeeksBox, &live->session()));
+				}
 			},
 			.keywords = {
 				u"purple"_q,
@@ -423,16 +429,13 @@ void BuildPurpleLastSeenSection(SectionBuilder &builder) {
 // Purple Telegram, not upstream. How long the app has had you, out of a log
 // this machine keeps and never sends. See docs/purple/work_mode.md.
 void BuildPurpleScreenTimeSection(SectionBuilder &builder) {
-	const auto controller = builder.controller();
+	const auto window = base::make_weak(builder.controller());
 	const auto session = builder.session();
-	if (!controller) {
-		return;
-	}
 	builder.addDivider();
 	builder.addSkip();
 	builder.addSubsectionTitle({
 		.id = u"advanced/purple_screen_time"_q,
-		.title = rpl::single(u"Screen time"_q),
+		.title = tr::lng_purple_settings_screen_time(),
 		.keywords = { u"purple"_q, u"screen"_q, u"time"_q },
 	});
 
@@ -440,11 +443,13 @@ void BuildPurpleScreenTimeSection(SectionBuilder &builder) {
 	// answers the question without opening anything.
 	builder.addButton({
 		.id = u"advanced/purple_screen_time_open"_q,
-		.title = rpl::single(u"Screen time"_q),
+		.title = tr::lng_purple_settings_screen_time(),
 		.st = &st::settingsButtonNoIcon,
 		.label = Purple::ScreenTimeDigestValue(session),
 		.onClick = [=] {
-			controller->show(Box(Purple::ScreenTimeBox, session));
+			if (const auto live = window.get()) {
+				live->show(Box(Purple::ScreenTimeBox, &live->session()));
+			}
 		},
 		.keywords = {
 			u"purple"_q,
@@ -469,266 +474,234 @@ void BuildPurpleScreenTimeSection(SectionBuilder &builder) {
 	builder.addSkip();
 }
 
-// Purple Telegram, not upstream. See docs/purple/premium.md and
-// docs/purple/work_mode.md.
-void BuildPurpleSection(SectionBuilder &builder) {
-	const auto controller = builder.controller();
+[[nodiscard]] auto CurrentSettingsWindow(SectionBuilder &builder) {
+	const auto window = base::make_weak(builder.controller());
+	const auto session = base::make_weak(builder.session().get());
+	return [=]() -> Window::SessionController* {
+		const auto own = window.get();
+		const auto live = session.get();
+		return own && live && &own->session() == live
+			&& own->window().sessionController() == own
+			&& !live->account().loggingOut()
+			&& live->account().maybeSession() == live
+			&& !own->window().locked()
+			&& !Core::App().screenIsLocked()
+			&& !PrivacyScreenActiveAny()
+			? own
+			: nullptr;
+	};
+}
+
+auto ArchiveSummaryValue(not_null<Main::Session*> session, bool compact = false) {
+	return rpl::single(rpl::empty) | rpl::then(ArchiveStorageChanges())
+		| rpl::map([weak = base::make_weak(session.get()), compact] {
+			const auto live = weak.get();
+			return !live ? QString()
+				: compact ? ArchiveStorageSizeLabel(live) : ArchiveStorageSummary(live);
+		});
+}
+
+void OpenArchiveCleanup(
+		not_null<Window::SessionController*> window,
+		ArchivePurgeKind kind,
+		Fn<Window::SessionController*()> current) {
+	ShowArchivePurgeBox(
+		window,
+		kind,
+		{ SessionAccountKey(&window->session()) },
+		tr::lng_purple_archive_all_chats(tr::now),
+		[current] { return current() != nullptr; });
+}
+
+void ShowCleanupReview(
+		not_null<Window::SessionController*> window,
+		Fn<Window::SessionController*()> current) {
+	window->show(Box<Ui::GenericBox>([=](not_null<Ui::GenericBox*> box) {
+		const auto live = current();
+		if (!live) { return; }
+		box->setTitle(tr::lng_purple_settings_archive_cleanup());
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			ArchiveSummaryValue(&live->session()),
+			st::boxLabel));
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box, tr::lng_purple_archive_purge_scope_notice(), st::boxLabel));
+		const auto guard = QPointer<Ui::GenericBox>(box);
+		for (const auto kind : { ArchivePurgeKind::Trashbin, ArchivePurgeKind::EditHistory }) {
+			box->addButton(
+				kind == ArchivePurgeKind::Trashbin
+					? tr::lng_purple_archive_empty_trash()
+					: tr::lng_purple_archive_clear_edits(),
+				[guard, current, kind] {
+					const auto resolve = current;
+					if (guard) { guard->closeBox(); }
+					if (const auto own = resolve()) {
+						OpenArchiveCleanup(own, kind, resolve);
+					}
+				});
+		}
+		box->addLeftButton(tr::lng_close(), [=] { box->closeBox(); });
+	}));
+}
+
+void BuildArchiveSettings(SectionBuilder &builder) {
+	const auto current = CurrentSettingsWindow(builder);
 	const auto session = builder.session();
 	builder.addSkip();
-	Purple::AddVersionRow(builder);
-	AddBirthdayReminderSettings(builder);
-	const auto archiveSession = base::make_weak(session.get());
-	builder.addDividerText(rpl::single(rpl::empty) | rpl::then(ArchiveStorageChanges()) | rpl::map([archiveSession] {
-		const auto live = archiveSession.get();
-		return live ? tr::lng_purple_archive_storage(tr::now) + u"\n"_q + ArchiveStorageSummary(live) : QString();
-	}));
-	if (controller) {
-		const auto window = base::make_weak(controller);
+	builder.addSubsectionTitle(tr::lng_purple_settings_archive_account(
+		lt_account, rpl::single(session->user()->name())));
+	builder.addDividerText(ArchiveSummaryValue(session));
+	builder.addButton({
+		.id = u"purple/archive_cleanup"_q,
+		.title = tr::lng_purple_settings_archive_cleanup(),
+		.icon = { &st::menuIconStorage },
+		.onClick = [=] {
+			if (const auto own = current()) { ShowCleanupReview(own, current); }
+		},
+		.keywords = { u"disk"_q, u"archive"_q, u"cleanup"_q, u"GC"_q, u"reclaim"_q },
+	});
+	for (const auto kind : { ArchivePurgeKind::Trashbin, ArchivePurgeKind::EditHistory }) {
+		const auto trash = (kind == ArchivePurgeKind::Trashbin);
 		builder.addButton({
-			.id = u"advanced/purple_music_source_folder"_q,
-			.title = tr::lng_purple_music_source(),
+			.id = trash ? u"advanced/purple_archive_trash"_q : u"advanced/purple_archive_edits"_q,
+			.title = trash ? tr::lng_purple_archive_empty_trash() : tr::lng_purple_archive_clear_edits(),
 			.onClick = [=] {
-				if (const auto own = window.get()) ChooseMusicSourceFolder(own);
+				if (const auto own = current()) { OpenArchiveCleanup(own, kind, current); }
 			},
-			.keywords = { u"music"_q, u"playlist"_q, u"folder"_q },
+			.keywords = trash
+				? QStringList{ u"archive"_q, u"trash"_q, u"deleted"_q }
+				: QStringList{ u"archive"_q, u"edited"_q, u"versions"_q },
 		});
-		const auto hideChats = builder.addButton({
-			.id = u"advanced/purple_music_hide_chats"_q,
-			.title = tr::lng_purple_music_hide_chats(),
-			.toggled = MusicHideChatsValue(),
-			.keywords = { u"music"_q, u"sidebar"_q },
-		});
-		if (hideChats) {
-			hideChats->toggledValue() | rpl::on_next(SetMusicHideChats, hideChats->lifetime());
-		}
-		for (const auto kind : {ArchivePurgeKind::Trashbin, ArchivePurgeKind::EditHistory}) {
-			builder.addButton({
-				.id = kind == ArchivePurgeKind::Trashbin ? u"advanced/purple_archive_trash"_q : u"advanced/purple_archive_edits"_q,
-				.title = kind == ArchivePurgeKind::Trashbin ? tr::lng_purple_archive_empty_trash() : tr::lng_purple_archive_clear_edits(),
-				.onClick = [archiveSession, window, kind] {
-					const auto live = archiveSession.get();
-					const auto own = window.get();
-					if (live && own && &own->session() == live) {
-						ShowArchivePurgeBox(own, kind, {SessionAccountKey(live)},
-							tr::lng_purple_archive_all_chats(tr::now), [] { return true; });
-					}
+	}
+	builder.addSectionButton({
+		.title = tr::lng_purple_settings_archive_cache(),
+		.targetSection = ::Settings::LocalStorageId(),
+		.icon = { &st::menuIconStorage },
+	});
+	builder.addDividerText(tr::lng_purple_settings_archive_cache_about());
+	builder.addSkip();
+	builder.addButton({
+		.id = u"advanced/purple_archive_discard"_q,
+		.title = tr::lng_purple_archive_discard(),
+		.onClick = [=] {
+			const auto own = current();
+			if (!own) { return; }
+			const auto discard = ArchiveDiscardAction(&own->session());
+			const auto confirm = own->show(Ui::MakeConfirmBox({
+				.text = tr::lng_purple_archive_discard_confirm(tr::now),
+				.confirmed = [=](Fn<void()> close) {
+					close();
+					if (current()) { discard(); }
 				},
-			});
-		}
-		builder.addButton({
-			.id = u"advanced/purple_archive_discard"_q,
-			.title = tr::lng_purple_archive_discard(),
-			.onClick = [archiveSession, window] {
-				const auto live = archiveSession.get();
-				const auto ownWindow = window.get();
-				if (!live || !ownWindow || &ownWindow->session() != live) {
-					return;
-				}
-				const auto discard = ArchiveDiscardAction(live);
-				ownWindow->show(Ui::MakeConfirmBox({
-					.text = tr::lng_purple_archive_discard_confirm(tr::now),
-					.confirmed = [archiveSession, window, discard](Fn<void()> close) {
-						close();
-						const auto live = archiveSession.get();
-						const auto ownWindow = window.get();
-						if (live && ownWindow && &ownWindow->session() == live) {
-							discard();
-						}
-					},
-					.confirmText = tr::lng_purple_archive_discard_button(tr::now),
-				}));
-			},
-		});
-	}
-	BuildPurpleSettingsFiles(builder);
-	if (controller) {
-		const auto window = base::make_weak(controller);
-		const auto origin = base::make_weak(session.get());
-		builder.addButton({
-			.id = u"advanced/purple_account_work_mode"_q,
-			.title = AccountRowChanges() | rpl::map([=] {
-				const auto live = origin.get();
-				return live ? AccountWorkModeTitle(live) : QString();
-			}),
-			.label = AccountRowChanges() | rpl::map([=] {
-				const auto live = origin.get();
-				return live ? AccountListsSummary(live) : QString();
-			}),
-			.onClick = [=] {
-				const auto live = origin.get();
-				const auto ownWindow = window.get();
-				if (live && ownWindow && &ownWindow->session() == live) {
-					ownWindow->show(Box(ChooseAccountWorkModeBox, not_null{ ownWindow }));
-				}
-			},
-			.keywords = { u"purple"_q, u"lists"_q, u"stock"_q, u"follow"_q },
-			.shown = AccountRowChanges() | rpl::map([=] {
-				const auto live = origin.get();
-				return live && (AccountWorkModeChoiceVisible(live)
-					|| AccountWorkModeForSession(live) == AccountWorkMode::Stock);
-			}),
-		});
-	}
-	if (controller) {
-		builder.addButton({
-			.id = u"advanced/purple_settings_owner"_q,
-			.title = tr::lng_purple_settings_file_owner(),
-			.label = rpl::single(SettingsOwnerStatus()),
-			.onClick = [=] { controller->show(Box(ChooseSettingsOwnerBox, std::make_optional(SessionAccountKey(&controller->session())))); },
-		});
-	}
+				.confirmText = tr::lng_purple_archive_discard_button(tr::now),
+			}));
+			if (confirm) {
+				own->window().sessionControllerValue() | rpl::skip(1)
+					| rpl::on_next([=] {
+						if (confirm && !current()) { confirm->closeBox(); }
+					}, confirm->lifetime());
+			}
+		},
+		.keywords = { u"archive"_q, u"discard"_q, u"remove"_q, u"disk"_q },
+	});
+	builder.addSkip();
+}
 
-	// The main menu carries it too, and that is where it belongs for something
-	// switched several times a day. But Settings is where people look for a
-	// feature they have heard of and cannot find, and searching "work mode"
-	// finding nothing is how a feature stays unused.
-	if (controller) {
-		builder.addButton({
-			.id = u"advanced/purple_work_mode"_q,
-			.title = rpl::single(u"Work Mode"_q),
-			.icon = { &st::menuIconTagFilter },
-			.onClick = [=] {
-				controller->show(Box(Purple::PresetBox, session));
-			},
-			.keywords = {
-				u"purple"_q,
-				u"work"_q,
-				u"mode"_q,
-				u"preset"_q,
-				u"focus"_q,
-				u"hide"_q,
-			},
-		});
-	}
-
+void BuildWorkActivitySettings(SectionBuilder &builder) {
+	const auto current = CurrentSettingsWindow(builder);
+	const auto origin = base::make_weak(builder.session().get());
+	builder.addSkip();
+	builder.addButton({
+		.id = u"advanced/purple_work_mode"_q,
+		.title = tr::lng_purple_settings_work_mode(),
+		.icon = { &st::menuIconTagFilter },
+		.onClick = [=] {
+			if (const auto own = current()) {
+				own->show(Box(Purple::PresetBox, &own->session()));
+			}
+		},
+		.keywords = { u"purple"_q, u"work"_q, u"mode"_q, u"preset"_q, u"focus"_q, u"hide"_q },
+	});
+	builder.addButton({
+		.id = u"advanced/purple_account_work_mode"_q,
+		.title = AccountRowChanges() | rpl::map([=] {
+			const auto live = origin.get();
+			return live ? AccountWorkModeTitle(live) : QString();
+		}),
+		.label = AccountRowChanges() | rpl::map([=] {
+			const auto live = origin.get();
+			return live ? AccountListsSummary(live) : QString();
+		}),
+		.onClick = [=] {
+			if (const auto own = current()) {
+				own->show(Box(ChooseAccountWorkModeBox, not_null{ own }));
+			}
+		},
+		.keywords = { u"purple"_q, u"lists"_q, u"stock"_q, u"follow"_q },
+		.shown = AccountRowChanges() | rpl::map([=] {
+			const auto live = origin.get();
+			return live && (AccountWorkModeChoiceVisible(live)
+				|| AccountWorkModeForSession(live) == AccountWorkMode::Stock);
+		}),
+	});
 	AddAccountScopeCaption(builder);
+	builder.addButton({
+		.id = u"advanced/purple_schedule"_q,
+		.title = tr::lng_purple_settings_schedule(),
+		.icon = { &st::menuIconSchedule },
+		.onClick = [=] {
+			if (const auto own = current()) { own->show(Box(Purple::ScheduleBox)); }
+		},
+		.keywords = { u"purple"_q, u"schedule"_q, u"work"_q, u"hours"_q, u"ruleset"_q, u"timetable"_q },
+	});
+	BuildPurpleScreenTimeSection(builder);
+	AddBirthdayReminderSettings(builder);
+	builder.addSkip();
+}
 
-	// The schedule was file-only until now, which meant the one feature that
-	// changes the app without being asked was also the one with nothing on
-	// screen to read it back from. The status line under it is what the
-	// picker shows too, so the two cannot drift.
-	if (controller) {
-		builder.addButton({
-			.id = u"advanced/purple_schedule"_q,
-			.title = rpl::single(u"Schedule"_q),
-			.icon = { &st::menuIconSchedule },
-			.onClick = [=] {
-				controller->show(Box(Purple::ScheduleBox));
-			},
-			.keywords = {
-				u"purple"_q,
-				u"schedule"_q,
-				u"work"_q,
-				u"hours"_q,
-				u"ruleset"_q,
-				u"timetable"_q,
-			},
-		});
+void BuildPurpleMediaSettings(SectionBuilder &builder) {
+	const auto current = CurrentSettingsWindow(builder);
+	BuildMediaPlaybackSettings(builder);
+	BuildMediaRecordingSettings(builder);
+	BuildMediaReplySettings(builder);
+	builder.addSkip();
+	builder.addButton({
+		.id = u"advanced/purple_music_source_folder"_q,
+		.title = tr::lng_purple_music_source(),
+		.onClick = [=] {
+			if (const auto own = current()) { ChooseMusicSourceFolder(own); }
+		},
+		.keywords = { u"music"_q, u"playlist"_q, u"folder"_q },
+	});
+	const auto hideChats = builder.addButton({
+		.id = u"advanced/purple_music_hide_chats"_q,
+		.title = tr::lng_purple_music_hide_chats(),
+		.toggled = MusicHideChatsValue(),
+		.keywords = { u"music"_q, u"sidebar"_q },
+	});
+	if (hideChats) {
+		hideChats->toggledValue() | rpl::on_next(SetMusicHideChats, hideChats->lifetime());
 	}
+	BuildEmojiExportSetting(builder);
+	builder.addSkip();
+}
 
-	// One settings.toml is meant to travel between machines, so each one has to
-	// be able to say which it is. The id is what a ruleset names; the name is
-	// what every device reading the file calls it.
-	if (controller) {
-		builder.addButton({
-			.id = u"advanced/purple_this_device"_q,
-			.title = rpl::single(u"This device"_q),
-			.st = &st::settingsButtonNoIcon,
-			.onClick = [=] {
-				controller->show(Box(Purple::DeviceLabelBox));
-			},
-			.keywords = { u"purple"_q, u"device"_q, u"name"_q, u"id"_q },
-		});
-	}
-
-	// The other half of settings.toml being a plain file: it is per-install,
-	// and Saved Messages is the one place both machines can already see.
-	// See docs/purple/sync.md.
-	if (controller) {
-		builder.addButton({
-			.id = u"advanced/purple_send_settings"_q,
-			.title = rpl::single(u"Send settings to Saved Messages"_q),
-			.icon = { &st::menuIconSavedMessages },
-			.onClick = [=] {
-				Purple::SendSettingsToSavedMessages(
-					session,
-					controller->uiShow(),
-					[weak = base::make_weak(controller), session] {
-						return weak && &weak->session() == session;
-					});
-			},
-			.keywords = {
-				u"purple"_q,
-				u"sync"_q,
-				u"settings"_q,
-				u"backup"_q,
-				u"saved"_q,
-			},
-		});
-	}
-	if (controller) {
-		builder.addButton({
-			.id = u"advanced/purple_share_settings"_q,
-			.title = tr::lng_purple_transfer_share(),
-			.icon = { &st::menuIconDownload },
-			.onClick = [=] {
-				Purple::ShareAccountSettingsFile(session, controller->uiShow(),
-					[weak = base::make_weak(controller), session] {
-						return weak && &weak->session() == session;
-					});
-			},
-			.keywords = { u"purple"_q, u"share"_q, u"settings"_q },
-		});
-	}
-	if (controller) {
-		builder.addButton({
-			.id = u"advanced/purple_sync_setup"_q,
-			.title = rpl::single(u"Sync across devices"_q),
-			.icon = { &st::menuIconSavedMessages },
-			.label = rpl::single(rpl::empty)
-				| rpl::then(AutomaticSettingsSyncChanges())
-				| rpl::map([weak = base::make_weak(session.get())] {
-					const auto session = weak.get();
-					return session && AutomaticSettingsSyncEnabled(session)
-						? tr::lng_settings_cloud_password_on(tr::now)
-						: tr::lng_settings_cloud_password_off(tr::now);
-				}),
-			.onClick = [=] {
-				controller->show(Box(Purple::SyncSetupBox));
-			},
-			.keywords = {
-				u"purple"_q,
-				u"sync"_q,
-				u"saved"_q,
-				u"devices"_q,
-			},
-		});
-	}
-
-	// Opt-in, and it stays opt-in: this posts a document to a real chat, and
-	// an upgrade that started doing that on somebody's behalf would be doing
-	// it behind their back. See ShouldAutoSend() for what stops two machines
-	// from handing the same file back and forth.
-	BuildAccountSettingsRow(builder, u"advanced/purple_send_after_save"_q,
-		rpl::single(u"Send to the sync chat after every save"_q), AccountSettingsRow::SendAfterSave);
-
+void BuildPurplePrivacySettings(SectionBuilder &builder) {
+	builder.addSkip();
+	BuildPrivacyScreenSetting(builder);
+	BuildPurpleLastSeenSection(builder);
 	const auto toggle = builder.addButton({
 		.id = u"advanced/purple_premium_toggle"_q,
-		.title = rpl::single(u"Local Premium features"_q),
+		.title = tr::lng_purple_settings_local_premium(),
 		.st = &st::settingsButtonNoIcon,
 		.toggled = Purple::LocalPremiumValue(),
 		.keywords = { u"purple"_q, u"premium"_q, u"ads"_q, u"translate"_q },
 	});
-
 	if (toggle) {
-		toggle->toggledValue(
-		) | rpl::filter([=](bool value) {
-			return (value != Purple::LocalPremium());
-		}) | rpl::on_next([=](bool value) {
-			Purple::SetLocalPremium(value);
-		}, toggle->lifetime());
+		toggle->toggledValue() | rpl::filter([](bool value) {
+			return value != Purple::LocalPremium();
+		}) | rpl::on_next(Purple::SetLocalPremium, toggle->lifetime());
 	}
-
 	AddAccountScopeCaption(builder);
 	builder.addDividerText(rpl::single(u"Unlocks the Premium features that "
 		"Telegram Desktop gates on the client alone: no sponsored messages, "
@@ -736,56 +709,243 @@ void BuildPurpleSection(SectionBuilder &builder) {
 		"accounts instead of three. Features the server enforces stay locked. "
 		"Stored in "_q + Purple::SettingsFilePath() + '.'));
 	builder.addSkip();
-
 	BuildModalKeysSetting(builder);
-	builder.addButton({
-		.id = u"advanced/purple_customize_settings"_q,
-		.title = rpl::single(u"Customize settings…"_q),
-		.st = &st::settingsButtonNoIcon,
-		.onClick = [weak = controller ? base::make_weak(controller)
-			: base::weak_ptr<Window::SessionController>()] {
-			if (const auto live = weak.get()) ShowCustomizeSettings(&live->window());
-		},
-		.keywords = { u"purple"_q, u"settings"_q, u"customize"_q, u"file"_q },
-	});
-	BuildPrivacyScreenSetting(builder);
-	BuildEmojiExportSetting(builder);
 	BuildControlSettings(builder);
-	BuildPurpleLastSeenSection(builder);
-	BuildPurpleScreenTimeSection(builder);
-	BuildMediaPlaybackSettings(builder);
-	BuildMediaRecordingSettings(builder);
-	BuildMediaReplySettings(builder);
 }
 
-class PurpleSettings final : public ::Settings::Section<PurpleSettings> {
+void BuildPurpleAccountsSettings(SectionBuilder &builder) {
+	const auto current = CurrentSettingsWindow(builder);
+	const auto live = base::make_weak(builder.session().get());
+	builder.addSkip();
+	BuildPurpleSettingsFiles(builder);
+	builder.addButton({
+		.id = u"advanced/purple_settings_owner"_q,
+		.title = tr::lng_purple_settings_file_owner(),
+		.label = rpl::single(SettingsOwnerStatus()),
+		.onClick = [=] {
+			if (const auto own = current()) {
+				own->show(Box(ChooseSettingsOwnerBox,
+					std::make_optional(SessionAccountKey(&own->session()))));
+			}
+		},
+		.keywords = { u"settings"_q, u"owner"_q, u"app-wide"_q, u"account"_q },
+	});
+	AddAccountScopeCaption(builder);
+	builder.addButton({
+		.id = u"advanced/purple_this_device"_q,
+		.title = tr::lng_purple_settings_this_device(),
+		.st = &st::settingsButtonNoIcon,
+		.onClick = [=] {
+			if (const auto own = current()) { own->show(Box(Purple::DeviceLabelBox)); }
+		},
+		.keywords = { u"purple"_q, u"device"_q, u"name"_q, u"id"_q },
+	});
+	const auto currentWindow = [=] { return current() != nullptr; };
+	builder.addButton({
+		.id = u"advanced/purple_send_settings"_q,
+		.title = tr::lng_purple_settings_send_saved(),
+		.icon = { &st::menuIconSavedMessages },
+		.onClick = [=] {
+			if (const auto own = current()) {
+				Purple::SendSettingsToSavedMessages(&own->session(), own->uiShow(), currentWindow);
+			}
+		},
+		.keywords = { u"purple"_q, u"sync"_q, u"settings"_q, u"backup"_q, u"saved"_q },
+	});
+	builder.addButton({
+		.id = u"advanced/purple_share_settings"_q,
+		.title = tr::lng_purple_transfer_share(),
+		.icon = { &st::menuIconDownload },
+		.onClick = [=] {
+			if (const auto own = current()) {
+				Purple::ShareAccountSettingsFile(&own->session(), own->uiShow(), currentWindow);
+			}
+		},
+		.keywords = { u"purple"_q, u"share"_q, u"settings"_q },
+	});
+	builder.addButton({
+		.id = u"advanced/purple_sync_setup"_q,
+		.title = tr::lng_purple_settings_sync_devices(),
+		.icon = { &st::menuIconSavedMessages },
+		.label = rpl::single(rpl::empty)
+			| rpl::then(AutomaticSettingsSyncChanges())
+			| rpl::map([=] {
+				const auto session = live.get();
+				return session && AutomaticSettingsSyncEnabled(session)
+					? tr::lng_settings_cloud_password_on(tr::now)
+					: tr::lng_settings_cloud_password_off(tr::now);
+			}),
+		.onClick = [=] {
+			if (const auto own = current()) { own->show(Box(Purple::SyncSetupBox)); }
+		},
+		.keywords = { u"purple"_q, u"sync"_q, u"saved"_q, u"devices"_q },
+	});
+	BuildAccountSettingsRow(builder, u"advanced/purple_send_after_save"_q,
+		tr::lng_purple_settings_send_after_save(), AccountSettingsRow::SendAfterSave);
+	builder.addSkip();
+}
+
+void BuildPurpleDiagnosticsSettings(SectionBuilder &builder) {
+	const auto current = CurrentSettingsWindow(builder);
+	builder.addSkip();
+	builder.addDividerText(tr::lng_purple_settings_diagnostics_scope());
+	builder.addButton({
+		.id = u"advanced/purple_log_export"_q,
+		.title = tr::lng_purple_settings_diagnostics_export(),
+		.onClick = [=] {
+			if (const auto live = current()) { Diagnostics::ShowExport(&live->window()); }
+		},
+		.keywords = { u"purple"_q, u"log"_q, u"diagnostics"_q, u"export"_q, u"debug"_q, u"notices"_q },
+	});
+	builder.addButton({
+		.id = u"advanced/purple_log_clear"_q,
+		.title = tr::lng_purple_settings_diagnostics_clear(),
+		.onClick = [=] {
+			if (const auto live = current()) { Diagnostics::ShowClear(&live->window()); }
+		},
+		.keywords = { u"purple"_q, u"log"_q, u"diagnostics"_q, u"clear"_q, u"debug"_q },
+	});
+	builder.addSkip();
+}
+
+class PurpleSettings final : public ::Settings::Search {
 public:
 	PurpleSettings(
 		QWidget *parent,
 		not_null<Window::SessionController*> controller);
 
-	[[nodiscard]] rpl::producer<QString> title() override;
+	[[nodiscard]] static ::Settings::Type Id() {
+		return ::Settings::SectionFactory<PurpleSettings>::Instance();
+	}
 
+	[[nodiscard]] rpl::producer<QString> title() override {
+		return tr::lng_purple_settings_title();
+	}
 };
+
+template <void (*Build)(SectionBuilder &), const tr::phrase<> *Title>
+class PurpleSubsection final : public ::Settings::Section<PurpleSubsection<Build, Title>> {
+	using Section = ::Settings::Section<PurpleSubsection<Build, Title>>;
+
+public:
+	PurpleSubsection(
+		QWidget *parent,
+		not_null<Window::SessionController*> controller)
+	: Section(parent, controller) {
+		const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+		this->build(content, meta().build);
+		Ui::ResizeFitChild(this, content);
+	}
+
+	[[nodiscard]] rpl::producer<QString> title() override {
+		return (*Title)();
+	}
+
+	static const BuildHelper &meta();
+};
+
+using ArchiveSettings = PurpleSubsection<BuildArchiveSettings, &tr::lng_purple_settings_archive>;
+using WorkActivitySettings = PurpleSubsection<BuildWorkActivitySettings, &tr::lng_purple_settings_work_activity>;
+using MediaSettings = PurpleSubsection<BuildPurpleMediaSettings, &tr::lng_purple_settings_media>;
+using PrivacySettings = PurpleSubsection<BuildPurplePrivacySettings, &tr::lng_purple_settings_privacy_controls>;
+using AccountsSettings = PurpleSubsection<BuildPurpleAccountsSettings, &tr::lng_purple_settings_accounts_sync>;
+using DiagnosticsSettings = PurpleSubsection<BuildPurpleDiagnosticsSettings, &tr::lng_purple_settings_diagnostics>;
+
+struct PageInfo {
+	::Settings::Type id;
+	const tr::phrase<> *title;
+	const style::icon *icon;
+	QStringList keywords;
+};
+
+const auto kPages = std::array{
+	PageInfo{ ArchiveSettings::Id(), &tr::lng_purple_settings_archive, &st::menuIconStorage,
+		{ u"disk"_q, u"usage"_q, u"archive"_q, u"storage"_q } },
+	PageInfo{ WorkActivitySettings::Id(), &tr::lng_purple_settings_work_activity, &st::menuIconTagFilter,
+		{ u"focus"_q, u"schedule"_q, u"usage"_q } },
+	PageInfo{ MediaSettings::Id(), &tr::lng_purple_settings_media, &st::menuIconVideoChat,
+		{ u"playback"_q, u"recording"_q, u"music"_q, u"reply"_q } },
+	PageInfo{ PrivacySettings::Id(), &tr::lng_purple_settings_privacy_controls, &st::menuIconLock,
+		{ u"privacy"_q, u"keybindings"_q, u"automation"_q } },
+	PageInfo{ AccountsSettings::Id(), &tr::lng_purple_settings_accounts_sync, &st::menuIconDevices,
+		{ u"owner"_q, u"toml"_q, u"sync"_q } },
+	PageInfo{ DiagnosticsSettings::Id(), &tr::lng_purple_settings_diagnostics, &st::menuIconGroupLog,
+		{ u"diagnostic"_q, u"debug"_q, u"logs"_q } },
+};
+
+template <void (*Build)(SectionBuilder &), const tr::phrase<> *Title>
+const BuildHelper &PurpleSubsection<Build, Title>::meta() {
+	static const auto meta = [] {
+		const auto page = ranges::find(kPages, Title, &PageInfo::title);
+		Assert(page != kPages.end());
+		return BuildHelper({
+			.id = page->id,
+			.parentId = PurpleSettings::Id(),
+			.title = page->title,
+			.icon = page->icon,
+			.keywords = page->keywords,
+			.tabStops = true,
+		}, Build);
+	}();
+	return meta;
+}
+
+const auto kPageMetadata = std::array{
+	&ArchiveSettings::meta(),
+	&WorkActivitySettings::meta(),
+	&MediaSettings::meta(),
+	&PrivacySettings::meta(),
+	&AccountsSettings::meta(),
+	&DiagnosticsSettings::meta(),
+};
+
+void BuildPurpleSection(SectionBuilder &builder) {
+	const auto current = CurrentSettingsWindow(builder);
+	builder.addSkip();
+	const auto customize = builder.addButton({
+		.id = u"advanced/purple_customize_settings"_q,
+		.title = tr::lng_purple_settings_customize(),
+		.icon = { &st::menuIconSettings },
+		.keywords = { u"purple"_q, u"settings"_q, u"customize"_q, u"file"_q },
+	});
+	if (customize) {
+		customize->addClickHandler([=] {
+			if (const auto own = current()) {
+				ShowCustomizeSettings(&own->window(), customize);
+			}
+		});
+	}
+	builder.addDivider();
+	builder.addSkip();
+	for (const auto &page : kPages) {
+		builder.addSectionButton({
+			.title = (*page.title)(),
+			.targetSection = page.id,
+			.icon = { page.icon },
+			.label = page.id == ArchiveSettings::Id()
+				? ArchiveSummaryValue(builder.session(), true)
+				: rpl::producer<QString>(),
+		});
+	}
+	builder.addDivider();
+	builder.addSkip();
+	Purple::AddVersionRow(builder);
+	builder.addSkip();
+}
 
 const auto PurpleSettingsMeta = BuildHelper({
 	.id = PurpleSettings::Id(),
 	.parentId = ::Settings::MainId(),
 	.title = &tr::lng_purple_settings_title,
 	.icon = &st::menuIconManage,
+	.keywords = { u"purple"_q, u"work mode"_q, u"sync"_q },
+	.tabStops = true,
 }, BuildPurpleSection);
 
 PurpleSettings::PurpleSettings(
 		QWidget *parent,
 		not_null<Window::SessionController*> controller)
-: Section(parent, controller) {
-	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
-	build(content, PurpleSettingsMeta.build);
-	Ui::ResizeFitChild(this, content);
-}
-
-rpl::producer<QString> PurpleSettings::title() {
-	return tr::lng_purple_settings_title();
+: Search(parent, controller, { Id(), PurpleSettingsMeta.build }) {
 }
 
 } // namespace

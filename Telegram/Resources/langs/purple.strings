@@ -10,6 +10,30 @@ docs/purple/upstream_hooks.md.
 */
 
 "lng_purple_settings_title" = "Purple";
+"lng_purple_settings_customize" = "Customize settings…";
+"lng_purple_settings_archive" = "Archive & storage";
+"lng_purple_settings_work_activity" = "Work Mode & activity";
+"lng_purple_settings_media" = "Media";
+"lng_purple_settings_privacy_controls" = "Privacy & controls";
+"lng_purple_settings_accounts_sync" = "Accounts, files & sync";
+"lng_purple_settings_diagnostics" = "Diagnostics & logs";
+"lng_purple_settings_work_mode" = "Work Mode";
+"lng_purple_settings_schedule" = "Schedule";
+"lng_purple_settings_screen_time" = "Screen time";
+"lng_purple_settings_last_seen" = "Last seen";
+"lng_purple_settings_last_seen_reasons" = "Say why a last seen is hidden";
+"lng_purple_settings_local_premium" = "Local Premium features";
+"lng_purple_settings_this_device" = "This device";
+"lng_purple_settings_send_saved" = "Send settings to Saved Messages";
+"lng_purple_settings_sync_devices" = "Sync across devices";
+"lng_purple_settings_send_after_save" = "Send to the sync chat after every save";
+"lng_purple_settings_archive_account" = "Message archive for {account}.";
+"lng_purple_settings_archive_cleanup" = "Review cleanup…";
+"lng_purple_settings_archive_cache" = "Telegram media cache";
+"lng_purple_settings_archive_cache_about" = "Telegram’s media cache uses separate storage from this account’s Purple archive.";
+"lng_purple_settings_diagnostics_export" = "Export diagnostic log…";
+"lng_purple_settings_diagnostics_clear" = "Clear diagnostic log…";
+"lng_purple_settings_diagnostics_scope" = "Export includes this install’s masked Purple diagnostic log and recent notices for this account and the app. Clear empties this install’s diagnostic log.";
 "lng_purple_birthday_reminders" = "Birthday Reminders";
 "lng_purple_birthday_who" = "Whose birthdays should Purple remind you about?";
 "lng_purple_birthday_audience_about" = "Always Remind includes selected people even when you choose Nobody. Never Remind takes priority. Purple can only remind you about birthdays visible to you.";

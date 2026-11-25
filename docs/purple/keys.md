@@ -255,26 +255,28 @@ on the modal status line and cheatsheet footer.
   open the new topic or thread composer when Telegram grants permission. For
   bots that manage their own threads, the action opens the off-topic composer
   for a regular message. The bot decides whether to start a thread.
-- **Evil notices and notice history (`SPC h e`):** when modal keys are enabled,
-  detailed Purple notices (such as settings-file reload impacts, sync-chat
-  problems, archive recovery warnings, and actionable errors) open in a modal
-  notice layer (`j`/`k`/`gg`/`G` scroll, `Tab` or `h`/`l` between buttons,
-  `o` selects the primary action, `RET` activates the selected button, `y`
-  copies, `?` opens help, `q`/`Esc` closes). The Close button is selected on
-  arrival. Before/after values resolve bare chat IDs in the current account.
-  Hidden, unknown, ambiguous, and negative IDs remain literal. Background
-  notices coalesce and wait for the account's active window, clear of Insert
-  mode, IME preedit, pending keys, the Peek wait cover, and other layers.
-  Returning to Normal or closing a blocking box opens at most one waiting
-  notice. Short acknowledgements and single-line errors go to the modal status
-  line (transient bar in Zen, or a stock toast when covered by an open box), with errors staying longer and soft screen-time
-  budget notices showing a persistent status cue. `SPC h e` reopens recent
+- **Purple notices and notice history (`SPC h e`):** Detailed notices,
+  warnings, errors, and notices with actions open a dialog in either keyboard
+  mode. Use the mouse or `Tab`, `Enter`, and `Esc`. With modal keys enabled,
+  `j`/`k`/`gg`/`G` scroll, `h`/`l` select buttons, `o` selects the
+  primary action, `y` copies logs, `?` opens help, and `q` closes. Close is
+  selected on arrival. **Copy logs** copies the visible notice and up to 60
+  recent lines for that subsystem. Before/after values in the dialog
+  resolve bare chat IDs in the current account. Hidden, unknown, ambiguous,
+  and negative IDs remain literal. Notices wait for the correct active
+  window and a pause in typing. Background notices coalesce and also wait
+  for blocking layers and pending modal keys. Short acknowledgements can
+  still use the status line or a toast. `SPC h e` reopens recent
   per-account notices in a memory-only `*Messages*` list that clears on logout
   and is unavailable while passcode-locked or under the privacy screen.
   Archive removal warnings contain no account details and are shared across
   accounts, including after logout. Clearing the displayed history also
-  clears its pending notices. Stock toasts remain available with modal keys
-  off, subject to passcode and privacy checks.
+  clears its pending notices. Passcode lock, screen lock, and the privacy
+  cover defer notices and acknowledgements.
+
+- **Diagnostics in M-x.** Run `:log-export` to save a redacted bundle or
+  `:log-clear` to clear recent Purple diagnostic events after confirmation.
+  Both actions are also available under Purple → Diagnostics & logs.
 
 ## Known limits
 

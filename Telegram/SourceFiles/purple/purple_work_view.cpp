@@ -138,7 +138,7 @@ void WorkView::refreshWorkMode() {
 	// not the same claim: a gated chat is only out of the view while it has
 	// nothing to say, so the count that means anything is how many of them are
 	// still showing.
-	LOG(("Purple: %1 of %2 loaded chats never shown, %3 unread-gated "
+	LOG(("Purple Work Mode: %1 of %2 loaded chats never shown, %3 unread-gated "
 		"(%4 showing), %5 silenced, view holds %6."
 		).arg(hidden).arg(chats).arg(gated.size()).arg(mentioned).arg(silenced
 		).arg(viewList()->indexed()->size()));

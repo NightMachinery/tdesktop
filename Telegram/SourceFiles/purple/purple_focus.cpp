@@ -126,10 +126,8 @@ void Runner::tick() {
 		// write above is what makes the next edge an edge.
 		return;
 	}
-	LOG(("Purple: focus %1 -> '%2' (%3)."
-		).arg(FocusChangeName(step->change)
-		).arg(preset.isEmpty() ? NormalPreset() : preset
-		).arg(PresetSourceName(source)));
+	LOG(("Purple Work Mode: focus change=%1 source=%2."
+		).arg(FocusChangeName(step->change), PresetSourceName(source)));
 }
 
 class Detector final {
@@ -217,14 +215,14 @@ void Detector::check() {
 		if (!_complained) {
 			// Once per spell of not understanding it, not once a minute.
 			_complained = true;
-			LOG(("Purple Error: Focus state unreadable, %1. Holding whatever "
+			LOG(("Purple Work Mode: Error: Focus state unreadable, %1. Holding whatever "
 				"it last saw. (%2)"_q).arg(problem, _path));
 		}
 		return;
 	}
 	_complained = false;
 	if (*active != FocusActive()) {
-		LOG(("Purple: focus mode %1.").arg(*active ? u"on"_q : u"off"_q));
+		LOG(("Purple Work Mode: focus mode %1.").arg(*active ? u"on"_q : u"off"_q));
 		SetFocusActive(*active);
 	}
 }

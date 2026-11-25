@@ -86,6 +86,8 @@ struct SectionMeta {
 	Type parentId;
 	not_null<const tr::phrase<>*> title;
 	not_null<const style::icon*> icon;
+	QStringList keywords;
+	bool tabStops = false;
 };
 
 class SearchRegistry {
@@ -97,7 +99,8 @@ public:
 		SearchEntriesIndexer indexer);
 
 	[[nodiscard]] std::vector<SearchEntry> collectAll(
-		not_null<::Main::Session*> session) const;
+		not_null<::Main::Session*> session,
+		Type root = nullptr) const;
 
 	[[nodiscard]] QString sectionTitle(Type sectionId) const;
 	[[nodiscard]] QString sectionPath(
@@ -105,6 +108,7 @@ public:
 		bool parentsOnly = false) const;
 
 private:
+	[[nodiscard]] bool contains(Type root, Type section) const;
 	std::vector<SearchIndexerEntry> _indexers;
 	base::flat_map<Type, const SectionMeta*> _sections;
 
@@ -132,6 +136,7 @@ struct WidgetContext {
 	Fn<void(Type)> showOther;
 	Fn<bool()> isPaused;
 	HighlightRegistry *highlights = nullptr;
+	bool tabStops = false;
 };
 
 struct SearchContext {
@@ -204,6 +209,7 @@ public:
 		Type targetSection;
 		IconDescriptor icon;
 		QStringList keywords;
+		rpl::producer<QString> label;
 	};
 	Ui::SettingsButton *addSectionButton(SectionArgs &&args);
 

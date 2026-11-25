@@ -29,6 +29,7 @@ trap 'rm -f "${Bin}"' EXIT
 clang++ -std=c++20 -Wall -Wextra -Werror \
   -I "${Root}/Telegram/SourceFiles" \
   "${Root}/purple/test_modal_notices.cpp" \
+  "${Root}/Telegram/SourceFiles/purple/purple_diagnostics.cpp" \
   "${QtFlags[@]}" \
   -o "${Bin}"
 

@@ -102,7 +102,7 @@ struct VerifiedWrite {
 	if (result.readBack.status != SyncSettingsFileStatus::Present
 		|| result.readBack.text != text
 		|| result.readBack.fingerprint != fingerprint) {
-		LOG(("Purple Error: settings.toml did not read back as written."));
+		LOG(("Purple Sync: Error: settings.toml did not read back as written."));
 		return result;
 	}
 	result.status = SyncConfigApplyStatus::Applied;
@@ -339,7 +339,7 @@ SyncConfigApplyResult ApplySyncConfigChoice(
 	result.publishNeeded = completion.publishNeeded;
 	result.expectedParents = completion.expectedParents;
 	if (!completion.promiseKept) {
-		LOG(("Purple Error: the settings choice promised a different "
+		LOG(("Purple Sync: Error: the settings choice promised a different "
 			"publish than a fresh check proposes."));
 	}
 	result.status = SyncConfigApplyStatus::Applied;

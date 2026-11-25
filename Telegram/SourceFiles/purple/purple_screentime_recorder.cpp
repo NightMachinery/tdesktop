@@ -115,7 +115,7 @@ void WriteSnoozes(const std::vector<Snooze> &list) {
 			+ '\n';
 	}
 	if (!QDir().mkpath(ConfigDirectory())) {
-		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
+		LOG(("Purple Privacy: Error: Could not create %1.").arg(ConfigDirectory()));
 		return;
 	}
 	WriteConfigFile(SnoozeFilePath(), text);
@@ -170,7 +170,7 @@ void WriteNotices(const std::vector<Notice> &list) {
 			+ '\n';
 	}
 	if (!QDir().mkpath(ConfigDirectory())) {
-		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
+		LOG(("Purple Privacy: Error: Could not create %1.").arg(ConfigDirectory()));
 		return;
 	}
 	WriteConfigFile(NoticeFilePath(), text);
@@ -549,12 +549,12 @@ void Recorder::flush() {
 	}
 	const auto pending = base::take(_pending);
 	if (!QDir().mkpath(ConfigDirectory())) {
-		LOG(("Purple Error: Could not create %1.").arg(ConfigDirectory()));
+		LOG(("Purple Privacy: Error: Could not create %1.").arg(ConfigDirectory()));
 		return;
 	}
 	auto file = QFile(ScreenTimeLogPath());
 	if (!file.open(QIODevice::WriteOnly | QIODevice::Append)) {
-		LOG(("Purple Error: Could not append to %1."
+		LOG(("Purple Privacy: Error: Could not append to %1."
 			).arg(ScreenTimeLogPath()));
 		return;
 	}
@@ -607,7 +607,7 @@ void Recorder::prune() {
 	if (WriteConfigFile(ScreenTimeLogPath(), text)) {
 		_cache = kept;
 		_cacheValid = true;
-		LOG(("Purple: screen time log pruned to %1 days, %2 events left."
+		LOG(("Purple Privacy: screen time log pruned to %1 days, %2 events left."
 			).arg(days).arg(kept.size()));
 	}
 }

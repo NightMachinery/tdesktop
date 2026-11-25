@@ -525,7 +525,7 @@ void NativeStartupDiscard() {
 	auto readyFuture = ready.get_future();
 	auto reported = false;
 	auto worker = std::make_shared<NativeStartupWorker>(options,
-		[&](DesktopArchiveStatus status, QString reason, uint64_t) {
+		[&](DesktopArchiveStatus status, QString reason, auto) {
 			if (status == DesktopArchiveStatus::RemovalPending
 				&& reason == u"discard-account-lock-unavailable"_q
 				&& !std::exchange(reported, true)) {
@@ -568,7 +568,7 @@ void NativeStartupInflight() {
 	auto readyFuture = ready.get_future();
 	NativeValue = {};
 	NativeValue.worker = std::make_shared<NativeStartupWorker>(std::move(options),
-		[](DesktopArchiveStatus, QString, uint64_t) {},
+		[](DesktopArchiveStatus, QString, auto) {},
 		[&](auto journal) { ready.set_value(std::move(journal)); });
 	auto worker = NativeValue.worker;
 	CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
@@ -668,7 +668,7 @@ void NativeStartupUnavailable() {
 		auto captureStopped = std::atomic<bool>(false);
 		NativeValue = {};
 		NativeValue.worker = std::make_shared<NativeStartupWorker>(std::move(options),
-			[&](DesktopArchiveStatus status, QString reason, uint64_t) {
+			[&](DesktopArchiveStatus status, QString reason, auto) {
 				if (status == DesktopArchiveStatus::Unreadable && reason == u"outbox-sequence"_q) {
 					captureStopped = true;
 				}
@@ -724,7 +724,7 @@ void NativeStartupPurgeRenewal() {
 	auto readyCount = std::atomic<int>(0);
 	NativeValue = {};
 	NativeValue.worker = std::make_shared<NativeStartupWorker>(std::move(options),
-		[](DesktopArchiveStatus, QString, uint64_t) {}, [&](auto journal) {
+		[](DesktopArchiveStatus, QString, auto) {}, [&](auto journal) {
 			const auto index = readyCount.fetch_add(1);
 			if (!index) first.set_value(journal);
 			else if (index == 1) renewed.set_value(journal);
@@ -791,7 +791,7 @@ void NativeStartupReplacement() {
 	options.authorityReady = [&] { entered.set_value(); releaseFuture.wait(); return true; };
 	auto oldReady = std::atomic<int>(0);
 	auto old = std::make_shared<NativeStartupWorker>(options,
-		[](DesktopArchiveStatus, QString, uint64_t) {}, [&](auto) { ++oldReady; });
+		[](DesktopArchiveStatus, QString, auto) {}, [&](auto) { ++oldReady; });
 	CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
 	CHECK(old->PostStartupCapture(Event(Empty(), u"replaced-startup"_q, 0,
 		u"must stay absent"_q, ArchiveOrigin::Baseline, Key({0,123},45,19000)), 0));
@@ -806,7 +806,7 @@ void NativeStartupReplacement() {
 	auto ready = std::promise<std::shared_ptr<DesktopArchiveJournal>>(); auto readyFuture = ready.get_future();
 	NativeValue = {};
 	NativeValue.worker = std::make_shared<NativeStartupWorker>(std::move(options),
-		[](DesktopArchiveStatus, QString, uint64_t) {}, [&](auto journal) { ready.set_value(journal); });
+		[](DesktopArchiveStatus, QString, auto) {}, [&](auto journal) { ready.set_value(journal); });
 	auto worker = NativeValue.worker;
 	CHECK(successorEnteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
 	CHECK(!old->PostStartupCapture(Event(Empty(), u"late-old"_q, 0), 0));
@@ -837,7 +837,7 @@ void NativeStartupPayload() {
 	options.authorityReady = [&] { entered.set_value(); releaseFuture.wait(); return true; };
 	auto readyCount = std::atomic<int>(0);
 	auto worker = std::make_shared<NativeStartupWorker>(std::move(options),
-		[](DesktopArchiveStatus, QString, uint64_t) {}, [&](auto) { ++readyCount; });
+		[](DesktopArchiveStatus, QString, auto) {}, [&](auto) { ++readyCount; });
 	CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
 	for (auto i = 0; i != 2; ++i) CHECK(worker->PostStartupCapture(Event(Empty(),
 		u"large-startup-"_q + QString::number(i), 0, QString(1800000, u'x'),
@@ -881,7 +881,7 @@ void NativeStreamAdmission() {
 	auto finished = done.get_future();
 	auto worker = std::make_shared<NativeStartupWorker>(
 		std::move(options),
-		[](DesktopArchiveStatus, QString, uint64_t) {},
+		[](DesktopArchiveStatus, QString, auto) {},
 		[](auto) {});
 	CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
 	CHECK(worker->Post([order](DesktopArchiveStore &) {

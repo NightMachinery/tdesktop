@@ -80,7 +80,7 @@ void TranslateTracker::setup() {
 		static auto reported = false;
 		if (!reported) {
 			reported = true;
-			LOG(("Purple: language tracking %1 - translate chats %2, premium "
+			LOG(("Purple Translation: language tracking %1 - translate chats %2, premium "
 				"%3, local premium %4."
 				).arg(tracking ? u"ON"_q : u"OFF"_q
 				).arg(Core::App().settings().translateChatEnabled()

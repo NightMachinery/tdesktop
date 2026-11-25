@@ -325,7 +325,6 @@ void BuildMediaPlaybackSettings(::Settings::Builder::SectionBuilder &builder) {
 		}) | rpl::on_next(SetFloatKeepsSize, keep->lifetime());
 	}
 	builder.addDividerText(tr::lng_purple_video_message_size_about());
-	builder.addSkip();
 }
 
 bool RestartFloatOnDoubleClick(const HistoryItem *item) {

@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_emoji_export.h"
 #include "purple/purple_control.h"
 #include "purple/purple_archive_service.h"
+#include "purple/purple_archive_sqlite.h"
 #include "purple/purple_config.h"
 #include "purple/purple_sync_auto_service.h"
 #include "purple/purple_gate.h"
@@ -31,7 +32,11 @@ namespace Purple {
 
 void StartAppServices() {
 	SetSyncDiagSink([](const QString &line) {
-		LOG(("Purple diag: %1").arg(line));
+		LOG(("Purple Sync: %1").arg(line));
+	});
+	SetArchiveSqliteFailureSink([](int code, QStringView phase) {
+		LOG(("Purple Archive: SQLite failure; sqlite_code=%1 phase=%2.")
+			.arg(code).arg(phase));
 	});
 	StartDesktopAccountRouting();
 	StartSyncChatService();

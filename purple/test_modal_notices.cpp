@@ -1,4 +1,9 @@
 #include "purple/purple_notice_state.h"
+#include "purple/purple_diagnostics.h"
+
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QTemporaryDir>
 
 #include <iostream>
 #include <string>
@@ -21,6 +26,107 @@ void Check(bool ok, const std::string &name) {
 } // namespace
 
 int main() {
+	{
+		namespace Diagnostic = Purple::Diagnostics;
+		auto scratch = QTemporaryDir();
+		Check(scratch.isValid(), "diagnostics use an isolated temporary directory");
+		auto journal = Diagnostic::Journal();
+		journal.start(scratch.path());
+		const auto path = scratch.filePath(QString::fromLatin1(Diagnostic::kLogFile));
+		Check(!journal.append(u"Telegram: never copied to the local log"),
+			"only Purple lines enter the journal");
+		Check(journal.append(u"Purple Archive: Could not discard the account's archive; reason=discard-held "
+			"peer=123456 message_id=98765 duration_ms=5400 count=23 sqlite_code=2067 errno=13 "
+			"token=fixturetoken /Users/fixture/archive +49 170 1234567 fixture@example.org"),
+			"archive diagnostics written");
+		Check(journal.append(u"Purple Settings: fixture section"), "multiple subsystems are retained");
+		const auto data = [&] {
+			auto file = QFile(path);
+			return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+		}();
+		Check(data.contains("reason=discard-held") && data.contains("sqlite_code=2067")
+			&& data.contains("errno=13") && data.contains("duration_ms=5400") && data.contains("count=23"),
+			"archive failure retains exact reason, codes, durations and counts");
+		Check(data.size() > 4 && data.at(4) == '-' && data.contains("Z [Archive]"),
+			"archive line has a UTC timestamp and subsystem");
+		Check(!data.contains("123456") && !data.contains("98765") && !data.contains("fixturetoken")
+			&& !data.contains("fixture@example.org") && !data.contains("/Users/fixture")
+			&& !data.contains("+49") && data.contains("~/archive"),
+			"journal stores masked IDs, credentials, contacts and home paths");
+#ifdef Q_OS_UNIX
+		const auto privatePath = [](const QString &path) {
+			const auto flags = QFileInfo(path).permissions();
+			return flags.testFlag(QFile::ReadOwner) && flags.testFlag(QFile::WriteOwner)
+				&& !(flags & (QFile::ReadGroup | QFile::WriteGroup | QFile::ExeGroup
+					| QFile::ReadOther | QFile::WriteOther | QFile::ExeOther | QFile::ExeOwner));
+		};
+		Check(privatePath(path), "diagnostics use mode 0600");
+#endif
+		const auto copy = journal.copy(u"Local archive",
+			u"Visible heading\nVisible archive notice and detail; peer=123456");
+		Check(copy.startsWith(QStringLiteral("Visible heading\nVisible archive notice"))
+			&& copy.count(QStringLiteral("peer=id-1")) == 2
+			&& copy.contains(QStringLiteral("message_id=id-2"))
+			&& !copy.contains(QStringLiteral("fixture section")),
+			"copy retains visible notice text and matching subsystem with stable pseudonyms");
+		for (auto i = 0; i != 70; ++i) {
+			journal.append(u"Purple Archive: counted fixture scan");
+		}
+		Check(journal.copy(u"Local archive", {}).count(QStringLiteral("counted fixture scan")) == 60,
+			"copy is limited to 60 matching lines");
+		auto accountNotices = std::vector<NoticeRecord>(32);
+		auto noticeId = uint64_t(0);
+		for (auto &record : accountNotices) {
+			record.id = ++noticeId;
+			record.scope = QStringLiteral("Local archive");
+			record.summary = QStringLiteral("peer=123456 token=notice-secret");
+			record.timestampMs = 1;
+		}
+		accountNotices.back().repeatCount = 3;
+		accountNotices.back().rows.push_back({
+			.label = QStringLiteral("members"),
+			.before = QStringLiteral("[+123_456, 98765]"),
+			.after = QStringLiteral("[+123456]"),
+			.hasConfigPeerIds = true,
+		});
+		const auto appNotices = std::vector<NoticeRecord>{ {
+			.scope = QStringLiteral("Local archive"),
+			.summary = QStringLiteral("The account's archive removal is pending."),
+			.timestampMs = 2,
+		} };
+		const auto notices = Diagnostic::ExportNotices(accountNotices, appNotices);
+		const auto exported = journal.exportText(notices);
+		Check(exported.count(QStringLiteral("[This account]")) == 31
+			&& exported.endsWith(QStringLiteral("The account's archive removal is pending.\n"))
+			&& exported.contains(QStringLiteral("Repeated 3 times"))
+			&& exported.count(QStringLiteral("peer=id-1")) == 32
+			&& exported.contains(QStringLiteral("[id-1, id-2] -> [id-1]"))
+			&& !exported.contains(QStringLiteral("notice-secret")),
+			"recent notices share masking with the complete diagnostic export");
+		auto restarted = Diagnostic::Journal();
+		restarted.start(scratch.path());
+		Check(restarted.exportText(notices) == exported, "restart reads existing file and preserves aliasing");
+		Check(restarted.clear() && QFileInfo(path).size() == 0
+			&& journal.exportText({}).trimmed().isEmpty(),
+			"clear truncates the persistent log and is immediately visible");
+		auto rotating = Diagnostic::Journal(85);
+		rotating.start(scratch.path());
+		for (const auto line : { u"Purple Archive: first fixture",
+			u"Purple Archive: second fixture", u"Purple Archive: third fixture" }) {
+			Check(rotating.append(line), "rotating write succeeds");
+		}
+		const auto rotated = rotating.exportText({});
+		Check(!rotated.contains(QStringLiteral("first fixture"))
+			&& rotated.indexOf(QStringLiteral("second fixture")) < rotated.indexOf(QStringLiteral("third fixture"))
+			&& rotated.contains(QStringLiteral("second fixture"))
+			&& QFileInfo(path).size() <= 85 && QFileInfo(path + QStringLiteral(".1")).size() <= 85,
+			"rotation retains the two most recent bounded segments in order");
+#ifdef Q_OS_UNIX
+		Check(privatePath(path + QStringLiteral(".1")), "rotated segment keeps mode 0600");
+#endif
+		Check(rotating.clear() && QFileInfo(path + QStringLiteral(".1")).size() == 0,
+			"clear also truncates the rotated segment");
+	}
 	for (const auto modal : { true, false }) {
 		auto store = AccountNoticeStore();
 		auto context = DeliveryContext{ .modalEnabled = modal, .privacyScreenActive = true };
@@ -38,24 +144,43 @@ int main() {
 		Check(!store.takeNextPending(QStringLiteral("another"), context), "wrong account cannot take queued notice");
 		const auto delivered = store.takeNextPending(notice.accountKey, context);
 		Check(delivered && delivered->notice.record.id == submitted.id
-			&& delivered->route == (modal ? DeliveryRoute::OpenDialogNow : DeliveryRoute::StockToast),
+			&& delivered->route == DeliveryRoute::OpenDialogNow,
 			"router delivers retained record after uncovering");
 		Check(!store.takeNextPending(notice.accountKey, context), "retained record is delivered once");
 	}
 
-	// 1. Modal keys off uses stock toasts when the window is available.
+	// 1. Modal keys off still presents a dialog when the window is available.
 	{
 		DeliveryContext ctx;
 		ctx.modalEnabled = false;
 		ctx.statusBarVisible = true;
-		Check(DecideDelivery(NoticeKind::Dialog, true, false, ctx) == DeliveryRoute::StockToast,
-			"modal off: background dialog -> stock toast");
-		Check(DecideDelivery(NoticeKind::Dialog, false, false, ctx) == DeliveryRoute::StockToast,
-			"modal off: user dialog -> stock toast");
+		Check(DecideDelivery(NoticeKind::Dialog, true, false, ctx) == DeliveryRoute::OpenDialogNow,
+			"modal off: background notice opens a dialog");
+		Check(DecideDelivery(NoticeKind::Dialog, false, false, ctx) == DeliveryRoute::OpenDialogNow,
+			"modal off: foreground notice opens a dialog");
 		Check(DecideDelivery(NoticeKind::Ack, false, false, ctx) == DeliveryRoute::StockToast,
 			"modal off: ack -> stock toast");
-		Check(!ShouldFlushPendingDialog(ctx), "modal off: never flushes modal dialogs");
+		Check(ShouldFlushPendingDialog(ctx), "modal off: pending dialog can flush");
 		Check(!HistoryAccessible(ctx), "modal off: modal history layer unavailable");
+		ctx.recentTyping = true;
+		Check(DecideDelivery(NoticeKind::Dialog, false, false, ctx) == DeliveryRoute::QueueDialogWithCue,
+			"modal off: a foreground error waits while typing");
+		Check(!PendingRoute(NoticeRecord{}, ctx, false), "pending dialogs also wait while typing");
+		ctx.recentTyping = false;
+		ctx.hasImePreedit = true;
+		Check(!PendingRoute(NoticeRecord{}, ctx, false), "pending dialogs wait for IME composition");
+		ctx.hasImePreedit = false;
+		ctx.canInterruptWindow = false;
+		Check(!PendingRoute(NoticeRecord{}, ctx, false), "pending dialogs wait for the active window");
+		ctx.canInterruptWindow = true;
+		ctx.inInsertMode = ctx.hasPendingPrefix = true;
+		const auto background = NoticeRecord{ .background = true };
+		Check(DecideDelivery(NoticeKind::Dialog, true, false, ctx) == DeliveryRoute::OpenDialogNow,
+			"disabled modal keys ignore old Insert and prefix state for new background notices");
+		Check(PendingRoute(background, ctx, false) == DeliveryRoute::OpenDialogNow,
+			"disabling modal keys releases a queued background notice with old modal state");
+		ctx.hasBlockingLayerOrBox = true;
+		Check(!PendingRoute(background, ctx, false), "a stock layer still holds a background dialog");
 	}
 
 	// 2. Passcode locked or privacy screen active queues silently and hides history.
@@ -274,9 +399,9 @@ int main() {
 		};
 		const auto ackId = store.record(ack, true, {}, 110);
 		const auto first = store.takeNextPending(a, stock);
-		Check(first && first->route == DeliveryRoute::StockToast
+		Check(first && first->route == DeliveryRoute::OpenDialogNow
 			&& first->notice.record.summary == QStringLiteral("Latest"),
-			"after unlock the current stock mode delivers the latest notice");
+			"after unlock the latest notice opens a dialog with modal keys off");
 		if (first && first->notice.fallbackToast) {
 			first->notice.fallbackToast();
 		}
@@ -295,9 +420,9 @@ int main() {
 		typing.inInsertMode = true;
 		Check(!store.takeNextPending(a, typing), "modal notice waits while typing");
 		const auto afterDisable = store.takeNextPending(a, stock);
-		Check(afterDisable && afterDisable->route == DeliveryRoute::StockToast
+		Check(afterDisable && afterDisable->route == DeliveryRoute::OpenDialogNow
 			&& !afterDisable->notice.fallbackToast && !store.takeNextPending(a, normal),
-			"disabling modal keys gives one stock delivery with summary when no callback survives");
+			"disabling modal keys still opens one dialog");
 
 		const auto expired = store.record(ack, true, {}, 0);
 		const auto fresh = store.record(ack, true, {}, kPendingAckLifetimeMs - 1);

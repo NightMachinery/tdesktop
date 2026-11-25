@@ -286,8 +286,7 @@ void FolderStrip::refreshShown() {
 	if (extra + 1 > kPurpleViewLimit) {
 		// Silently drawing the first fifteen would read as "the rest are empty",
 		// which is the one thing it does not mean.
-		LOG(("Purple: preset '%1' defines %2 extra views; showing %3."
-			).arg(Purple::ActiveResolved(&_filters->_owner->session()).preset
+		LOG(("Purple Work Mode: preset defines %1 extra views; showing %2."
 			).arg(extra
 			).arg(kPurpleViewLimit - 1));
 	}
@@ -347,10 +346,10 @@ void FolderStrip::refreshShown() {
 	if (!missing.isEmpty()) {
 		// Same reasoning as the hidden-chat count: a folder name that matches
 		// nothing looks identical to a folder the preset meant to hide.
-		LOG(("Purple: preset names folders that do not exist: %1."
-			).arg(missing.join(u", "_q)));
+		LOG(("Purple Work Mode: preset refers to missing folders; count=%1."
+			).arg(missing.size()));
 	}
-	LOG(("Purple: folder strip showing %1 of %2, including %3 preset view(s)."
+	LOG(("Purple Work Mode: folder strip showing %1 of %2, including %3 preset view(s)."
 		).arg(result.size()).arg(_filters->_list.size()).arg(_viewCount));
 	_shown = std::move(result);
 }

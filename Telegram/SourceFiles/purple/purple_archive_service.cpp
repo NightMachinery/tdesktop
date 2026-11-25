@@ -1,4 +1,6 @@
 #include "purple/purple_archive_service.h"
+
+#include "ui/style/style_core_direction.h"
 #include "purple/purple_recording_store.h"
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
@@ -115,7 +117,7 @@ void ShowArchiveRemovalPending() {
 }
 
 void ShowArchiveDiscardFailure(Main::Session *session, const QString &reason) {
-	LOG(("Purple Archive: discard failed (%1).").arg(reason));
+	LOG(("Purple Archive: event=discard_failed reason=%1 count=1.").arg(reason));
 	ShowPurpleNotice({
 		.session = session,
 		.scope = u"Local archive"_q,
@@ -273,8 +275,13 @@ bool PersistedLoginAuthority(const QString &root, const QString &dataName,
 class ArchiveWorker final {
   public:
 	using Task = std::function<void(DesktopArchiveStore &)>;
+	struct Measurement {
+		uint64_t bytes;
+		bool complete;
+	};
+	using Report = Fn<void(DesktopArchiveStatus, QString, std::optional<Measurement>)>;
 	ArchiveWorker(DesktopArchiveOptions options,
-		Fn<void(DesktopArchiveStatus, QString, uint64_t)> report,
+		Report report,
 		Fn<void(std::shared_ptr<DesktopArchiveJournal>)> ready,
 		Fn<void(DesktopArchiveCaptureLosses)> captureLosses = {})
 		: _state(std::make_shared<State>()) {
@@ -288,7 +295,7 @@ class ArchiveWorker final {
 		}).detach();
 	}
 	static std::unique_ptr<ArchiveWorker> RemovalOnly(DesktopArchiveOptions options,
-		bool resolveSlot, Fn<void(DesktopArchiveStatus, QString, uint64_t)> report) {
+		bool resolveSlot, Report report) {
 		auto result = std::unique_ptr<ArchiveWorker>(new ArchiveWorker());
 		const auto state = result->_state;
 		state->report = std::move(report);
@@ -454,7 +461,7 @@ class ArchiveWorker final {
 		std::optional<uint64_t> streamBytes;
 	};
 	struct State {
-		Fn<void(DesktopArchiveStatus, QString, uint64_t)> report;
+		Report report;
 		Fn<void(std::shared_ptr<DesktopArchiveJournal>)> ready;
 		Fn<void(DesktopArchiveCaptureLosses)> captureLosses;
 		std::mutex mutex;
@@ -520,13 +527,13 @@ class ArchiveWorker final {
 		while (authorityReady && !state->cancelled) {
 			discard = DesktopArchiveStore::ResumeDiscard(options, [&] {
 				if (!std::exchange(showingDiscard, true)) {
-					state->report(DesktopArchiveStatus::RemovalPending, u"discard-cleanup-pending"_q, 0);
+					state->report(DesktopArchiveStatus::RemovalPending, u"discard-cleanup-pending"_q, std::nullopt);
 				}
 			});
 			if (!discard.retryable) {
 				break;
 			}
-			state->report(DesktopArchiveStatus::RemovalPending, discard.reason, 0);
+			state->report(DesktopArchiveStatus::RemovalPending, discard.reason, std::nullopt);
 			auto lock = std::unique_lock(state->mutex);
 			state->condition.wait_for(lock, std::chrono::seconds(1),
 				[&] { return state->cancelled.load(); });
@@ -536,17 +543,17 @@ class ArchiveWorker final {
 				state->startupFailed = true;
 				state->startupHeld = true;
 				startupHeld = true;
-				state->report(DesktopArchiveStatus::Unreadable, u"login-authority-held"_q, 0);
+				state->report(DesktopArchiveStatus::Unreadable, u"login-authority-held"_q, std::nullopt);
 			} else if (!discard) {
 				state->startupFailed = true;
 				state->startupHeld = true;
 				startupHeld = true;
-				state->report(DesktopArchiveStatus::Unreadable, discard.reason, 0);
+				state->report(DesktopArchiveStatus::Unreadable, discard.reason, std::nullopt);
 			} else if (!DesktopArchiveStore::Recover(options, &retryDiscards)) {
 				state->startupFailed = true;
 				state->startupHeld = true;
 				startupHeld = true;
-				state->report(DesktopArchiveStatus::RemovalPending, u"logout-recovery"_q, 0);
+				state->report(DesktopArchiveStatus::RemovalPending, u"logout-recovery"_q, std::nullopt);
 			} else {
 				static_cast<void>(store.Open(std::move(options)));
 				if (!store.epoch().storeId.isEmpty()) {
@@ -630,8 +637,7 @@ class ArchiveWorker final {
 			}
 		};
 
-		auto usageBytes = uint64_t(0);
-		auto usageComplete = false;
+		auto measurement = std::optional<Measurement>();
 		auto nextUsage = std::chrono::steady_clock::time_point();
 		auto nextReport = std::chrono::steady_clock::time_point();
 		auto reportedStatus = DesktopArchiveStatus::Disabled;
@@ -653,17 +659,18 @@ class ArchiveWorker final {
 			nextReport = now + std::chrono::seconds(1);
 			reportedStatus = status;
 			reportedFailure = failure;
-			if (store.Current() && (!usageComplete || now >= nextUsage)) {
+			if (store.Current() && (!measurement || !measurement->complete || now >= nextUsage)) {
 				const auto usage = store.Usage();
-				usageBytes = usage ? TotalArchiveUsage(*usage).value_or(0) : usageBytes;
-				usageComplete = usage && store.UsageComplete();
+				if (const auto bytes = usage ? TotalArchiveUsage(*usage) : std::nullopt) {
+					measurement = Measurement{ *bytes, store.UsageComplete() };
+				}
 				nextUsage = now + std::chrono::seconds(60);
 			}
 			auto losses = store.TakeCaptureLosses();
 			if (state->captureLosses && !losses.empty()) {
 				state->captureLosses(std::move(losses));
 			}
-			state->report(status, failure, usageBytes);
+			state->report(status, failure, measurement);
 		};
 		report();
 		auto streamCursor = QString();
@@ -802,7 +809,7 @@ class ArchiveWorker final {
 				}
 			}
 			if (!state->removed) {
-				state->report(DesktopArchiveStatus::RemovalPending, u"logout-removal-pending"_q, 0);
+				state->report(DesktopArchiveStatus::RemovalPending, u"logout-removal-pending"_q, std::nullopt);
 			}
 		}
 		ownedStore.reset();
@@ -824,7 +831,7 @@ struct ArchiveSession {
 	DesktopArchiveCaptureLosses captureLosses;
 	DesktopArchiveCaptureLosses captureDetails;
 	bool availabilityWarned = false;
-	uint64_t bytes = 0;
+	std::optional<ArchiveWorker::Measurement> usage;
 };
 std::map<Main::Session*, ArchiveSession> Sessions;
 std::set<Main::Session*> Retired;
@@ -854,7 +861,11 @@ void ReportArchiveCaptureLoss(Main::Session *session, const DesktopArchiveCaptur
 	}
 	auto &value = i->second;
 	const auto warn = AccumulateArchiveCaptureIncidents(losses, value.captureLosses, value.captureDetails);
-	LOG(("Purple Archive: capture incidents (%1).").arg(CaptureLossDetails(losses)));
+	for (const auto &[reason, count] : losses) {
+		LOG(("Purple Archive: event=%1 reason=%2 count=%3.")
+			.arg(ArchiveCaptureReasonWarns(reason) ? u"capture_loss"_q : u"capture_detail"_q)
+			.arg(reason).arg(count));
+	}
 	if (warn) {
 		ShowPurpleNotice({
 			.session = session,
@@ -908,8 +919,9 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 	const auto routing = value.routing;
 	value.worker = std::make_shared<ArchiveWorker>(
 		std::move(options),
-		[weak, accountKey, routing, app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString failure, uint64_t bytes) {
-			crl::on_main([weak, accountKey, routing, app, status, failure = std::move(failure), bytes] {
+		[weak, accountKey, routing, app = QPointer<Core::Application>(&Core::App())](
+				DesktopArchiveStatus status, QString failure, std::optional<ArchiveWorker::Measurement> usage) {
+			crl::on_main([weak, accountKey, routing, app, status, failure = std::move(failure), usage] {
 				if (!app) {
 					return;
 				}
@@ -932,9 +944,15 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 					value.availabilityWarned = false;
 				}
 				const auto firstFailure = ArchiveFailureNeedsToast(status, failure, value.availabilityWarned);
+				if (!failure.isEmpty() && (value.status != status || value.failure != failure)) {
+					LOG(("Purple Archive: event=status status=%1 reason=%2 measured_bytes=%3.")
+						.arg(int(status)).arg(failure).arg(usage ? usage->bytes : 0));
+				}
 				value.status = status;
 				value.failure = failure;
-				value.bytes = bytes;
+				if (usage) {
+					value.usage = usage;
+				}
 				if (firstFailure && Core::App().domain().started()) {
 					value.availabilityWarned = true;
 					LOG(("Purple Archive: unavailable (%1).").arg(failure));
@@ -1043,7 +1061,7 @@ void RemoveArchiveAtLogout(Main::Account &account) {
 			? QString::fromLatin1(QCryptographicHash::hash(authority, QCryptographicHash::Sha256).toHex())
 			: u"unavailable"_q;
 		static_cast<void>(ArchiveWorker::RemovalOnly(std::move(options), !session,
-			[app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString, uint64_t) {
+			[app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString, std::optional<ArchiveWorker::Measurement>) {
 				if (status == DesktopArchiveStatus::RemovalPending) {
 					crl::on_main([app] {
 						if (app) {
@@ -1587,6 +1605,21 @@ QString FormatArchiveSize(uint64_t bytes) {
 	return number + ' ' + QString::fromLatin1(units[unit]);
 }
 
+QString ArchiveStorageSizeLabel(not_null<Main::Session*> session) {
+	if (Retired.contains(session.get())) {
+		return {};
+	}
+	const auto &usage = For(session).usage;
+	if (!usage) {
+		return {};
+	}
+	auto label = FormatArchiveSize(usage->bytes);
+	if (!usage->complete) {
+		label += u'+';
+	}
+	return st::wrap_rtl(label);
+}
+
 QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 	if (Retired.contains(session.get())) {
 		return tr::lng_purple_archive_removal_pending(tr::now);
@@ -1610,7 +1643,7 @@ QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 	}
 	const auto usage = [&] {
 		return tr::lng_purple_archive_usage(
-			tr::now, lt_size, FormatArchiveSize(value.bytes));
+			tr::now, lt_size, FormatArchiveSize(value.usage ? value.usage->bytes : 0));
 	};
 	if (value.status == DesktopArchiveStatus::Ready) {
 		auto result = usage();

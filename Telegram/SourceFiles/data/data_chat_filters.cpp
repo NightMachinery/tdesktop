@@ -895,7 +895,7 @@ void ChatFilters::saveOrder(
 	// blind; this is the one choke point, so a display surface that was missed
 	// still cannot do damage here.
 	if (Purple::RefuseFolderOrderSave(&_owner->session())) {
-		LOG(("Purple: not saving folder order while a preset restricts "
+		LOG(("Purple Work Mode: not saving folder order while a preset restricts "
 			"folders. Switch to the normal preset to reorder them."));
 		return;
 	}

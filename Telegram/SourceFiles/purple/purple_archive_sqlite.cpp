@@ -3,18 +3,28 @@
 #include <QtCore/QFile>
 #include <QtCore/QThread>
 #include <cctype>
+#include <atomic>
 #include <limits>
 
 namespace Purple {
 namespace {
 
+std::atomic<void (*)(int, QStringView)> FailureSink = nullptr;
+
 DesktopArchiveSqlResult Failure(int code, QString phase) {
+	if (const auto sink = FailureSink.load()) {
+		sink(code, phase);
+	}
 	auto result = DesktopArchiveSqlResult();
 	result.code = code;
 	result.failure = std::move(phase);
 	return result;
 }
 
+}
+
+void SetArchiveSqliteFailureSink(void (*sink)(int, QStringView)) {
+	FailureSink.store(sink);
 }
 
 class DesktopArchiveSqlite::Impl {

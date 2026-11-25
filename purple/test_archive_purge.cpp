@@ -1028,7 +1028,7 @@ void ProductionExecutionBoundary() {
 	auto session = ProbePurgeSession();
 	PurgeValue.worker = std::make_shared<ProbePurgeWorker>(
 		Options(temporary.path()),
-		[](DesktopArchiveStatus status, QString reason, uint64_t) {
+		[](DesktopArchiveStatus status, QString reason, auto) {
 			if (!reason.isEmpty()) {
 				std::fprintf(stderr, "worker status=%d reason=%s\n", int(status), reason.toUtf8().constData());
 			}

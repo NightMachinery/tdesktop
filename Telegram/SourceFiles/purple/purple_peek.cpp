@@ -38,8 +38,7 @@ namespace {
 [[nodiscard]] QKeySequence Parse(const QString &keys, const QString &what) {
 	const auto sequence = QKeySequence(keys, QKeySequence::PortableText);
 	if (sequence.isEmpty() && !keys.isEmpty()) {
-		LOG(("Purple Error: %1 hotkey '%2' is not a key sequence."
-			).arg(what, keys));
+		LOG(("Purple Work Mode: invalid hotkey; action=%1.").arg(what));
 	}
 	return sequence;
 }

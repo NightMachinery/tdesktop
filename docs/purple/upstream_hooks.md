@@ -2025,12 +2025,37 @@ worker's pending database transactions. The existing playlist menu hook in
   `Purple::AddAboutVersion(layout, box)` below the upstream version button. See
   [version.md](version.md).
 
+### Shareable diagnostics
+
+- `logs.cpp`: initializes Purple diagnostics with the validated working
+  directory and forwards Purple main-log messages to its independent rotating
+  log.
+- `data/data_chat_filters.cpp` and `history/view/history_view_translate_tracker.cpp`:
+  tag their existing Purple messages with the Work Mode and Translation
+  subsystems.
+
+### Purple settings navigation
+
+- `settings/settings_builder.{h,cpp}` supports registry searches rooted at a
+  settings section, section search keywords, optional keyboard tab stops,
+  and a right-hand label on native section rows.
+- `settings/settings_search.{h,cpp}` accepts a root and landing page for
+  scoped search. Purple uses the same pinned search field, result controls,
+  and back-stack state as global Settings search.
+
+### Bot thread edit refresh
+
+- `boxes/peers/edit_forum_topic_box.cpp`: refreshes the edited bot thread by
+  ID after a successful or already-applied edit. The normal topic update
+  notifies the stock header and Purple topic picker.
+
 ### Per-chat translation exclusion
 
 - `history/view/history_view_translate_bar.cpp`: includes
   `purple/purple_translation_policy.h`, checks `Purple::ChatTranslationDisabled`
   on `Purple::ChatTranslationExcludedChanges`, and adds the exclude action to
-  the bar menu via `Purple::AddTranslateBarExcludeAction`.
+  the bar menu via `Purple::AddTranslateBarExcludeAction`. The Purple action
+  presents its Undo button through the account-scoped notice router.
 - `history/view/history_view_translate_tracker.cpp`: gates `_trackingLanguage`
   on `!Purple::ChatTranslationExcludedValue(peer)`.
 - `history/history.cpp`: guards `History::translateOfferFrom` with

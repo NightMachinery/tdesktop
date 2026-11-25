@@ -230,7 +230,7 @@ struct NoticeLayerConfig {
 	ModalNotices::NoticeRecord record;
 	QString primaryActionLabel;
 	Fn<void()> onPrimaryAction;
-	Fn<void()> onCopy;
+	Fn<bool()> onCopy;
 };
 
 [[nodiscard]] std::unique_ptr<Ui::LayerWidget> CreateNoticeLayer(

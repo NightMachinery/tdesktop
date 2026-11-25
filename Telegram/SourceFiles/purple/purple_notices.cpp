@@ -9,11 +9,13 @@
 #include "main/main_session.h"
 #include "mainwindow.h"
 #include "purple/purple_config.h"
+#include "purple/purple_diagnostics.h"
 #include "purple/purple_keys.h"
 #include "purple/purple_keys_ui.h"
 #include "purple/purple_picker.h"
 #include "purple/purple_privacy_screen.h"
 #include "ui/toast/toast_widget.h"
+#include "ui/layers/layer_widget.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
@@ -23,6 +25,7 @@
 #include <QtCore/QTimer>
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QInputMethodEvent>
 #include <QtWidgets/QApplication>
 
 #include <map>
@@ -34,6 +37,17 @@ namespace {
 const auto kAppKey = QString::fromLatin1(ModalNotices::kAppAccountKey);
 
 void SchedulePendingDelivery();
+
+struct PresentedNotice {
+	QPointer<::MainWindow> window;
+	QPointer<Ui::LayerWidget> layer;
+	QString accountKey;
+};
+
+PresentedNotice &Presented() {
+	static auto result = PresentedNotice();
+	return result;
+}
 
 struct StoredAction {
 	QString accountKey;
@@ -161,6 +175,7 @@ void EnsureLogoutHook(Main::Session *session, const QString &accountKey) {
 		const QString &accountKey) {
 	return window
 		&& !Core::App().passcodeLocked()
+		&& !Core::App().screenIsLocked()
 		&& !window->controller().locked()
 		&& !PrivacyScreenActiveAny()
 		&& !PrivacyScreenActive(window)
@@ -220,30 +235,28 @@ void EnsureLogoutHook(Main::Session *session, const QString &accountKey) {
 	return rec;
 }
 
-void CopyRecord(::MainWindow *window, const ModalNotices::NoticeRecord &rec) {
-	if (!CanExposeNoticeInWindow(window, rec.accountKey)) {
-		return;
+bool CopyRecord(::MainWindow *window, const ModalNotices::NoticeRecord &rec) {
+	if (!CanPresentNotice(window, rec.accountKey) || !window->isActiveWindow()) {
+		return false;
 	}
-	if (auto *cb = QGuiApplication::clipboard()) {
-		cb->setText(ResolveNoticeLabels(window, rec).plainText());
+	const auto clipboard = QGuiApplication::clipboard();
+	if (!clipboard) {
+		return false;
 	}
-	SetModalStatusMessage(
-		window,
-		u"Copied notice to clipboard"_q,
-		false,
-		ModalNotices::kAckDurationInfoMs,
-		false);
+	clipboard->setText(Diagnostics::ForNotice(ResolveNoticeLabels(window, rec)));
+	return true;
 }
 
 void OpenNoticeLayerForRecord(
 		not_null<::MainWindow*> window,
 		const ModalNotices::NoticeRecord &rec) {
-	if (!CanExposeNoticeInWindow(window.get(), rec.accountKey)) {
+	if (Presented().layer || !CanPresentNotice(window.get(), rec.accountKey)
+		|| !window->isActiveWindow()) {
 		return;
 	}
 	const auto weakWin = QPointer<::MainWindow>(window.get());
 	const auto current = [weakWin, accountKey = rec.accountKey, id = rec.id] {
-		return CanExposeNoticeInWindow(weakWin.data(), accountKey)
+		return CanPresentNotice(weakWin.data(), accountKey) && weakWin->isActiveWindow()
 			? Store().findById(accountKey, id)
 			: std::nullopt;
 	};
@@ -265,11 +278,12 @@ void OpenNoticeLayerForRecord(
 		.primaryActionLabel = guardedAction ? rec.primaryActionLabel : QString(),
 		.onPrimaryAction = std::move(guardedAction),
 		.onCopy = [weakWin, current] {
-			if (const auto live = current()) {
-				CopyRecord(weakWin.data(), *live);
-			}
+			const auto live = current();
+			return live && CopyRecord(weakWin.data(), *live);
 		},
 	});
+	Presented() = { window.get(), layer.get(), rec.accountKey };
+	QObject::connect(layer.get(), &QObject::destroyed, qApp, SchedulePendingDelivery);
 	ShowModalNoticeLayer(window, std::move(layer), /*isHistory=*/false);
 }
 
@@ -369,16 +383,37 @@ class PendingNoticeDelivery final : public QObject {
 public:
 	PendingNoticeDelivery() : QObject(qApp) {
 		qApp->installEventFilter(this);
+		_typingDelay.setSingleShot(true);
+		_typingDelay.setInterval(1100);
+		connect(&_typingDelay, &QTimer::timeout, this, [this] { schedule(); });
 		rpl::merge(
 			Core::App().passcodeLockChanges(),
 			PrivacyScreenChanges(),
 			ModalKeysEnabledChanges()
 		) | rpl::on_next([this] { schedule(); }, _lifetime);
+		Core::App().screenIsLockedValue() | rpl::skip(1) | rpl::on_next([this] {
+			schedule();
+		}, _lifetime);
 		Core::App().enumerateWindows([&](not_null<Window::Controller*> ctrl) {
 			if (const auto window = ctrl->widget()) {
 				watch(window);
 			}
 		});
+	}
+
+	ModalNotices::DeliveryContext context(::MainWindow *window) const {
+		auto ctx = ModalDeliveryContext(window);
+		ctx.passcodeLocked |= Core::App().screenIsLocked();
+		if (window && !ctx.modalEnabled) {
+			ctx.canInterruptWindow = window->isActiveWindow() && window->isVisible()
+				&& !window->isMinimized();
+			ctx.hasBlockingLayerOrBox |= window->controller().isLayerShown();
+		}
+		ctx.canInterruptWindow &= !Presented().layer
+			&& !QApplication::activeModalWidget() && !QApplication::activePopupWidget();
+		ctx.recentTyping = window && _typingWindow == window && _typingDelay.isActive();
+		ctx.hasImePreedit |= window && _preedit && _preedit->window() == window;
+		return ctx;
 	}
 
 	void schedule() {
@@ -393,6 +428,14 @@ public:
 				if (toast) {
 					toast->deleteLater();
 				}
+			}
+		}
+		const auto &shown = Presented();
+		if (shown.layer && !CanPresentNotice(shown.window, shown.accountKey)) {
+			const auto layer = std::exchange(Presented().layer, {});
+			layer->hide();
+			if (layer) {
+				layer->closeLayer();
 			}
 		}
 		if (!_scheduled) {
@@ -421,6 +464,22 @@ private:
 
 	bool eventFilter(QObject *object, QEvent *event) override {
 		const auto type = event->type();
+		if (type == QEvent::KeyPress || type == QEvent::InputMethod) {
+			const auto widget = qobject_cast<QWidget*>(object);
+			if (widget && widget->testAttribute(Qt::WA_InputMethodEnabled)) {
+				if (const auto window = dynamic_cast<::MainWindow*>(widget->window())) {
+					_typingWindow = window;
+					_typingDelay.start();
+					if (type == QEvent::InputMethod) {
+						const auto ime = static_cast<QInputMethodEvent*>(event);
+						_preedit = ime->preeditString().isEmpty() ? nullptr : widget;
+					}
+				}
+			}
+		} else if (type == QEvent::FocusOut && object == _preedit.data()) {
+			_preedit.clear();
+			schedule();
+		}
 		if (type == QEvent::Hide && _toast && _toast.data() == object) {
 			_toast->deleteLater();
 			_toast.clear();
@@ -430,6 +489,8 @@ private:
 			if (widget && dynamic_cast<::MainWindow*>(widget->window())) {
 				schedule();
 			}
+		} else if (type == QEvent::Hide && qobject_cast<QWidget*>(object)) {
+			schedule();
 		} else if (type == QEvent::Show || type == QEvent::WindowActivate
 			|| type == QEvent::WindowStateChange) {
 			if (const auto window = dynamic_cast<::MainWindow*>(object)) {
@@ -466,8 +527,9 @@ private:
 		if (ModalKeysEnabled() && window->isActiveWindow()) {
 			EnsureModalKeysAttached(window);
 		}
-		const auto ctx = ModalDeliveryContext(window);
-		const auto next = Store().takeNextPending(accountKey, ctx, _toast || _statusBusy);
+		const auto ctx = context(window);
+		const auto next = Store().takeNextPending(
+			accountKey, ctx, _toast || _statusBusy || Presented().layer);
 		if (!next) {
 			return false;
 		}
@@ -504,6 +566,9 @@ private:
 	}
 
 	QSet<::MainWindow*> _windows;
+	QTimer _typingDelay;
+	QPointer<::MainWindow> _typingWindow;
+	QPointer<QWidget> _preedit;
 	QPointer<QWidget> _toast;
 	QString _toastAccount;
 	bool _scheduled = false;
@@ -511,9 +576,13 @@ private:
 	rpl::lifetime _lifetime;
 };
 
-void SchedulePendingDelivery() {
+PendingNoticeDelivery &Pending() {
 	static const auto delivery = new PendingNoticeDelivery();
-	delivery->schedule();
+	return *delivery;
+}
+
+void SchedulePendingDelivery() {
+	Pending().schedule();
 }
 
 [[nodiscard]] Fn<void()> GuardDeferredFallback(
@@ -538,7 +607,10 @@ void SubmitNotice(
 		std::optional<PurpleNoticeAction> action = std::nullopt) {
 	const auto &accountKey = record.accountKey;
 	const auto window = ResolveEligibleMainWindow(origin, accountKey);
-	const auto ctx = ModalDeliveryContext(window);
+	const auto ctx = Pending().context(window);
+	if (record.kind == ModalNotices::NoticeKind::Dialog) {
+		fallback = {};
+	}
 	const auto [route, id, enqueue] = Store().submit(
 		record,
 		ctx,
@@ -548,8 +620,7 @@ void SubmitNotice(
 	if (!enqueue && route == DeliveryRoute::StockToast) {
 		if (fallback && (!origin || &window->controller() == origin)) {
 			fallback();
-		} else if (!fallback && record.kind == ModalNotices::NoticeKind::Dialog
-			&& !ctx.modalEnabled) {
+		} else {
 			window->controller().showToast(record.summary);
 		}
 	}
@@ -578,6 +649,20 @@ void SubmitNotice(
 }
 
 } // namespace
+
+void InitPurpleNoticeDelivery() {
+	Pending();
+}
+
+QString ExportRecentPurpleNotices(not_null<Window::Controller*> window) {
+	const auto session = window->maybeSession();
+	const auto accountKey = session ? PurpleNoticeAccountKey(session) : QString();
+	if (accountKey.isEmpty() || Core::App().activeWindow() != window.get()
+		|| !CanPresentNotice(window->widget(), accountKey)) {
+		return {};
+	}
+	return Diagnostics::ExportNotices(Store().historyFor(accountKey), Store().historyFor(kAppKey));
+}
 
 QString PurpleNoticeAccountKey(Main::Session *session) {
 	if (!session) {
@@ -643,7 +728,9 @@ void ShowPurpleAck(PurpleAckRequest request) {
 	rec.summary = request.text;
 	rec.coalesceKey = request.coalesceKey;
 	rec.severity = request.severity;
-	rec.kind = ModalNotices::NoticeKind::Ack;
+	rec.kind = (request.persistent || request.severity == ModalNotices::NoticeSeverity::Info)
+		? ModalNotices::NoticeKind::Ack
+		: ModalNotices::NoticeKind::Dialog;
 	rec.background = request.background;
 	rec.persistent = request.persistent;
 	rec.timestampMs = QDateTime::currentMSecsSinceEpoch();
@@ -664,13 +751,13 @@ int PendingPurpleNoticeCount(Main::Session *session) {
 
 void MaybeFlushPendingNotices(not_null<::MainWindow*> window) {
 	if (PendingPurpleNoticeCount(window->controller().maybeSession())
-		&& ModalNotices::ShouldFlushPendingDialog(ModalDeliveryContext(window.get()))) {
+		&& ModalNotices::ShouldFlushPendingDialog(Pending().context(window.get()))) {
 		SchedulePendingDelivery();
 	}
 }
 
 void OpenPurpleNoticeHistory(not_null<::MainWindow*> window) {
-	const auto ctx = ModalDeliveryContext(window.get());
+	const auto ctx = Pending().context(window.get());
 	if (!ModalNotices::HistoryAccessible(ctx)) {
 		return;
 	}

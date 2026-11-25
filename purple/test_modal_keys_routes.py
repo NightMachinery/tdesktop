@@ -75,7 +75,7 @@ ordered(section_builder, "SectionBuilder::controller() const",
         "const SearchContext &) -> Window::SessionController*", "return nullptr")
 purple_section = read("purple/purple_settings_section.cpp")
 ordered(purple_section, 'u"advanced/purple_customize_settings"_q',
-        "if (const auto live = weak.get())", "ShowCustomizeSettings(&live->window())")
+        "if (const auto own = current())", "ShowCustomizeSettings(&own->window(), customize)")
 assert not any("builder.controller()->" in source.read_text(encoding="utf-8")
                for source in (SOURCE / "purple").glob("*.cpp"))
 bound("OpenCalls", "SPC o p")
@@ -440,6 +440,16 @@ ordered(notices_cpp, "class PendingNoticeDelivery", "passcodeLockChanges()",
 ordered(notices_cpp, "QWidget *ShowDeferredToast", "ToastCapture", "pending.fallbackToast()",
         "capture.visibleToast()", "CanShowDeferredToast", "Ui::Toast::Show")
 config_cpp = read("purple/purple_config.cpp")
+diagnostics_ui = read("purple/purple_diagnostics_ui.cpp")
+ordered(keys, '"log-export"', '"log-clear"', "case Action::LogExport:",
+        "Diagnostics::CanManage", "Diagnostics::ShowExport", "Diagnostics::ShowClear")
+ordered(diagnostics_ui, "void ShowExport", "CanManage(window)", "FileDialog::GetWritePath",
+        "CurrentWindow(window)", "IsAppDataPath(path)", "QSaveFile(path)", "file.commit()")
+ordered(diagnostics_ui, "void ShowClear", "CanManage(window)", "Ui::MakeConfirmBox",
+        "CurrentWindow(window)", "close()", "current()", "Clear()")
+ordered(read("purple/purple_settings_section.cpp"), "void BuildPurpleDiagnosticsSettings", "CurrentSettingsWindow(builder)",
+        "advanced/purple_log_export", "Diagnostics::ShowExport",
+        "advanced/purple_log_clear", "Diagnostics::ShowClear")
 ordered(config_cpp, "void Config::reloadFromDisk", "takeEditorGlobalReload", "edited && !editorEcho")
 ordered(config_cpp, "SettingsEditorOpening CaptureWindowSettingsEditor", "activeWindow() == host",
         "host->maybeSession() == live", "!host->locked()", "!PrivacyScreenActiveAny()", "!live->account().loggingOut()")
@@ -451,6 +461,16 @@ archive_cpp = read("purple/purple_archive_service.cpp")
 ordered(archive_cpp, "void ShowArchiveRemovalPending()", ".appScoped = true",
         "kArchiveRemovalNoticeKey", "ShowArchiveRemovalPending();", "archive:gap:",
         "void RemoveArchiveAtLogout", "ShowArchiveRemovalPending();", "archive:discard_failed:")
+ordered(archive_cpp, 'failure = u"discard-held"_q', "Could not discard the account's archive; reason=%1",
+        ".arg(i->second.failure)", "ShowPurpleNotice")
+topic_edit = read("boxes/peers/edit_forum_topic_box.cpp")
+ordered(topic_edit, "const auto refreshBotTopic", "bot ? peer->forum() : nullptr",
+        "liveForum->requestTopic(rootId)", "MTPmessages_EditForumTopic",
+        "api->applyUpdates(result)", "refreshBotTopic();", "TOPIC_NOT_MODIFIED",
+        "if (unchanged)", "refreshBotTopic();")
+ordered(keys, "using TopicFlag = Data::TopicUpdate::Flag",
+        "topicUpdates(TopicFlag::Title | TopicFlag::IconId)",
+        "update.topic->peer()->id == peerId", "CreateTopicPickerLayer")
 st_cover_cpp = read("purple/purple_screentime_cover.cpp")
 ordered(st_cover_cpp, "ShowPurpleAck", ".persistent = true")
 last_seen_cpp = read("purple/purple_last_seen.cpp")
