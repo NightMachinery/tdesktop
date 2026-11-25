@@ -30,7 +30,7 @@ size_t Section(const SettingAddress &address, bool known) {
 	if (root == u"schedule"_q || root == u"focus_sync"_q || root == u"devices"_q) return 2;
 	if (root == u"peek"_q) return 3;
 	if (root == u"recent"_q || root == u"suggestions"_q || root == u"overrides"_q) return 4;
-	if (root == u"notifications"_q || root == u"last_seen"_q) return 5;
+	if (root == u"notifications"_q || root == u"last_seen"_q || root == u"privacy_screen"_q) return 5;
 	if (root == u"playback"_q || root == u"playlists"_q) return 6;
 	if (root == u"recording"_q || root == u"media_reply"_q) return 7;
 	if (root == u"screen_time"_q) return 8;

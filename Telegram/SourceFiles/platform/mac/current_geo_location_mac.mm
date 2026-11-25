@@ -14,7 +14,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 @interface LocationDelegate : NSObject<CLLocationManagerDelegate>
 
-- (id) initWithCallback:(Fn<void(Core::GeoLocation)>)callback;
+- (id) initWithCallback:(Fn<void(Core::GeoLocation)>)callback
+	allowPrompt:(BOOL)allowPrompt;
 - (void) locationManager:(CLLocationManager *)manager didUpdateLocations:(NSArray<CLLocation *> *)locations;
 - (void) locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error;
 - (void) locationManager:(CLLocationManager *) manager didChangeAuthorizationStatus:(CLAuthorizationStatus) status;
@@ -25,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 @implementation LocationDelegate {
 CLLocationManager *_manager;
 Fn<void(Core::GeoLocation)> _callback;
+BOOL _allowPrompt;
 }
 
 - (void) fail {
@@ -39,6 +41,10 @@ Fn<void(Core::GeoLocation)> _callback;
 - (void) processWithStatus:(CLAuthorizationStatus)status {
 	switch (status) {
 	case kCLAuthorizationStatusNotDetermined:
+		if (!_allowPrompt) {
+			[self fail];
+			return;
+		}
 		if (@available(macOS 10.15, *)) {
 			[_manager requestWhenInUseAuthorization];
 		} else {
@@ -56,8 +62,10 @@ Fn<void(Core::GeoLocation)> _callback;
 	}
 }
 
-- (id) initWithCallback:(Fn<void(Core::GeoLocation)>)callback {
+- (id) initWithCallback:(Fn<void(Core::GeoLocation)>)callback
+		allowPrompt:(BOOL)allowPrompt {
 	if (self = [super init]) {
+		_allowPrompt = allowPrompt;
 		_callback = std::move(callback);
 		_manager = [[CLLocationManager alloc] init];
 		_manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers;
@@ -114,7 +122,29 @@ Fn<void(Core::GeoLocation)> _callback;
 namespace Platform {
 
 void ResolveCurrentExactLocation(Fn<void(Core::GeoLocation)> callback) {
-	[[LocationDelegate alloc] initWithCallback:std::move(callback)];
+	[[LocationDelegate alloc] initWithCallback:std::move(callback) allowPrompt:YES];
+}
+
+void ResolveCurrentAuthorizedLocation(Fn<void(Core::GeoLocation)> callback) {
+	[[LocationDelegate alloc] initWithCallback:std::move(callback) allowPrompt:NO];
+}
+
+void ResolveWeatherAddress(
+		const QString &address,
+		Fn<void(Core::GeoLocation)> callback) {
+	CLGeocoder *geocoder = [[CLGeocoder alloc] init];
+	[geocoder geocodeAddressString:Q2NSString(address) completionHandler:^(
+			NSArray<CLPlacemark*> *placemarks,
+			NSError *error) {
+		auto result = Core::GeoLocation();
+		if (const auto location = [[placemarks firstObject] location]) {
+			const auto coordinate = location.coordinate;
+			result.point = QPointF(coordinate.latitude, coordinate.longitude);
+			result.accuracy = Core::GeoLocationAccuracy::Exact;
+		}
+		callback(result);
+		[geocoder release];
+	}];
 }
 
 void ResolveLocationAddress(

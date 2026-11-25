@@ -439,7 +439,7 @@ ordered(keys, "int Keys::statusBarHeight", "chromeVisible() ?", "ModalStatusBar:
 ordered(classify, "KeyUse::Cancel", "KeyUse::ExitInsertOrBackOut",
         "_window->isFullScreen()", "KeyUse::FullscreenBack")
 ordered(keys, "case KeyUse::FullscreenBack:", "target.history->escape()",
-        "target.controller->showBackFromStack()")
+        "target.messages.section->delegate()->listCancelRequest()")
 ordered(read("window/window_adaptive.cpp"), "void Adaptive::setPurpleFullscreen",
         "fullscreen ? ChatLayout::Normal : _measuredChatLayout.current()")
 ordered(keys, "case Action::ToggleZenChats:", "ToggleZenChatList(current)")
@@ -546,7 +546,9 @@ last_seen_cpp = read("purple/purple_last_seen.cpp")
 ordered(last_seen_cpp, "ShowPurpleNotice", "lastseen:empty:", ".background = true")
 
 privacy = read("purple/purple_privacy_screen.cpp")
-ordered(privacy, "ShouldFetchWeather", "Accept-Language")
+ordered(privacy, "void ensureFresh()", "PrivacyScreenActiveAny()", "WeatherPermitted()",
+        'source != "off"', "resolveLocation(false)", "Accept-Language")
+ordered(privacy, 'u"Use approximate location"_q', 'ChangeWeatherSource("current")', "resolveLocation(true)")
 ordered(privacy, "Lock with passcode", "hasLocalPasscode()", "lockByPasscode()", "DismissPrivacyScreen()")
 ordered(privacy, "QEvent::WindowActivate", "QEvent::FocusIn", "QEvent::InputMethod", "QEvent::Drop")
 ordered(privacy, "class PrivacyAppFilter final", "passcodeLockValue()", "QEvent::Show",

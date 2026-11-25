@@ -55,6 +55,10 @@ the numbers.
   clears OS Now Playing metadata without stopping playback, hides tray account
   actions, and disables macOS global menu actions while Purple's privacy screen
   is active.
+- `platform/platform_current_geo_location.h`,
+  `platform/mac/current_geo_location_mac.mm`, and `Telegram.plist`: expose
+  a current-location lookup that cannot prompt, a separate explicit address
+  lookup, and the macOS location-use explanation.
 - `window/window_session_controller.cpp`: records chat visits for the local
   recency palette. `boxes/peer_list_box.*` allows the palette to sort search
   results while preserving the selected row.

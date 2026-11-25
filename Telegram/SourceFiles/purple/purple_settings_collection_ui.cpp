@@ -13,6 +13,7 @@
 #include <QtGui/QKeyEvent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
+#include <QtCore/QTimeZone>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
@@ -536,10 +537,19 @@ private:
 				return values.join(u',');
 			};
 		}
-		if (spec.kind == Kind::Choice) {
+		if (spec.kind == Kind::Choice || spec.kind == Kind::TimeZone) {
 			const auto choices = new QComboBox(_form);
 			choices->setAccessibleName(spec.label);
-			choices->addItems(spec.choices);
+			if (spec.kind == Kind::TimeZone) {
+				choices->setEditable(true);
+				choices->setInsertPolicy(QComboBox::NoInsert);
+				choices->lineEdit()->installEventFilter(this);
+				for (const auto &zone : QTimeZone::availableTimeZoneIds()) {
+					choices->addItem(QString::fromUtf8(zone));
+				}
+			} else {
+				choices->addItems(spec.choices);
+			}
 			choices->setCurrentText(spec.initial);
 			field(choices);
 			return [choices] { return choices->currentText(); };
@@ -632,10 +642,24 @@ private:
 			field(name);
 		}
 		auto readers = std::vector<Fn<QString()>>();
-		if (insert && !_config.peerField) {
-			for (const auto &spec : Structures::RecordFields(id)) readers.push_back(recordField(spec));
+		const auto editingClock = id == SettingId::WorldClocks && op == Op::Replace;
+		if ((insert && !_config.peerField) || editingClock) {
+			auto fields = Structures::RecordFields(id);
+			if (editingClock) {
+				const auto parsed = ParseSettings(
+					u"privacy_screen.world_clocks = [%1]"_q.arg(QString::fromUtf8(item.literal)),
+					QString());
+				if (!parsed.settings.worldClocks.empty()) {
+					fields[0].initial = parsed.settings.worldClocks.front().zone;
+					fields[1].initial = parsed.settings.worldClocks.front().label;
+				}
+			}
+			for (const auto &spec : fields) {
+				readers.push_back(recordField(spec));
+			}
 		}
-		if ((insert && !_config.peerField && readers.empty()) || op == Op::Replace) {
+		if ((insert && !_config.peerField && readers.empty())
+			|| (op == Op::Replace && !editingClock)) {
 			literal = new QPlainTextEdit(QString::fromUtf8(insert
 				? Structures::RecordTemplate(id) : item.literal), _form);
 			literal->setAccessibleName(u"One TOML value or inline record"_q);

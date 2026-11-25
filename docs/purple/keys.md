@@ -262,17 +262,19 @@ on the modal status line and cheatsheet footer.
   URLs. The privacy screen is not a security lock; when a local passcode is
   configured, it offers a separate **Lock with passcode** button that engages
   the passcode lock before dismissing the privacy overlay so chats do not flash.
-  - **Optional weather (Settings -> Purple -> Privacy screen weather location):**
-    blank by default, making zero network requests. When a city name is set, it
-    is trimmed and capped to 80 characters, then sent directly to Open-Meteo's
-    geocoding API (`geocoding-api.open-meteo.com`) and forecast API
-    (`api.open-meteo.com`) at most once every 30 minutes (with 15-minute backoff
-    after failures), using a generic `ClockWidget/1.0` user agent, fixed
-    `Accept-Language: en-US,en;q=0.9`, and no cookies. The geocoding request
-    reveals the configured place name and your IP address directly to Open-Meteo.
-    Because `QNetworkAccessManager` does not route through Telegram's MTProto
-    proxy, weather requests are skipped automatically whenever an in-app proxy
-    is enabled.
+  - **World clocks.** Set an ordered list under `[privacy_screen]` in Customize
+    or in app-wide `settings.toml`. Clocks use IANA time zones. The cover
+    hides clocks with the same current UTC offset and marks differences in
+    calendar date. A label is visible on the cover.
+  - **Optional weather.** The cover can show current conditions, the next six
+    hours, and the next three days. Under **Settings → Purple → Privacy screen
+    weather**, choose a town or postal code, resolve a street address with
+    Apple on macOS, or enable approximate current location. The default is
+    off. Weather source and temperature units are device settings. The cover
+    displays a generic location label and suspends weather while an app proxy
+    is enabled. The forecast request sends the rounded area and your IP to
+    Open-Meteo. Town searches send the entered text to Open-Meteo only when
+    submitted. macOS address search sends the submitted address to Apple.
 - **Forum groups and threaded bots:** `SPC b t` / `, t` opens the live-updating
   topic picker for the current forum group or threaded bot. It loads more as
   you approach the end of the results or filter them. `L` loads a page and

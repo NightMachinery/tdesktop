@@ -562,6 +562,16 @@ private:
 			}
 		});
 		layout->addWidget(stockMx);
+		const auto weather = Button(_browser, u"Privacy screen weather · this device"_q);
+		weather->installEventFilter(this);
+		connect(weather, &QPushButton::clicked, this, [this] {
+			if (visibleContent() && _window) {
+				if (const auto owner = _window->controller().sessionController()) {
+					ShowPrivacyWeatherSettings(owner);
+				}
+			}
+		});
+		CustomizeLook::AppendAction(layout, weather);
 		const auto footer = new CustomizeLook::Actions(_browser);
 		for (const auto button : { _edit, _reset, _undo, _reviewButton, _help }) {
 			footer->append(button);

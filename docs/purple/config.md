@@ -16,6 +16,21 @@ snooze count for a hard budget's cover, and `screentime_notices`, the soft
 budget bulletins already shown today. None of them exists while
 `[screen_time] enabled_p` is false, and none of them ever leaves the machine.
 
+## Privacy cover
+
+Configure world clocks in the app-wide `settings.toml` or through **Customize
+settings → Notifications & Last Seen → Privacy screen**.
+
+```toml
+[privacy_screen]
+world_clocks = [{ zone = "Asia/Tehran", label = "Tehran" }]
+```
+
+Enter IANA time zone IDs. The optional label appears on the cover. Purple
+displays only one clock per current UTC offset, with the system clock first.
+The weather source and units are set on this device in **Privacy screen
+weather**. Weather settings do not travel with this TOML file.
+
 ## Why a separate file
 
 Telegram's own settings are a single serialized blob inside `tdata`. Adding a

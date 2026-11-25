@@ -8,6 +8,7 @@
 class MainWindow;
 namespace Window {
 class MainWindow;
+class SessionController;
 } // namespace Window
 
 namespace Settings::Builder {
@@ -15,9 +16,6 @@ class SectionBuilder;
 } // namespace Settings::Builder
 
 namespace Purple {
-
-[[nodiscard]] QString PrivacyWeatherLocation();
-void SetPrivacyWeatherLocation(const QString &location);
 
 // Non-private display backdrop (clock, date, optional weather).
 class PrivacyBackdropWidget final : public Ui::RpWidget {
@@ -29,6 +27,7 @@ public:
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
+	void showEvent(QShowEvent *event) override;
 
 private:
 	void refreshWeatherIfConfigured();
@@ -46,6 +45,7 @@ void SyncPrivacyScreenForWindow(not_null<::MainWindow*> window);
 void UpdatePrivacyScreenLayout(not_null<::MainWindow*> window, QRect body);
 void RaisePrivacyScreen(not_null<::MainWindow*> window);
 
+void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller);
 void BuildPrivacyScreenSetting(::Settings::Builder::SectionBuilder &builder);
 
 } // namespace Purple

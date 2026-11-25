@@ -4,6 +4,7 @@
 
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStringDecoder>
+#include <QtCore/QTimeZone>
 
 #define TOML_EXCEPTIONS 0
 #include "tomlplusplus/toml.hpp"
@@ -57,6 +58,9 @@ bool Recognized(SettingId id, const toml::node *node) {
 		const auto to = ParseTimeOfDay(Property(node, "to"));
 		return from && to && from != to && !Property(node, "preset").isEmpty();
 	}
+	if (id == SettingId::WorldClocks) {
+		return QTimeZone::isTimeZoneIdAvailable(Property(node, "zone").toUtf8());
+	}
 	if (id == SettingId::Budgets) {
 		return !Property(node, "target").isEmpty() && ParseDuration(Property(node, "per_day")).has_value();
 	}
@@ -73,7 +77,7 @@ bool Recognized(SettingId id, const toml::node *node) {
 
 QString ItemLabel(const toml::node *node, const QByteArray &literal, const SettingAddressPart &last) {
 	if (const auto name = std::get_if<QString>(&last)) return *name;
-	for (const auto field : { "name", "list", "target", "preset" }) {
+	for (const auto field : { "name", "list", "target", "preset", "label", "zone" }) {
 		const auto value = Property(node, field);
 		if (!value.isEmpty()) return value;
 	}
@@ -206,6 +210,10 @@ QByteArray RecordTemplate(SettingId id) {
 
 std::vector<RecordField> RecordFields(SettingId id) {
 	using Kind = FieldKind;
+	if (id == SettingId::WorldClocks) {
+		return { { u"zone"_q, u"Time zone"_q, Kind::TimeZone, u"UTC"_q, {}, true },
+			{ u"label"_q, u"Public label (optional)"_q, Kind::String } };
+	}
 	if (RuleCollection(id)) {
 		return { { u"from"_q, u"From"_q, Kind::Time, u"22:00"_q, {}, true },
 			{ u"to"_q, u"To"_q, Kind::Time, u"06:00"_q, {}, true },
@@ -282,6 +290,9 @@ std::optional<QByteArray> EncodeRecord(SettingId id, const QStringList &values, 
 		auto literal = quote(value);
 		switch (field.kind) {
 		case FieldKind::Choice: allowed = field.choices.contains(value); break;
+		case FieldKind::TimeZone:
+			allowed = QTimeZone::isTimeZoneIdAvailable(value.toUtf8());
+			break;
 		case FieldKind::Time: allowed = ParseTimeOfDay(value).has_value(); break;
 		case FieldKind::Duration: allowed = ParseDuration(value).has_value(); break;
 		case FieldKind::Integer: {
