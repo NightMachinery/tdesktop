@@ -1720,7 +1720,8 @@ Purple edit in this file.
 
 **`Telegram/SourceFiles/media/system_media_controls_manager.cpp`**: +4 -0.
 First Purple edit in this file.
-- The facade include, after the file's own header.
+- The recording facade include follows the file's own header, then the
+  privacy screen include.
 - The `commandRequests` handler in the constructor: one early return through
   `Purple::HandleSystemMediaCommand`, only when no video delegate is set. It
   takes skip backward and forward for the active audio track and returns
