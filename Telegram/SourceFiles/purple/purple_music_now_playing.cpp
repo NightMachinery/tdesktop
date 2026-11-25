@@ -104,6 +104,9 @@ NowPlaying::NowPlaying(
 , _progress(Ui::CreateChild<Ui::MediaSliderWheelless>(
 	this, st::purpleMusicProgress))
 , _time(Ui::CreateChild<Ui::FlatLabel>(this, QString(), st::boxLabel)) {
+	using Direction = Ui::ContinuousSlider::Direction;
+	_progress->setDirection(style::RightToLeft()
+		? Direction::HorizontalReversed : Direction::Horizontal);
 	_progress->setAccessibleName(tr::lng_purple_music_playback_position(tr::now));
 	_progress->setChangeProgressCallback([=, seek = std::move(actions.startSeeking)](double) {
 		if (seek && _state.active && !_state.seeking) seek();
@@ -194,7 +197,7 @@ int NowPlaying::resizeGetHeight(int width) {
 	_time->moveToRight(padding, progressTop, width);
 	_progress->setGeometryToLeft(compactMode ? padding : left, progressTop,
 		std::max(1, width - (compactMode ? padding : left) - _time->width() - 2 * padding),
-		progressHeight);
+		progressHeight, width);
 	if (_play) {
 		placeTransport(compactMode ? left : width - padding - transportWidth(),
 			compactMode ? padding + transportTop : padding + st::purpleMusicActionGap, width);
@@ -309,19 +312,20 @@ void NowPlaying::paintEvent(QPaintEvent *) {
 	const auto left = 2 * padding + side;
 	const auto controls = compact(width()) ? 0 : transportWidth() + padding;
 	const auto available = std::max(0, width() - left - padding - controls);
+	const auto align = style::RightToLeft() ? Qt::AlignRight : Qt::AlignLeft;
 	auto y = padding;
 	p.setPen(st::windowFg);
 	p.setFont(st::purpleMusicNowEyebrow);
 	PaintMusicText(p, style::rtlrect(left, y, available, st::purpleMusicNowEyebrow->height, width()),
-		tr::lng_purple_music_now_playing(tr::now));
+		tr::lng_purple_music_now_playing(tr::now), 1, align);
 	y += st::purpleMusicNowEyebrow->height;
 	p.setFont(st::purpleMusicNowTitle);
 	PaintMusicText(p, style::rtlrect(left, y, available, st::purpleMusicNowTitle->height, width()),
-		_state.title);
+		_state.title, 1, align);
 	y += st::purpleMusicNowTitle->height;
 	p.setFont(st::normalFont);
 	PaintMusicText(p, style::rtlrect(left, y, available, st::normalFont->height, width()),
-		ArtistAndAlbum(_state, QFontMetrics(p.font()), available));
+		ArtistAndAlbum(_state, QFontMetrics(p.font()), available), 1, align);
 }
 
 struct PlaybackPresentation {

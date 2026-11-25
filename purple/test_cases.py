@@ -360,6 +360,14 @@ CASES = {
         'libraries': ['Telegram/lib_base/liblib_base.a'],
         'frameworks': ['QtCore', 'Foundation'],
     },
+    'music-progress': {
+        'program': 'music_progress_cases.cpp',
+        'units': ['ui/widgets/continuous_sliders.cpp', '../lib_crl/crl/dispatch/crl_dispatch_async.cpp'],
+        'build_libraries': ['libcrypto.a', 'libxxhash.dylib'],
+        'libraries': ['Telegram/lib_ui/liblib_ui.a', 'Telegram/lib_base/liblib_base.a'],
+        'frameworks': ['QtCore', 'QtGui', 'QtWidgets', 'QtSvg', 'QtTest', 'Foundation', 'AppKit', 'Metal'],
+        'link': ['-lobjc'],
+    },
     'recording-round': {
         # F10's round copy, remux, repair rebuild and AAC measure over the
         # build's own FFmpeg, on a round encoded at test time.

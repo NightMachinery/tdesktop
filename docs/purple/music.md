@@ -76,7 +76,8 @@ into view with the cover.
 The now-playing panel shows the current song, with a seek slider and
 previous, play or pause, and next controls. It takes the place of the
 regular song toolbar while the library is open. The library shows the
-effective Normal bindings beside its controls.
+effective Normal bindings beside its controls. In a right-to-left interface,
+playback fills the rail from the right and clicking farther left seeks ahead.
 
 Marks reveal a bar with playback, queue, playlist, forwarding, and clear
 actions. Each action shows its key chord inside the button. Narrow windows
