@@ -94,6 +94,10 @@ ordered(customize, "bool privacyKey", "qobject_cast<QLineEdit*>", "Qt::Key_F8", 
 ordered(customize, "FilterCustomizeSettingsInput", "editor->privacyKey")
 ordered(keys, ".onPick = [guard", "Available(action, restoredTarget)", "guard->dispatch(action, restored, 1)")
 customize_look = read("purple/purple_settings_customize_look.h")
+ordered(customize_look, "class Canvas", "paintEvent", "customizeBackground")
+ordered(customize, "new CustomizeLook::Canvas(_pages)", "new CustomizeLook::Canvas(_sheetPage)",
+        "setViewport(new CustomizeLook::Canvas(_sheetPage))")
+ordered(customize, "void addSheetWidget", "CustomizeLook::AppendAction(_sheetLayout, button)")
 ordered(customize_look, "class Chip", "setToolTip(details)", "setAccessibleDescription(details)", "Qt::ElideMiddle")
 ordered(customize_look, "class Tree", "setAlternatingRowColors(false)", "drawBranches")
 assert "new QPushButton" not in customize
@@ -114,6 +118,7 @@ ordered(customize, "void chooseAccount", "SessionAccountKey(session) != key", "e
 ordered(customize, "void showCollection", "LiveSessionFor(target.account)", "PeerCatalogue(session, *field)",
         "CreateSettingsCollection", "stageIntent(std::move(intent), key)")
 collections = read("purple/purple_settings_collection_ui.cpp")
+ordered(collections, "new CustomizeLook::Actions(_main)", "button(footer,", "CustomizeLook::AppendAction(layout, result)")
 collection_edit = collections[collections.index("void edit(Op op)"):collections.index("bool run(std::vector<SettingsEdit>")]
 ordered(collection_edit, "FindSettingDescriptor(_config.address)", "if (!descriptor)", "return;", "descriptor->id")
 ordered(collection_edit, "FindSettingDescriptor(item.address)", "if (_config.named && !insert && !objectDescriptor)", "return;")

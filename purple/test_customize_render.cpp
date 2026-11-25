@@ -157,17 +157,20 @@ void Render(QWidget &widget, const QDir &output, const QString &name, QSize size
 	};
 	const auto title = widget.findChild<QLabel*>(QStringLiteral("fixtureHeading"));
 	Check(title && title->isVisible(), "heading is visible");
-	const auto titleBounds = QRect(title->mapTo(&widget, QPoint()), title->size());
-	const auto background = pixel(QPoint(titleBounds.right() - 1, titleBounds.center().y()));
-	Check(background == Tone(title, "customizeBackground", QPalette::Window),
-		"pixels behind the heading use the Customize canvas");
-	auto contrast = 1.;
-	for (auto y = titleBounds.top(); y < titleBounds.bottom(); ++y) {
-		for (auto x = titleBounds.left(); x < titleBounds.right(); ++x) {
-			contrast = std::max(contrast, ModalUi::TextContrast(pixel(QPoint(x, y)), background));
+	for (const auto label : widget.findChildren<QLabel*>()) {
+		if (!label->isVisible() || (label != title && !label->property("secondary").toBool())) continue;
+		const auto bounds = QRect(label->mapTo(&widget, QPoint()), label->size());
+		const auto background = pixel(QPoint(bounds.right() - 1, bounds.center().y()));
+		Check(background == Tone(label, "customizeBackground", QPalette::Window),
+			"pixels behind the label use the Customize canvas");
+		auto contrast = 1.;
+		for (auto y = bounds.top(); y < bounds.bottom(); ++y) {
+			for (auto x = bounds.left(); x < bounds.right(); ++x) {
+				contrast = std::max(contrast, ModalUi::TextContrast(pixel(QPoint(x, y)), background));
+			}
 		}
+		Check(contrast >= 4.5, "painted label pixels meet contrast");
 	}
-	Check(contrast >= 4.5, "painted heading pixels meet contrast");
 	const auto buttons = widget.findChildren<QPushButton*>();
 	auto occupied = QList<QRect>();
 	for (const auto button : buttons) {
@@ -468,6 +471,13 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 			lists->addWidget(list);
 		}
 		layout->addLayout(lists, 1);
+	} else if (kind == QStringLiteral("budget")) {
+		auto search = new QLineEdit(page);
+		search->setPlaceholderText(QStringLiteral("Filter eligible chats"));
+		layout->addWidget(search);
+		auto list = new QListWidget(page);
+		list->addItem(QStringLiteral("Fixture chat"));
+		layout->addWidget(list, 1);
 	} else if (kind == QStringLiteral("rename")) {
 		auto refs = new QLabel(QStringLiteral("Same-file references\npresets.example.list_order[0].list"), page);
 		refs->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
@@ -480,16 +490,29 @@ void SheetRender(const QDir &output, bool dark, int width, const QString &kind,
 		body->setReadOnly(true);
 		layout->addWidget(body, 1);
 	} else {
-		auto body = new QLabel(QStringLiteral("Fixture settings and actions"), page);
+		const auto description = (kind == QStringLiteral("help"))
+			? QStringLiteral("Return edits a setting. F8 opens the privacy screen outside a text field.")
+			: (kind == QStringLiteral("waiting"))
+			? QStringLiteral("Waiting for the reviewed settings operation.")
+			: QStringLiteral("Fixture settings and actions");
+		auto body = new QLabel(description, page);
 		body->setProperty("secondary", true);
 		layout->addWidget(body);
 		layout->addStretch();
 	}
+	auto firstAction = static_cast<QPushButton*>(nullptr);
 	for (const auto action : actions) {
-		AppendAction(layout, new Action(QString::fromLatin1(action), page));
+		const auto button = new Action(QString::fromLatin1(action), page);
+		AppendAction(layout, button);
+		if (!firstAction) firstAction = button;
 	}
 	Theme(&host, !dark);
+	Theme(stack, !dark);
+	host.resize(width, 460);
+	host.show();
+	QApplication::processEvents();
 	Theme(stack, dark);
+	if (firstAction) firstAction->setFocus();
 	Render(host, output, QStringLiteral("%1-%2-%3.png").arg(kind,
 		dark ? QStringLiteral("dark") : QStringLiteral("light")).arg(width), QSize(width, 460));
 }
@@ -526,6 +549,12 @@ int main(int argc, char **argv) {
 				{ "Switch buffer", "Back" });
 			SheetRender(output, dark, width, QStringLiteral("discard"), QStringLiteral("Discard staged changes?"),
 				{ "Keep editing", "Review and apply", "Discard and close" });
+			SheetRender(output, dark, width, QStringLiteral("budget"), QStringLiteral("Choose budget chat"),
+				{ "Choose chat", "Cancel" });
+			SheetRender(output, dark, width, QStringLiteral("help"), QStringLiteral("Customize help"),
+				{ "Back" });
+			SheetRender(output, dark, width, QStringLiteral("waiting"), QStringLiteral("Applying reviewed settings"),
+				{});
 		}
 	}
 	TreeRender(output, true, 640, true);
