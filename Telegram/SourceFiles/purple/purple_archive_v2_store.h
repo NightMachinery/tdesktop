@@ -16,6 +16,7 @@ enum class Phase {
 
 struct Lease {
 	std::atomic<bool> live{true};
+	std::atomic<uint64_t> mediaRevision{0};
 	DesktopArchiveCrypto crypto;
 	void revoke();
 };
@@ -64,10 +65,78 @@ struct CapturedEvent {
 struct StoredBody {
 	int64 observedAt = 0;
 	QByteArray body;
+	int64 serial = 0;
+};
+
+struct MediaStatus {
+	int64 ordinal = 0;
+	QByteArray description;
+	int64 savedBytes = 0;
+	QString reason;
+};
+
+struct HistoryVersion {
+	int64 sequence = 0;
+	StoredBody value;
+	std::vector<MediaStatus> media;
+};
+
+struct HistoryPage {
+	MessageStatus status = MessageStatus::Live;
+	bool missingPreimage = false;
+	std::vector<HistoryVersion> rows;
+	int64 before = 0;
+};
+
+class TimelineCursor {
+	friend class Store;
+	TimelineCursor(int64 day, QByteArray message, QByteArray scope, QByteArray peer, bool deleted)
+		: activity(day), key(std::move(message)), store(std::move(scope)), chat(std::move(peer)), trash(deleted) {
+	}
+	int64 activity;
+	QByteArray key;
+	QByteArray store;
+	QByteArray chat;
+	bool trash;
+};
+
+struct TimelineEntry {
+	MessageIdentity identity;
+	MessageStatus status = MessageStatus::Deleted;
+	int64 observedAt = 0;
+	std::optional<StoredBody> latest;
+	TimelineCursor cursor;
+};
+
+struct TimelinePage {
+	std::vector<TimelineEntry> rows;
+	std::optional<TimelineCursor> before;
+};
+
+enum class CleanupKind { EditHistory, DeletedMessages };
+
+struct CleanupTicket {
+private:
+	friend class Store;
+	CleanupTicket(QByteArray id, QByteArray peer, CleanupKind type, int64 serial)
+		: store(std::move(id)), chat(std::move(peer)), kind(type), cutoff(serial) {
+	}
+	QByteArray store;
+	QByteArray chat;
+	CleanupKind kind;
+	int64 cutoff;
+	std::shared_ptr<bool> started = std::make_shared<bool>(false);
+};
+
+struct CleanupResult {
+	StoreEffect effect;
+	int removed = 0;
+	bool complete = false;
 };
 
 struct BlobInput {
 	QByteArray storeId;
+	uint64_t revision = 0;
 	MessageIdentity identity;
 	int64 sequence = 0;
 	int64 ordinal = 0;
@@ -88,6 +157,16 @@ struct Usage {
 	[[nodiscard]] int64 physical() const { return database + wal + sharedMemory + support; }
 };
 
+struct StorageSummary {
+	Usage active;
+	std::optional<int64> pending;
+	int64 ordinaryCap = 0;
+	int64 timedCap = 0;
+	int64 ordinaryFileCap = 0;
+	int64 lastTrimDay = -1;
+	bool overLimit = false;
+};
+
 class Store final {
 public:
 	explicit Store(StoreOptions options);
@@ -102,11 +181,22 @@ public:
 	[[nodiscard]] StoreEffect logout(const QByteArray &expectedId);
 	[[nodiscard]] StoreEffect recover();
 	[[nodiscard]] std::optional<StoredBody> body(const MessageIdentity &identity, int64 sequence);
+	[[nodiscard]] std::optional<std::vector<MediaStatus>> media(const MessageIdentity &identity, int64 sequence);
+	[[nodiscard]] bool readSaved(const QByteArray &expected, const MessageIdentity &identity, int64 sequence,
+		int64 ordinal, const std::function<bool(const QByteArray &)> &sink);
 	[[nodiscard]] QByteArray id() const;
 	[[nodiscard]] bool current() const;
 	[[nodiscard]] std::optional<Usage> usage();
+	[[nodiscard]] std::optional<StorageSummary> storageSummary();
+	[[nodiscard]] std::optional<int64> pendingBytes() const;
 	[[nodiscard]] StoreEffect maintain();
+	[[nodiscard]] std::optional<int64> estimateExpired(const Policy &policy);
 	[[nodiscard]] StoreEffect updatePolicy(Policy policy);
+	[[nodiscard]] std::optional<HistoryPage> history(const MessageIdentity &identity, int64 before, int limit);
+	[[nodiscard]] std::optional<TimelinePage> timeline(std::optional<PeerToken> peer,
+		bool deletedOnly, std::optional<TimelineCursor> before, int limit);
+	[[nodiscard]] std::optional<CleanupTicket> prepareCleanup(CleanupKind kind, std::optional<PeerToken> peer = {});
+	[[nodiscard]] CleanupResult cleanupPage(const CleanupTicket &ticket);
 
 private:
 	struct Retired {
@@ -126,6 +216,10 @@ private:
 		int64 activity = 0;
 		int64 observedAt = 0;
 		int64 kind = 0;
+		int64 serial = 0;
+		QByteArray identity;
+		bool missingPreimage = false;
+		bool emptied = false;
 	};
 
 	[[nodiscard]] bool step(Phase phase) const;
@@ -143,7 +237,17 @@ private:
 	[[nodiscard]] std::optional<QByteArray> unseal(QStringView key, const QByteArray &context, const QByteArray &data);
 	[[nodiscard]] QByteArray token(const QByteArray &type, const QByteArray &identity) const;
 	[[nodiscard]] QByteArray associated(const QByteArray &type, const QByteArray &key) const;
+	struct SavedBlob {
+		QByteArray key;
+		QByteArray digest;
+		int64 size = 0;
+		int64 parts = 0;
+	};
+	[[nodiscard]] std::optional<SavedBlob> savedBlob(const QByteArray &key, int64 sequence, int64 ordinal);
+	[[nodiscard]] static QByteArray encodeIdentity(const MessageIdentity &identity);
 	[[nodiscard]] std::optional<Row> readHead(const QByteArray &key, const QByteArray &identity);
+	[[nodiscard]] std::optional<QByteArray> sealMessage(const QByteArray &key, const Row &row);
+	[[nodiscard]] std::optional<int64> captureSerial();
 	[[nodiscard]] QString openDatabase(const QByteArray &dataKey);
 	[[nodiscard]] StoreEffect write(ArchiveSqlProgram program);
 	[[nodiscard]] QString reserve(int64 logical, int64 physical, bool timed, const QByteArray &keep,

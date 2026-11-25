@@ -180,7 +180,7 @@ with (work / 'build.log').open('w') as log:
     for name in ['purple_desktop_archive_store', 'purple_archive_maintenance', 'purple_archive_queries', 'purple_archive_sqlite', 'purple_archive_crypto', 'purple_archive_files', 'purple_archive_media', 'purple_archive_journal', 'purple_archive_capture_snapshot', 'purple_archive_attention', 'purple_archive_stream', 'purple_archive_media_access', 'purple_archive_media_loader', 'purple_archive_markdown', 'purple_markdown_publication', 'purple_markdown_source', *markdown_units]:
         objects.append(build / (base + 'SourceFiles/purple/' + name + '.cpp.o') if args.use_build_objects else compile(repo / ('Telegram/SourceFiles/purple/' + name + '.cpp'), name))
     if fixture == 'purple/test_archive.cpp':
-        for unit in ('schema', 'storage', 'store', 'writer', 'acquisition', 'quota'):
+        for unit in ('schema', 'storage', 'store', 'writer', 'acquisition', 'quota', 'views'):
             objects += [compile(repo / ('Telegram/SourceFiles/purple/purple_archive_v2_' + unit + '.cpp'),
                                 'archive-v2-' + unit)]
     objects += [build / (base + 'SourceFiles/purple/purple_archive_backup_mac.mm.o')]

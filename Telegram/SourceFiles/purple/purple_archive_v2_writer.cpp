@@ -24,7 +24,11 @@ int64 Weight(const CapturedEvent &event) {
 }
 
 struct Writer::State {
-	using Job = std::variant<CapturedEvent, QByteArray>;
+	struct Query {
+		QByteArray generation;
+		ReadOrCleanup operation;
+	};
+	using Job = std::variant<CapturedEvent, QByteArray, Query>;
 	std::mutex mutex;
 	std::condition_variable changed;
 	std::deque<Job> jobs;
@@ -81,6 +85,14 @@ StoreEffect Writer::postBlob(BlobInput input) {
 	_state->blob = std::move(input);
 	_state->changed.notify_one();
 	return {};
+}
+
+bool Writer::query(QByteArray expectedId, ReadOrCleanup operation) {
+	const auto lock = std::lock_guard(_state->mutex);
+	if (!operation || _state->stopped || !_state->lease->live.load() || _state->jobs.size() == kEvents) return false;
+	_state->jobs.emplace_back(State::Query{ std::move(expectedId), std::move(operation) });
+	_state->changed.notify_one();
+	return true;
 }
 
 bool Writer::reset(QByteArray expectedId) {
@@ -161,6 +173,8 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 		if (event) {
 			auto effect = store->capture(*event);
 			if (state->lease->live.load()) report(std::move(effect), store->id());
+		} else if (const auto query = std::get_if<State::Query>(&job)) {
+			if (store->current() && query->generation == store->id()) query->operation(*store);
 		} else {
 			auto effect = store->reset(std::get<QByteArray>(job));
 			const auto id = store->id();

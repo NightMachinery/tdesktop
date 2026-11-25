@@ -14,6 +14,8 @@ public:
 
 	[[nodiscard]] StoreEffect post(CapturedEvent event);
 	[[nodiscard]] StoreEffect postBlob(BlobInput input);
+	using ReadOrCleanup = std::function<void(Store &)>;
+	[[nodiscard]] bool query(QByteArray expectedId, ReadOrCleanup operation);
 	[[nodiscard]] bool reset(QByteArray expectedId);
 	void logout(QByteArray expectedId);
 

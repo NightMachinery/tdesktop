@@ -1,0 +1,273 @@
+namespace V2Fixtures {
+
+void HistoryAndCleanup() {
+	Section = "v2 version and timeline keysets, authenticated cleanup cutoff and old media";
+	const auto temp = QTemporaryDir();
+	const auto options = Options(temp.path());
+	auto store = V2Store(options);
+	auto other = V2Store(Options(temp.path(), 18));
+	CHECK(store.open() && other.open());
+	const auto id = store.id();
+	auto event = Sample(id, "a", "A");
+	const auto message = event.identity;
+	CHECK(store.capture(event).committed);
+	event.event = Observation::Edit;
+	event.eventId = "b";
+	event.body = "B";
+	CHECK(store.capture(event).committed);
+	const auto replay = event;
+	event.eventId = "c";
+	event.body = "C";
+	CHECK(store.capture(event).committed);
+	const auto first = store.history(message, 0, 2);
+	CHECK(first && first->rows.size() == 2 && first->before == 2);
+	if (!first || first->rows.size() != 2) return;
+	CHECK(first->rows[0].value.body == "C" && first->rows[1].value.body == "B");
+	event.eventId = "d";
+	event.body = "D";
+	CHECK(store.capture(event).committed);
+	const auto second = store.history(message, first->before, 2);
+	CHECK(second && second->rows.size() == 1 && second->rows.front().value.body == "A" && second->before == 0);
+	const auto edits = store.prepareCleanup(CleanupKind::EditHistory, message.peer);
+	CHECK(edits && other.cleanupPage(*edits).effect.reason == u"scope_retired"_q);
+	if (!edits) return;
+	auto pending = SampleBlob(id, "complete payload for selected head");
+	pending.sequence = 4;
+	const auto cleared = store.cleanupPage(*edits);
+	CHECK(cleared.effect.committed && cleared.complete && cleared.removed == 3);
+	const auto head = store.history(message, 0, 64);
+	CHECK(head && head->rows.size() == 1 && head->rows.front().value.body == "D");
+	CHECK(store.capture(replay) && !store.capture(replay).committed);
+	CHECK(!store.body(message, 5));
+	CHECK(store.writeBlob(pending).reason == u"scope_retired"_q);
+	pending.revision = options.lease->mediaRevision.load();
+	CHECK(store.writeBlob(pending).committed);
+	const auto saved = store.media(message, 4);
+	CHECK(saved && saved->size() == 1 && saved->front().savedBytes == pending.size && saved->front().reason.isEmpty());
+	auto exported = QByteArray();
+	const auto exportPart = [&](const QByteArray &part) { exported += part; return true; };
+	CHECK(!store.readSaved(other.id(), message, 4, 0, exportPart) && exported.isEmpty());
+	CHECK(store.readSaved(id, message, 4, 0, exportPart) && exported == "complete payload for selected head");
+	auto badInput = SampleBlob(id, "expected complete payload");
+	badInput.sequence = 4;
+	badInput.digest = QByteArray(32, 'q');
+	badInput.revision = options.lease->mediaRevision.load();
+	CHECK(store.writeBlob(badInput).reason == u"scope_retired"_q);
+	CHECK(store.media(message, 4)->front().savedBytes == pending.size);
+
+	const auto terminal = [&](int offset, Observation kind, QByteArray preimage = {}) {
+		auto row = Sample(id, QByteArray::number(offset));
+		row.identity.message += offset;
+		row.event = kind;
+		row.body.clear();
+		row.preimage = std::move(preimage);
+		return row;
+	};
+	auto deleted = terminal(1, Observation::Delete, "earlier body known at deletion");
+	auto expired = terminal(2, Observation::Expire);
+	auto foreign = terminal(3, Observation::Consume, "different chat");
+	++foreign.identity.peer.id;
+	CHECK(store.capture(deleted).committed && store.capture(expired).committed && store.capture(foreign).committed);
+	const auto missing = store.history(expired.identity, 0, 1);
+	CHECK(missing && missing->missingPreimage && missing->rows.empty());
+	auto archive = store.timeline(message.peer, true, {}, 1);
+	CHECK(archive && archive->before && archive->rows.size() == 1);
+	if (!archive || !archive->before) return;
+	const auto cursor = archive->before;
+	CHECK(!other.timeline(message.peer, true, cursor, 1));
+	CHECK(!store.timeline(foreign.identity.peer, true, cursor, 1));
+	CHECK(!store.timeline(message.peer, false, cursor, 1));
+	const auto older = store.timeline(message.peer, true, cursor, 1);
+	CHECK(older && older->rows.size() == 1 && older->rows.front().identity != archive->rows.front().identity);
+	const auto trash = store.prepareCleanup(CleanupKind::DeletedMessages, message.peer);
+	CHECK(trash);
+	if (!trash) return;
+	auto late = terminal(4, Observation::Consume, "after confirmation");
+	late.observedAt -= 30;
+	CHECK(store.capture(late).committed);
+	CHECK(store.cleanupPage(*trash).removed == 1);
+	CHECK(!store.body(deleted.identity, 1) && store.body(late.identity, 1) && store.body(foreign.identity, 1));
+	CHECK(store.cleanupPage(*trash).complete);
+	auto resurrect = Sample(id, "replayed baseline");
+	resurrect.identity = deleted.identity;
+	CHECK(!store.capture(resurrect).committed && !store.body(deleted.identity, 1));
+	const auto tombstone = store.history(deleted.identity, 0, 1);
+	CHECK(tombstone && tombstone->status == MessageStatus::Deleted && tombstone->rows.empty());
+	const auto shown = store.timeline(message.peer, true, {}, 64);
+	CHECK(shown && shown->rows.size() == 2 && std::none_of(shown->rows.begin(), shown->rows.end(),
+		[&](const TimelineEntry &entry) { return entry.identity == deleted.identity; }));
+	const auto stats = store.storageSummary();
+	CHECK(stats && stats->pending == 0 && stats->ordinaryCap == 512 * kMiB && stats->timedCap == 256 * kMiB);
+	CHECK(stats && stats->active.database > 0 && !stats->overLimit);
+}
+
+void PendingBytesAndMediaOutcome() {
+	Section = "v2 row-level failed media outcome and published retirement size";
+	const auto temp = QTemporaryDir();
+	auto options = Options(temp.path());
+	auto canDetach = false;
+	options.checkpoint = [&](Phase phase) { return phase != Phase::BeforeDetach || canDetach; };
+	auto store = V2Store(options);
+	CHECK(store.open());
+	const auto id = store.id();
+	const auto event = Sample(id);
+	CHECK(store.capture(event).committed);
+	auto incomplete = SampleBlob(id, "complete planned content");
+	incomplete.read = [](qsizetype) { return QByteArray("short"); };
+	CHECK(store.writeBlob(incomplete).reason == u"copy_incomplete"_q);
+	const auto described = store.media(event.identity, 1);
+	CHECK(described && described->size() == 1 && !described->front().savedBytes
+		&& described->front().reason == u"copy_incomplete"_q);
+	const auto reset = store.reset(id);
+	CHECK(reset.committed && reset.reason == u"cleanup_pending"_q);
+	const auto pending = store.pendingBytes();
+	CHECK(pending && *pending > 0);
+	canDetach = true;
+	CHECK(store.recover() && store.pendingBytes() == 0);
+}
+
+void ConfirmedPagesAndNoticeDeduplication() {
+	Section = "v2 bounded pages, writer confirmation barrier and per-episode notices";
+	const auto temp = QTemporaryDir();
+	auto initial = std::promise<QByteArray>();
+	auto options = Options(temp.path());
+	auto writer = Writer(options, [&](StoreEffect result, QByteArray id) {
+		if (result && !result.committed) initial.set_value(std::move(id));
+	});
+	auto ready = initial.get_future();
+	CHECK(ready.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+	if (ready.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+	const auto id = ready.get();
+	auto event = Sample(id);
+	for (auto i = 0; i != 67; ++i) {
+		event.event = i ? Observation::Edit : Observation::Baseline;
+		event.eventId = event.body = QByteArray::number(i);
+		CHECK(writer.post(event));
+	}
+	auto tested = std::promise<std::vector<int>>();
+	auto result = tested.get_future();
+	CHECK(writer.query(id, [&](V2Store &store) {
+		const auto ticket = store.prepareCleanup(CleanupKind::EditHistory);
+		if (!ticket) { tested.set_value({}); return; }
+		const auto first = store.cleanupPage(*ticket);
+		const auto second = store.cleanupPage(*ticket);
+		tested.set_value({ first.removed, int(first.complete), second.removed, int(second.complete) });
+	}));
+	CHECK(result.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
+	if (result.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+		CHECK((result.get() == std::vector<int>{ 64, 0, 2, 1 }));
+	}
+	auto attention = Attention();
+	using Stage = IncidentStage;
+	using Warn = ArchiveWarning;
+	CHECK(attention.observe(Stage::Startup, {}, false).reason.isEmpty());
+	CHECK(attention.observe(Stage::WholeFile, u"disk_full", false).warning == Warn::None);
+	CHECK(attention.observe(Stage::Cleanup, u"cleanup_pending", false).warning == Warn::None);
+	CHECK(attention.observe(Stage::Capture, u"text_queue_full", false).warning == Warn::MessageLost);
+	CHECK(attention.observe(Stage::Capture, u"text_write_failed", false).warning == Warn::None);
+	CHECK(attention.observe(Stage::Capture, u"disk_full", false).warning == Warn::CapturePaused);
+	CHECK(attention.observe(Stage::Capture, u"store_busy", false).warning == Warn::None);
+	CHECK(attention.observe(Stage::Capture, {}, false).reason.isEmpty());
+	CHECK(attention.observe(Stage::Maintenance, {}, false).reason == u"capture_resumed");
+	CHECK(attention.observe(Stage::Capture, u"text_encode_failed", false).warning == Warn::MessageLost);
+	CHECK(attention.observe(Stage::Cleanup, u"untrusted diagnostic sample", false).reason == u"archive_operation_failed");
+	CHECK(Attention().observe(Stage::Startup, {}, false).warning == Warn::None);
+}
+
+std::map<QString, QByteArray> FixtureTree(const QString &root) {
+	auto snapshot = std::map<QString, QByteArray>();
+	auto files = QDirIterator(root, QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
+	while (files.hasNext()) {
+		const auto path = files.next();
+		snapshot.emplace(path, Read(path));
+	}
+	return snapshot;
+}
+
+constexpr auto kLegacyFixture = "archive-v2-confirmed-legacy-fixture";
+
+int LegacyCrashChild(const QString &root, bool detached) {
+	if (QFileInfo(root).canonicalFilePath() != root || Read(root + u"/confirmed-test.marker"_q) != kLegacyFixture) return 2;
+	auto legacy = ::Options(root);
+	const auto review = DesktopArchiveStore::ReviewPreviousArchive(legacy);
+	if (!review.review) return 3;
+	auto checks = 0;
+	legacy.maintenanceAllowed = [&] {
+		if (++checks == (detached ? 3 : 2)) std::_Exit(kCrash);
+		return true;
+	};
+	static_cast<void>(DesktopArchiveStore::DeletePreviousArchive(legacy, *review.review));
+	return 4;
+}
+
+void PreviousArchiveRemoval() {
+	for (const auto detached : { false, true }) {
+		Section = "v2 previous archive reviewed without opening and resumed after crash";
+		const auto temp = QTemporaryDir();
+		const auto legacy = ::Options(temp.path());
+		auto other = ::Options(temp.path(), 456);
+		other.slot = u"1"_q;
+		auto a = DesktopArchiveStore();
+		auto b = DesktopArchiveStore();
+		CHECK(a.Open(legacy) == DesktopArchiveStatus::Ready);
+		CHECK(b.Open(other) == DesktopArchiveStatus::Ready);
+		const auto old = a.directory();
+		const auto otherDir = b.directory();
+		CHECK(a.Close() && b.Close());
+		CHECK(DesktopArchiveWrite(old + u"/archive.sqlite"_q, "corrupt read-only fixture"));
+		const auto baseline = FixtureTree(temp.path());
+		const auto selected = FixtureTree(QFileInfo(old).absolutePath());
+		const auto neighbors = FixtureTree(QFileInfo(otherDir).absolutePath());
+		auto size = int64(0);
+		for (const auto &[path, bytes] : selected) size += bytes.size();
+		const auto v2 = Options(temp.path());
+		{
+			auto store = V2Store(v2);
+			CHECK(store.open());
+			CHECK(store.capture(Sample(store.id())).committed);
+			CHECK(store.reset(store.id()).committed);
+		}
+		{
+			auto fresh = V2Store(Options(temp.path()));
+			CHECK(fresh.open());
+			CHECK(fresh.logout(fresh.id()).committed);
+		}
+		for (const auto &[path, bytes] : baseline) CHECK(Read(path) == bytes && QFileInfo::exists(path));
+		const auto former = DesktopArchiveStore::ReviewPreviousArchive(legacy);
+		CHECK(former.review && former.review->bytes() == size && former.reason.isEmpty());
+		if (!former.review) continue;
+		CHECK(DesktopArchiveStore::DeletePreviousArchive(other, *former.review).reason == u"discard-account-changed"_q);
+		const auto marker = legacy.profileRoot + u"/purple-archive-profile.json"_q;
+		const auto saved = Read(marker);
+		CHECK(!saved.isEmpty() && QFile::remove(marker));
+		CHECK(DesktopArchiveStore::ReviewPreviousArchive(legacy).reason == u"discard-profile-binding-unavailable"_q);
+		CHECK(!QFileInfo::exists(marker));
+		CHECK(DesktopArchiveWrite(marker, saved));
+		CHECK(DesktopArchiveWrite(old + u"/changed-size.fixture"_q, "added bytes"));
+		CHECK(DesktopArchiveStore::DeletePreviousArchive(legacy, *former.review).reason == u"discard-archive-changed"_q);
+		CHECK(QFileInfo::exists(old));
+		CHECK(DesktopArchiveRemoveFile(old + u"/changed-size.fixture"_q));
+		CHECK(Put(temp.filePath(u"confirmed-test.marker"_q), kLegacyFixture));
+		auto process = QProcess();
+		process.start(QCoreApplication::applicationFilePath(), { u"archive-v2-legacy-crash-fixture"_q, temp.path(),
+			detached ? u"after"_q : u"before"_q });
+		CHECK(process.waitForStarted() && process.waitForFinished(15000));
+		CHECK(process.exitStatus() == QProcess::NormalExit && process.exitCode() == kCrash);
+		const auto selectedAccount = QFileInfo(old).absolutePath();
+		CHECK(QFileInfo::exists(selectedAccount + u".discard.json"_q));
+		CHECK(QFileInfo::exists(selectedAccount + u".discard"_q) == detached);
+		CHECK(DesktopArchiveStore::ReviewPreviousArchive(legacy).reason == u"cleanup_pending"_q);
+		CHECK(DesktopArchiveStore::ResumePreviousArchiveDeletion(other));
+		CHECK(QFileInfo::exists(selectedAccount + u".discard.json"_q));
+		auto signedOut = legacy;
+		signedOut.loginAuthority.clear();
+		signedOut.loginAuthKeyIds.clear();
+		CHECK(!DesktopArchiveStore::RetryPreviousArchiveDeletions(signedOut));
+		CHECK(DesktopArchiveStore::ResumePreviousArchiveDeletion(signedOut));
+		CHECK(!QFileInfo::exists(selectedAccount) && !QFileInfo::exists(selectedAccount + u".discard"_q));
+		CHECK(!QFileInfo::exists(selectedAccount + u".discard.json"_q));
+		CHECK(FixtureTree(QFileInfo(otherDir).absolutePath()) == neighbors);
+	}
+}
+
+}

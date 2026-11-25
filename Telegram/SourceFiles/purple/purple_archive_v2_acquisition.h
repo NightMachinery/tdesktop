@@ -13,6 +13,7 @@ struct MediaTarget {
 	QByteArray source;
 	MediaKind kind = MediaKind::Other;
 	bool timed = false;
+	uint64_t revision = 0;
 	friend bool operator==(const MediaTarget &, const MediaTarget &) = default;
 };
 

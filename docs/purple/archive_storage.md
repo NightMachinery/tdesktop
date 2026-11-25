@@ -904,3 +904,36 @@ unavailable startup, first-notice preservation, post-publication purge and
 generation renewal, replacement, and bounded large-payload drain. Moving charge
 release to queue-pop time fails the in-flight check. Measured component drain
 times do not establish application startup latency or UI behavior.
+
+### History, storage and cleanup
+
+The v2 history readers return bounded pages. Message history uses version sequence.
+Chat and deleted-message views use authenticated message identity with a keyset
+cursor bound to the store and filter. A deleted observation can report that its
+earlier content was unavailable. Whole-file status comes from the committed,
+authenticated media reference. The saved-file reader verifies the reference,
+manifest, ordered parts and digest. A viewer or export must publish the output
+only after the complete read succeeds and the account remains current.
+
+Manual cleanup runs through the same account queue as capture. The confirmation
+fixes the store, optional chat, operation and accepted-capture cutoff. Clear edit
+history keeps the newest body and retains opaque replay keys. Empty deleted
+messages removes the stored bodies and retains the deletion marker. A cleanup
+page removes at most 64 entries. Newer observations fall outside the cutoff, and
+callbacks from media admitted before cleanup cannot attach bytes afterwards.
+If cleanup is interrupted, review and confirm it again to process what remains.
+
+Storage accounts for the active database and sidecars separately from pending
+deletion. The separate previous-archive review proves the existing profile and
+account metadata and measures its owned directory with a read-only walk. It
+refuses missing metadata, unverified directory identity, links or a changing
+measurement. Confirmation rechecks the account, size and identities under the
+archive locks. Once the confirmed intent is durable, recovery can finish that
+exact deletion without opening the previous database or using its key.
+
+The prepared diagnostics use the rotating Purple log. They carry the stage,
+fixed reason, media kind, count and a byte-size range. Actual message loss and
+paused capture can each raise one warning per episode. Media outcomes, pending
+cleanup and successful recovery are details. Counts from earlier sessions do
+not produce a new warning. These views and the v2 writer remain unregistered
+with the live Desktop archive routes until the cutover.

@@ -5,6 +5,7 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QSaveFile>
+#include <filesystem>
 #include <limits>
 #include <vector>
 #ifdef Q_OS_WIN
@@ -421,6 +422,36 @@ bool DesktopArchiveRemoveFile(const QString &path) {
 	}
 	return DesktopArchivePrivate(path, false) && QFile::remove(path)
 		   && DesktopArchiveSyncDirectory(info.absolutePath());
+}
+
+std::optional<qint64> DesktopArchiveMeasureTree(const QString &root) {
+	namespace fs = std::filesystem;
+	if (!DesktopArchivePrivate(root, true)) return std::nullopt;
+	const auto identity = DesktopArchivePersistentIdentity(root);
+	if (identity.isEmpty()) return std::nullopt;
+#ifdef Q_OS_WIN
+	const auto native = fs::path(root.toStdWString());
+#else
+	const auto native = fs::path(QFile::encodeName(root).constData());
+#endif
+	auto total = qint64(0);
+	auto error = std::error_code();
+	auto entry = fs::recursive_directory_iterator(native, error);
+	for (const auto end = fs::recursive_directory_iterator(); !error && entry != end; entry.increment(error)) {
+#ifdef Q_OS_WIN
+		const auto path = QString::fromStdWString(entry->path().native());
+#else
+		const auto path = QFile::decodeName(entry->path().c_str());
+#endif
+		const auto status = entry->symlink_status(error);
+		if (error || entry.depth() >= 8) return std::nullopt;
+		if (fs::is_directory(status) && DesktopArchivePrivate(path, true)) continue;
+		if (!fs::is_regular_file(status) || !DesktopArchivePrivate(path, false)) return std::nullopt;
+		const auto size = entry->file_size(error);
+		if (error || size > uint64_t(std::numeric_limits<qint64>::max() - total)) return std::nullopt;
+		total += qint64(size);
+	}
+	return !error && DesktopArchivePersistentIdentity(root) == identity ? std::optional(total) : std::nullopt;
 }
 
 bool DesktopArchiveRemoveTreePage(const QString &root, int limit, bool &complete) {

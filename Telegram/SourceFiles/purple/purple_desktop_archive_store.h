@@ -75,6 +75,22 @@ struct DesktopArchiveDiscardResult {
 	[[nodiscard]] explicit operator bool() const { return reason.isEmpty(); }
 };
 
+class PreviousArchiveReview {
+public:
+	[[nodiscard]] int64 bytes() const { return _bytes; }
+
+private:
+	friend class DesktopArchiveStore;
+	PreviousArchiveReview() = default;
+	int64 _bytes = 0;
+	DesktopArchiveDiscardToken _token;
+};
+
+struct PreviousArchivePreparation {
+	std::optional<PreviousArchiveReview> review;
+	QString reason;
+};
+
 struct DesktopArchiveOptions {
 	QString archiveRoot;
 	QString profileRoot;
@@ -138,6 +154,11 @@ class DesktopArchiveStore final {
 		const DesktopArchiveOptions &options, const DesktopArchiveDiscardToken &token);
 	[[nodiscard]] static DesktopArchiveDiscardResult ResumeDiscard(
 		const DesktopArchiveOptions &options, const std::function<void()> &pending = {});
+	[[nodiscard]] static PreviousArchivePreparation ReviewPreviousArchive(const DesktopArchiveOptions &options);
+	[[nodiscard]] static DesktopArchiveDiscardResult DeletePreviousArchive(
+		const DesktopArchiveOptions &options, const PreviousArchiveReview &review);
+	[[nodiscard]] static DesktopArchiveDiscardResult ResumePreviousArchiveDeletion(const DesktopArchiveOptions &options);
+	[[nodiscard]] static bool RetryPreviousArchiveDeletions(const DesktopArchiveOptions &profile);
 	[[nodiscard]] bool Current() const;
 	[[nodiscard]] bool MemoryCurrent() const;
 	[[nodiscard]] DesktopArchiveStagingCounters StagingCountersForTest() const;

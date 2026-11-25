@@ -209,6 +209,34 @@ StoreEffect Store::open() {
 	return {};
 }
 
+std::optional<int64> Store::pendingBytes() const {
+	if (!_bound || !ownsPointer()) return std::nullopt;
+	auto pending = int64(0);
+	for (const auto &old : _pointer.retired) {
+		const auto live = archivePath(old.id);
+		const auto detached = archivePath(old.id, true);
+		const auto path = Exists(live) ? live : detached;
+		if (!Exists(path)) continue;
+		const auto size = DesktopArchivePersistentIdentity(path) == old.directory
+			? DesktopArchiveMeasureTree(path) : std::nullopt;
+		if ((Exists(live) && Exists(detached)) || !size || *size > std::numeric_limits<int64>::max() - pending) {
+			return std::nullopt;
+		}
+		pending += *size;
+	}
+	return ownsPointer() ? std::optional(pending) : std::nullopt;
+}
+
+std::optional<StorageSummary> Store::storageSummary() {
+	const auto active = usage();
+	if (!active) return std::nullopt;
+	const auto ordinary = int64(_options.policy.totalMiB) * 1024 * 1024;
+	const auto timed = int64(_options.policy.timedMiB) * 1024 * 1024;
+	return StorageSummary{ *active, pendingBytes(), ordinary, timed,
+		int64(_options.policy.ordinaryFileMiB) * 1024 * 1024, _lastTrimDay,
+		active->ordinary > ordinary || active->timed > timed || active->physical() > ordinary + timed };
+}
+
 QString Store::cleanup() {
 	while (!_pointer.retired.empty()) {
 		if (!ownsPointer()) return u"cleanup_blocked"_q;

@@ -62,7 +62,8 @@ std::optional<Usage> Store::usage() {
 	const auto metadata = Integer(_db.Read({ u"SELECT "
 		"coalesce((SELECT sum(length(sealed_identity)+160) FROM messages),0)+"
 		"coalesce((SELECT sum(length(sealed_body)+144) FROM versions),0)+"
-		"coalesce((SELECT sum(length(sealed_descriptor)+144) FROM media),0)"_q, {}, kRow }));
+		"coalesce((SELECT sum(length(sealed_descriptor)+144) FROM media),0)+"
+		"coalesce((SELECT count(*)*128 FROM purged_edits),0)"_q, {}, kRow }));
 	if (!ordinary || !timed || !metadata || *ordinary > std::numeric_limits<int64>::max() - *metadata) return std::nullopt;
 	return Usage{ QFileInfo(path).size(), QFileInfo(path + u"-wal"_q).size(), QFileInfo(path + u"-shm"_q).size(),
 		QFileInfo(path + u"-journal"_q).size() + QFileInfo(pointerPath()).size()
@@ -182,7 +183,9 @@ StoreEffect Store::maintain() {
 	if (!before) return { u"store_unreadable"_q };
 	const auto physical = physicalLimit(0);
 	if (physical == u"disk_full"_q || physical == u"store_busy"_q) return { physical };
-	if (const auto failure = expire(today()); !failure.isEmpty()) return { failure };
+	const auto day = today();
+	if (const auto failure = expire(day); !failure.isEmpty()) return { failure };
+	_lastTrimDay = day;
 	if (const auto failure = trim(0, false, {}); !failure.isEmpty()) return { failure };
 	if (const auto failure = trim(0, true, {}); !failure.isEmpty()) return { failure };
 	if (physical == u"quota_unreclaimable"_q) {
@@ -202,6 +205,15 @@ StoreEffect Store::maintain() {
 	if (!after) return { u"store_unreadable"_q };
 	_reclaimed += std::max<int64>(0, before->physical() - after->physical());
 	return { physicalLimit(0) };
+}
+
+std::optional<int64> Store::estimateExpired(const Policy &policy) {
+	if (!current() || !Valid(policy)) return std::nullopt;
+	return Integer(_db.Read({ u"SELECT count(*) FROM messages WHERE last_activity<=?-CASE class "
+		"WHEN 0 THEN ? WHEN 1 THEN ? WHEN 2 THEN ? WHEN 3 THEN ? ELSE ? END"_q,
+		{ today(), int64(policy.daysFor(ChatClass::Direct)), int64(policy.daysFor(ChatClass::Bot)),
+			int64(policy.daysFor(ChatClass::Group)), int64(policy.daysFor(ChatClass::Channel)),
+			int64(policy.days) }, kRow }));
 }
 
 StoreEffect Store::updatePolicy(Policy policy) {

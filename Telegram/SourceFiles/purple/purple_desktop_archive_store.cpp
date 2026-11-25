@@ -386,6 +386,41 @@ std::optional<Layout> Profile(const DesktopArchiveOptions &options, bool create,
 		&& BindingIdentity(options) == native ? std::optional(result) : std::nullopt;
 }
 
+std::optional<Layout> PreviousProfile(const DesktopArchiveOptions &options) {
+	const auto native = BindingIdentity(options);
+	if (native.isEmpty() || !QFileInfo(options.profileRoot).isDir()
+		|| QFileInfo(options.profileRoot).canonicalFilePath() != options.profileRoot
+		|| QFileInfo(options.archiveRoot).canonicalFilePath() != options.archiveRoot
+		|| !DesktopArchivePrivate(options.archiveRoot, true)) return {};
+	const auto links = options.archiveRoot + u"/profile-links"_q;
+	if (!DesktopArchivePrivate(links, true)) return {};
+	const auto marker = Marker(options);
+	const auto link = links + '/' + QString::fromLatin1(
+		QCryptographicHash::hash(native, QCryptographicHash::Sha256).toHex()) + u".json"_q;
+	const auto object = ReadObject(marker);
+	if (!object || object->size() != 3 || object->value(u"version"_q) != QJsonValue(1)
+		|| object->value(u"identity"_q).toString().toLatin1() != native
+		|| ReadObject(link) != object) return {};
+	auto layout = Layout();
+	layout.profile = object->value(u"profile"_q).toString();
+	if (!Token(layout.profile)) return {};
+	layout.profileDirectory = options.archiveRoot + '/' + layout.profile;
+	if (!DesktopArchivePrivate(layout.profileDirectory, true)) return {};
+	for (const auto &name : {u"accounts"_q, u"intents"_q, u"fences"_q, u"locks"_q}) {
+		if (!DesktopArchivePrivate(layout.profileDirectory + '/' + name, true)) return {};
+	}
+	layout.catalogue = layout.profileDirectory + u"/catalogue.json"_q;
+	return BindingIdentity(options) == native ? std::optional(layout) : std::nullopt;
+}
+
+std::optional<Layout> PreviousAccount(const DesktopArchiveOptions &options) {
+	const auto account = AccountKeyText(options.account.environment, options.account.userId);
+	auto layout = PreviousProfile(options);
+	if (!account || !layout) return {};
+	ScopeAccount(*layout, *account);
+	return layout;
+}
+
 std::optional<QJsonObject> Catalogue(const Layout &layout, bool create) {
 	if (!Exists(layout.catalogue)) {
 		return create ? std::optional(QJsonObject{
@@ -1759,6 +1794,89 @@ bool DesktopArchiveStore::Remove(int maximumActions) {
 		self.crypto = DesktopArchiveCrypto();
 	}
 	return result;
+}
+
+PreviousArchivePreparation DesktopArchiveStore::ReviewPreviousArchive(const DesktopArchiveOptions &options) {
+	if (options.active && !options.active()) return {{}, u"discard-account-changed"_q};
+	if (!Exists(options.archiveRoot) && NoProfileBinding(options)) return {};
+	auto layout = PreviousAccount(options);
+	if (!layout) return {{}, u"discard-profile-binding-unavailable"_q};
+	if (DiscardPending(*layout)) return {{}, u"cleanup_pending"_q};
+	if (!Exists(layout->accountDirectory)) return {};
+	if (options.loginAuthority.size() != 32 || !DesktopArchiveLoginKeysValid(options.loginAuthKeyIds)) {
+		return {{}, u"discard-login-authority-unavailable"_q};
+	}
+	const auto directory = DesktopArchiveIdentity(layout->accountDirectory);
+	const auto profile = DesktopArchiveIdentity(options.profileRoot);
+	const auto catalogue = Catalogue(*layout, false);
+	const auto entry = catalogue
+		? catalogue->value(u"accounts"_q).toObject().value(layout->account) : QJsonValue();
+	const auto bound = Fence(*layout);
+	if (!entry.isObject() || !ApplyRecord(*layout, entry.toObject()) || !bound
+		|| bound->storeId != layout->store || bound->generation != layout->generation
+		|| !DesktopArchivePrivate(layout->root, true)
+		|| QDir(layout->accountDirectory).entryList(
+			QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System) != QStringList{layout->store}) {
+		return {{}, u"discard-account-ownership-unverified"_q};
+	}
+	const auto fence = DiscardStamp(layout->fence);
+	const auto logout = DiscardStamp(layout->intent);
+	const auto size = DesktopArchiveMeasureTree(layout->accountDirectory);
+	if (directory.isEmpty() || profile.isEmpty() || !catalogue || fence.isEmpty() || logout.isEmpty()
+		|| !size || DesktopArchiveIdentity(layout->accountDirectory) != directory
+		|| DesktopArchiveIdentity(options.profileRoot) != profile) {
+		return {{}, u"discard-account-ownership-unverified"_q};
+	}
+	auto result = PreviousArchiveReview();
+	result._bytes = *size;
+	result._token = { options.account, layout->profile, profile, directory,
+		DiscardRecordDigest(entry),
+		fence, logout, DiscardAuthority(options), options.loginAuthKeyIds };
+	return { std::move(result), {} };
+}
+
+DesktopArchiveDiscardResult DesktopArchiveStore::DeletePreviousArchive(
+		const DesktopArchiveOptions &options, const PreviousArchiveReview &review) {
+	const auto &token = review._token;
+	if (options.account != token.account || options.loginAuthority.size() != 32
+		|| options.loginAuthKeyIds != token.keys || DiscardAuthority(options) != token.authority
+		|| (options.active && !options.active())) return { u"discard-account-changed"_q };
+	const auto layout = PreviousAccount(options);
+	if (!layout || layout->profile != token.profile
+		|| DesktopArchiveIdentity(options.profileRoot) != token.profileIdentity) return { u"discard-profile-changed"_q };
+	auto profileLock = QLockFile(options.archiveRoot + u"/profile.lock"_q);
+	profileLock.setStaleLockTime(0);
+	if (!profileLock.tryLock(0)) return { u"discard-profile-lock-unavailable"_q, true };
+	auto lock = std::make_unique<QLockFile>(layout->lock);
+	const auto release = gsl::finally([&] { ReleaseAccountLock(lock, layout->lock); });
+	lock->setStaleLockTime(0);
+	if (!RecoverReleasedLock(layout->lock) || !lock->tryLock(0)) return { u"discard-account-lock-unavailable"_q, true };
+	const auto verified = PreviousAccount(options);
+	if (!verified || verified->profile != layout->profile
+		|| DesktopArchiveIdentity(options.profileRoot) != token.profileIdentity) return { u"discard-profile-changed"_q };
+	profileLock.unlock();
+	if (DiscardPending(*layout) || DesktopArchiveIdentity(layout->accountDirectory) != token.directoryIdentity
+		|| DesktopArchiveMeasureTree(layout->accountDirectory) != review._bytes) return { u"discard-archive-changed"_q };
+	return FinishDiscard(*layout, options, &token);
+}
+
+DesktopArchiveDiscardResult DesktopArchiveStore::ResumePreviousArchiveDeletion(const DesktopArchiveOptions &options) {
+	if (!Exists(options.archiveRoot) && NoProfileBinding(options)) return {};
+	const auto layout = PreviousAccount(options);
+	if (!layout) return { u"discard-profile-binding-unavailable"_q };
+	if (!DiscardPending(*layout)) return {};
+	auto lock = std::make_unique<QLockFile>(layout->lock);
+	const auto release = gsl::finally([&] { ReleaseAccountLock(lock, layout->lock); });
+	lock->setStaleLockTime(0);
+	if (!RecoverReleasedLock(layout->lock) || !lock->tryLock(0)) return { u"discard-account-lock-unavailable"_q, true };
+	return DiscardPending(*layout) ? FinishDiscard(*layout, options, nullptr, true) : DesktopArchiveDiscardResult();
+}
+
+bool DesktopArchiveStore::RetryPreviousArchiveDeletions(const DesktopArchiveOptions &profile) {
+	// Only a completed profile binding and a previously confirmed on-disk
+	// intent authorize recovery. Startup never prepares a deletion.
+	const auto layout = PreviousProfile(profile);
+	return layout && RecoverConfirmedDiscards(*layout, profile, {});
 }
 
 DesktopArchiveDiscardPreparation DesktopArchiveStore::PrepareDiscard(

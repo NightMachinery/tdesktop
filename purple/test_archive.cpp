@@ -9,6 +9,7 @@
 #include "purple/purple_archive_v2_schema.h"
 #include "purple/purple_archive_v2_writer.h"
 #include "purple/purple_archive_v2_acquisition.h"
+#include "purple/purple_archive_v2_attention.h"
 #include "purple/purple_desktop_archive_store.h"
 #include "purple/purple_sync_json.h"
 #include "tests/archive_test_support.h"
@@ -2474,19 +2475,19 @@ void ArchiveV2Schema() {
 	};
 	CHECK(scalar(u"PRAGMA auto_vacuum"_q) == ArchiveSqlValue(int64(2)));
 	CHECK(apply({
-		{u"INSERT INTO meta VALUES(2,?,?)"_q, {QByteArray("store"), QByteArray("header")}},
-		{u"INSERT INTO messages VALUES(x'01',x'02',x'03',0,0,25,3,x'FF')"_q},
-		{u"INSERT INTO versions VALUES(x'01',1,x'A1',25,x'A0',x'AA')"_q},
-		{u"INSERT INTO versions VALUES(x'01',2,x'A2',25,x'B0',x'BB')"_q},
-		{u"INSERT INTO versions VALUES(x'01',3,x'A3',25,x'A0',x'AA')"_q},
+		{u"INSERT INTO meta VALUES(2,?,?,0)"_q, {QByteArray("store"), QByteArray("header")}},
+		{u"INSERT INTO messages VALUES(x'01',x'02',x'03',0,0,25,3,x'FF',4,0)"_q},
+		{u"INSERT INTO versions VALUES(x'01',1,x'A1',25,x'A0',x'AA',1)"_q},
+		{u"INSERT INTO versions VALUES(x'01',2,x'A2',25,x'B0',x'BB',2)"_q},
+		{u"INSERT INTO versions VALUES(x'01',3,x'A3',25,x'A0',x'AA',1)"_q},
 		{u"INSERT INTO blobs VALUES(x'04',1000,x'FE')"_q},
 		{u"INSERT INTO blob_parts VALUES(x'04',0,x'FD')"_q},
 		{u"INSERT INTO media VALUES(x'01',1,0,x'50',1,1,1,0,x'FC',x'04',x'FA')"_q},
 		{u"INSERT INTO media VALUES(x'01',3,0,x'50',1,0,1,0,x'FC',x'04',x'FA')"_q},
 	}));
-	CHECK(!apply({ {u"INSERT INTO versions VALUES(x'01',4,x'A3',25,x'A0',x'AA')"_q} }));
+	CHECK(!apply({ {u"INSERT INTO versions VALUES(x'01',4,x'A3',25,x'A0',x'AA',1)"_q} }));
 	CHECK(!apply({ {u"INSERT INTO media VALUES(x'01',4,0,x'50',1,0,1,0,x'FC',x'04',x'FA')"_q} }));
-	CHECK(!apply({ {u"INSERT INTO meta VALUES(1,x'01',x'02')"_q} }));
+	CHECK(!apply({ {u"INSERT INTO meta VALUES(1,x'01',x'02',0)"_q} }));
 	CHECK(scalar(u"SELECT group_concat(seq) FROM (SELECT seq FROM versions ORDER BY seq)"_q)
 		== ArchiveSqlValue(u"1,2,3"_q));
 	CHECK(scalar(u"SELECT count(*) FROM sqlite_schema WHERE type='index' AND name IN "
@@ -2504,6 +2505,7 @@ void ArchiveV2Schema() {
 
 #include "test_archive_v2_writer.inc"
 #include "test_archive_v2_quota.inc"
+#include "test_archive_v2_views.inc"
 
 }
 
@@ -2515,6 +2517,9 @@ int main(int argc, char** argv) {
 		if (phase < 0 || phase > int(Purple::ArchiveV2::Phase::AfterUnlink)) return 2;
 		return V2Fixtures::CrashChild(QString::fromUtf8(argv[2]), QString::fromUtf8(argv[3]),
 			Purple::ArchiveV2::Phase(phase));
+	}
+	if (argc == 4 && QByteArray(argv[1]) == "archive-v2-legacy-crash-fixture") {
+		return V2Fixtures::LegacyCrashChild(QString::fromUtf8(argv[2]), QByteArray(argv[3]) == "after");
 	}
 	if (argc > 1 && QByteArray(argv[1]) == "observation-upgrade-only") {
 		ObservationUpgradeOnOpen(false, false);
@@ -2548,6 +2553,10 @@ int main(int argc, char** argv) {
 	V2Fixtures::SeparatePressure();
 	V2Fixtures::QuotaDiskAndAge();
 	V2Fixtures::VerifiedCompleteFile();
+	V2Fixtures::HistoryAndCleanup();
+	V2Fixtures::PendingBytesAndMediaOutcome();
+	V2Fixtures::ConfirmedPagesAndNoticeDeduplication();
+	V2Fixtures::PreviousArchiveRemoval();
 	LegacyProfileBinding();
 	KeySetMigrationAndRebind();
 	ExplicitDiscardRecovery();

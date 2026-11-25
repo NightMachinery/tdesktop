@@ -14,13 +14,15 @@ MediaAdmission::MediaAdmission(std::shared_ptr<Lease> lease, QByteArray generati
 MediaDecision MediaAdmission::begin(const Policy &policy, MediaRequest request,
 		MediaTrigger trigger, bool reference, bool complete) {
 	const auto &target = request.target;
+	const auto revision = _lease ? _lease->mediaRevision.load() : 0;
+	if (_pending && _pending->target.revision != revision) _pending.reset();
 	if (target.store.size() != 16 || target.store != _generation || target.source.isEmpty() || target.sequence <= 0
 		|| target.ordinal < 0 || _pending) {
 		return { MediaAction::Describe, MediaReason::ScopeRetired };
 	}
 	const auto decision = DecideMedia(policy, request.kind, request.chat, {
 		.kind = target.kind, .trigger = trigger, .timed = target.timed,
-		.current = _lease && _lease->live.load(), .complete = complete,
+		.current = _lease && _lease->live.load() && _lease->mediaRevision.load() == target.revision, .complete = complete,
 		.reference = reference, .size = request.size,
 	});
 	if (decision.action != MediaAction::Describe) _pending = std::move(request);
@@ -38,11 +40,11 @@ std::optional<BlobInput> MediaAdmission::finish(const Policy &policy, const Medi
 	auto request = std::exchange(_pending, std::nullopt);
 	const auto decision = DecideMedia(policy, request->kind, request->chat, {
 		.kind = target.kind, .trigger = MediaTrigger::WholeFileAvailable, .timed = target.timed,
-		.current = _lease && _lease->live.load(), .admitted = true, .complete = true,
+		.current = _lease && _lease->live.load() && _lease->mediaRevision.load() == target.revision, .admitted = true, .complete = true,
 		.size = request->size,
 	});
 	return decision.action == MediaAction::Adopt
-		? std::optional(BlobInput{ .storeId = target.store, .identity = target.message,
+		? std::optional(BlobInput{ .storeId = target.store, .revision = target.revision, .identity = target.message,
 			.sequence = target.sequence, .ordinal = target.ordinal, .size = request->size, .source = target.source })
 		: std::nullopt;
 }

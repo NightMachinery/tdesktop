@@ -32,6 +32,7 @@ struct DesktopArchiveSourceIdentity {
 	const QString &path, qint64 limit);
 [[nodiscard]] bool DesktopArchiveWrite(const QString &path, const QByteArray &bytes);
 [[nodiscard]] bool DesktopArchiveRemoveFile(const QString &path);
+[[nodiscard]] std::optional<qint64> DesktopArchiveMeasureTree(const QString &root);
 [[nodiscard]] bool DesktopArchiveRemoveTreePage(
 	const QString &root, int limit, bool &complete);
 
