@@ -26,6 +26,34 @@ namespace {
 
 constexpr auto kRecentMediaObservationLimit = size_t(512);
 
+constexpr auto kDetailPrefixes = { "stream-", "media-" };
+constexpr auto kDetailReasons = {
+	"unseen-delete", "ambiguous-delete", "unresolved-delete",
+	"lifecycle-media-not-owned", "lifecycle-preimage-stale", "journal-replay-recovered",
+	// Durable rows from older versions that treated holds as loss.
+	"capture-recovery-held", "capture-startup-drain", "outbox-replay-held",
+	"outbox-sequence", "outbox-sequence-missing", "outbox-sequence-create",
+	"outbox-order-regression", "outbox-entry", "outbox-evidence",
+	"outbox-stale", "outbox-confirmation", "capture-admission-renewed",
+};
+
+ArchiveSqlStatement ArchiveHasMessageGap(const AccountKey &account, const ArchiveSqlSecurity &security) {
+	const auto oldReplayHold = ArchiveSqlToken(account, ArchiveIndexKind::Maintenance,
+		"gap/capture-replay-held", security);
+	auto query = ArchiveSqlStatement{u"SELECT 1 FROM capture_gaps WHERE gap_id != ?"_q,
+		{oldReplayHold}, ArchiveSqlExpectation::Rows};
+	for (const auto prefix : kDetailPrefixes) {
+		query.sql += u" AND reason NOT GLOB ?"_q;
+		query.binds.push_back(QString::fromLatin1(prefix) + '*');
+	}
+	for (const auto reason : kDetailReasons) {
+		query.sql += u" AND reason != ?"_q;
+		query.binds.push_back(QString::fromLatin1(reason));
+	}
+	query.sql += u" LIMIT 1"_q;
+	return query;
+}
+
 auto &CatalogueMutex = *new std::mutex();
 auto &ReleasedLocksMutex = *new std::mutex();
 auto &ReleasedLocks = *new std::map<QString, QByteArray>();
@@ -827,6 +855,14 @@ bool RunRemoval(Layout layout, ArchiveRemoval removal, DesktopArchiveSqlite* dat
 
 }
 
+bool ArchiveCaptureReasonWarns(const QString &reason) {
+	return std::none_of(kDetailPrefixes.begin(), kDetailPrefixes.end(), [&](const char *prefix) {
+		return reason.startsWith(QLatin1StringView(prefix));
+	}) && std::none_of(kDetailReasons.begin(), kDetailReasons.end(), [&](const char *detail) {
+		return reason == QLatin1StringView(detail);
+	});
+}
+
 bool DesktopArchiveLoginKeysValid(const QByteArray &keys) {
 	const auto parts = keys.split(',');
 	if (parts.empty() || parts.size() > 128) {
@@ -1490,7 +1526,7 @@ DesktopArchiveStatus DesktopArchiveStore::Open(DesktopArchiveOptions options) {
 	if (!RecoverCaptureAttention()) {
 		return self.status;
 	}
-	const auto gaps = self.database.Read(ArchiveSqlReadCaptureGaps(1));
+	const auto gaps = self.database.Read(ArchiveHasMessageGap(self.options.account, self.security));
 	if (!gaps.ok) {
 		self.Fail(DesktopArchiveStatus::Unreadable, u"gap-index"_q);
 		return self.status;
@@ -1641,7 +1677,7 @@ bool DesktopArchiveStore::Gap(
 }
 
 void DesktopArchiveStore::NoteCaptureLoss(const QString &reason) {
-	_impl->hasCaptureGap = true;
+	_impl->hasCaptureGap = _impl->hasCaptureGap || ArchiveCaptureReasonWarns(reason);
 	++_impl->captureLosses[reason];
 }
 
@@ -2302,7 +2338,7 @@ DesktopArchiveHistoryPage DesktopArchiveStore::ReadHistoryPage(const ArchiveMess
 	auto result = DesktopArchiveHistoryPage();
 	auto &self = *_impl;
 	result.epoch = self.epoch;
-	result.hasGap = self.hasCaptureGap || !self.failure.isEmpty();
+	result.hasGap = self.hasCaptureGap;
 	if (!Current() || key.account != self.options.account || limit < 1
 		|| limit > kArchiveSqlPageLimit || !self.database.BeginRead()) {
 		return result;
@@ -3362,7 +3398,7 @@ ArchiveDeletedPage DesktopArchiveStore::ReadDeletedView(const QString &id,
 	}
 	if (i->second->Current(self.database)) {
 		result = i->second->Read(limit);
-		result.hasGap = self.hasCaptureGap || !self.failure.isEmpty();
+		result.hasGap = self.hasCaptureGap;
 		if (result.status == ArchiveQueryStatus::Ready && (!Current() || !i->second->Current(self.database))) {
 			result.entries.clear();
 			result.status = ArchiveQueryStatus::Stale;

@@ -94,13 +94,13 @@ DesktopArchiveOptions Options(Main::Account &account) {
 }
 
 bool ArchiveFailureNeedsToast(DesktopArchiveStatus status,
-		const QString &failure, const QString &previous) {
-	return status != DesktopArchiveStatus::Ready
+		const QString &failure, bool alreadyWarned) {
+	return !alreadyWarned && status != DesktopArchiveStatus::Ready
 		&& status != DesktopArchiveStatus::Disabled
 		&& status != DesktopArchiveStatus::Maintenance
 		&& status != DesktopArchiveStatus::RemovalPending
 		&& status != DesktopArchiveStatus::RetentionGap
-		&& !failure.isEmpty() && failure != previous;
+		&& !failure.isEmpty();
 }
 
 void ShowArchiveRemovalPending() {
@@ -496,6 +496,7 @@ class ArchiveWorker final {
 		auto &store = *ownedStore;
 		auto journal = std::shared_ptr<DesktopArchiveJournal>();
 		auto journalFailure = QString();
+		auto journalOpened = false;
 		auto startupHeld = false;
 		auto startupJournal = std::shared_ptr<DesktopArchiveJournal>();
 		auto authorityReady = !options.authorityReady;
@@ -552,14 +553,17 @@ class ArchiveWorker final {
 				}
 				if (const auto access = store.JournalAccess()) {
 					journal = std::make_shared<DesktopArchiveJournal>(*access);
-					if (journal->Open() && journal->Drain(store)) {
+					journalOpened = journal->Open();
+					if (journalOpened && journal->Drain(store)) {
 						startupJournal = journal;
 						if (!state->cancelled) {
 							state->ready(journal);
 						}
 					} else {
-						journalFailure = journal->failure().isEmpty()
-							? u"capture-recovery-held"_q : journal->failure();
+						journalFailure = journalOpened ? journal->replayFailure() : journal->failure();
+						if (journalFailure.isEmpty()) {
+							journalFailure = u"capture-recovery-held"_q;
+						}
 					}
 				}
 			}
@@ -604,15 +608,14 @@ class ArchiveWorker final {
 				return;
 			}
 			journal = fresh;
-			if (journalFailure.startsWith(u"purge-"_q)
-				|| journalFailure.startsWith(u"capture-admission-"_q)) {
-				journalFailure.clear();
-			}
+			journalOpened = true;
+			journalFailure.clear();
 			state->startupFailed = false;
 			state->ready(fresh);
 		};
 		const auto drainJournal = [&] {
-			if (!journal || journal->WriterRetired() || !store.Current() || !journal->access().current()) {
+			if (!journalOpened || !journal || journal->WriterRetired()
+				|| !store.Current() || !journal->access().current()) {
 				return;
 			}
 			if (journal->Drain(store)) {
@@ -621,8 +624,8 @@ class ArchiveWorker final {
 					startupJournal = journal;
 					state->ready(journal);
 				}
-			} else if (journalFailure.isEmpty()) {
-				journalFailure = journal->failure();
+			} else {
+				journalFailure = journal->replayFailure();
 			}
 		};
 
@@ -638,7 +641,10 @@ class ArchiveWorker final {
 			}
 			const auto now = std::chrono::steady_clock::now();
 			const auto failure = journalFailure.isEmpty() ? store.failure() : journalFailure;
-			const auto status = !journalFailure.isEmpty() && store.status() == DesktopArchiveStatus::Ready
+			const auto captureStopped = !journalFailure.isEmpty()
+				&& (!journalOpened || writerRetirementHeld || store.JournalRenewalHeld()
+					|| journalFailure == u"outbox-entry"_q || journalFailure == u"outbox-evidence"_q);
+			const auto status = captureStopped && store.status() == DesktopArchiveStatus::Ready
 				? DesktopArchiveStatus::Unreadable : store.status();
 			if (now < nextReport && reportedStatus == status && reportedFailure == failure) {
 				return;
@@ -812,6 +818,8 @@ struct ArchiveSession {
 	QString failure;
 	QString discardFailure;
 	DesktopArchiveCaptureLosses captureLosses;
+	DesktopArchiveCaptureLosses captureDetails;
+	bool availabilityWarned = false;
 	uint64_t bytes = 0;
 };
 std::map<Main::Session*, ArchiveSession> Sessions;
@@ -825,24 +833,34 @@ QString CaptureLossDetails(const DesktopArchiveCaptureLosses &losses) {
 	return detail.join(u", "_q);
 }
 
+bool AccumulateArchiveCaptureIncidents(const DesktopArchiveCaptureLosses &incidents,
+	DesktopArchiveCaptureLosses &losses, DesktopArchiveCaptureLosses &details) {
+	const auto firstLoss = losses.empty();
+	for (const auto &[reason, count] : incidents) {
+		auto &counts = ArchiveCaptureReasonWarns(reason) ? losses : details;
+		counts[reason] += count;
+	}
+	return firstLoss && !losses.empty();
+}
+
 void ReportArchiveCaptureLoss(Main::Session *session, const DesktopArchiveCaptureLosses &losses) {
 	const auto i = Sessions.find(session);
 	if (i == Sessions.end() || !i->second.routing->load() || Retired.contains(session)) {
 		return;
 	}
-	auto &reported = i->second.captureLosses;
-	for (const auto &[reason, count] : losses) {
-		reported[reason] += count;
+	auto &value = i->second;
+	const auto warn = AccumulateArchiveCaptureIncidents(losses, value.captureLosses, value.captureDetails);
+	LOG(("Purple Archive: capture incidents (%1).").arg(CaptureLossDetails(losses)));
+	if (warn) {
+		ShowPurpleNotice({
+			.session = session,
+			.scope = u"Local archive"_q,
+			.summary = tr::lng_purple_archive_gap(tr::now) + '\n' + CaptureLossDetails(value.captureLosses),
+			.coalesceKey = u"archive:gap:"_q + PurpleNoticeAccountKey(session),
+			.severity = ModalNotices::NoticeSeverity::Warning,
+			.background = true,
+		});
 	}
-	LOG(("Purple Archive: observations lost (%1).").arg(CaptureLossDetails(losses)));
-	ShowPurpleNotice({
-		.session = session,
-		.scope = u"Local archive"_q,
-		.summary = tr::lng_purple_archive_gap(tr::now) + '\n' + CaptureLossDetails(reported),
-		.coalesceKey = u"archive:gap:"_q + PurpleNoticeAccountKey(session),
-		.severity = ModalNotices::NoticeSeverity::Warning,
-		.background = true,
-	});
 	Changes.fire({});
 }
 
@@ -905,12 +923,16 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 				if (i == Sessions.end()) {
 					return;
 				}
-				const auto firstFailure = ArchiveFailureNeedsToast(status, failure, i->second.failure);
-				i->second.status = status;
-				i->second.failure = failure;
-				i->second.bytes = bytes;
-				if (firstFailure && Core::App().domain().started()
-					&& Core::App().domain().active().maybeSession() == live) {
+				auto &value = i->second;
+				if (status == DesktopArchiveStatus::Ready || status == DesktopArchiveStatus::Disabled) {
+					value.availabilityWarned = false;
+				}
+				const auto firstFailure = ArchiveFailureNeedsToast(status, failure, value.availabilityWarned);
+				value.status = status;
+				value.failure = failure;
+				value.bytes = bytes;
+				if (firstFailure && Core::App().domain().started()) {
+					value.availabilityWarned = true;
 					LOG(("Purple Archive: unavailable (%1).").arg(failure));
 					ShowPurpleNotice({
 						.session = live,
@@ -1586,12 +1608,16 @@ QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 		return tr::lng_purple_archive_usage(
 			tr::now, lt_size, FormatArchiveSize(value.bytes));
 	};
-	if (!value.captureLosses.empty() && value.status == DesktopArchiveStatus::Ready) {
-		return tr::lng_purple_archive_gap(tr::now) + u"\n"_q
-			+ CaptureLossDetails(value.captureLosses) + u"\n"_q + usage();
-	}
 	if (value.status == DesktopArchiveStatus::Ready) {
-		return usage();
+		auto result = usage();
+		if (!value.captureLosses.empty()) {
+			result = tr::lng_purple_archive_gap(tr::now) + '\n'
+				+ CaptureLossDetails(value.captureLosses) + '\n' + result;
+		}
+		if (!value.captureDetails.empty()) {
+			result += '\n' + CaptureLossDetails(value.captureDetails);
+		}
+		return result;
 	}
 	if (value.status == DesktopArchiveStatus::Disabled) {
 		return tr::lng_purple_archive_opening(tr::now);

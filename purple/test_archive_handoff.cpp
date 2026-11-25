@@ -110,6 +110,7 @@ void ReportArchiveCaptureLoss(ProbeSession*, const DesktopArchiveCaptureLosses &
 }
 void CaptureOnMain(Fn<void()> callback) { callback(); }
 #include "archive-failure-toast.inc"
+#include "archive-capture-incidents.inc"
 void QueueArchiveRetentionGap(not_null<ProbeSession*> session, QString reason);
 #include "archive-capture-queue.inc"
 struct NativeProbeValue {
@@ -128,14 +129,28 @@ void StartupOnMain(Fn<void()> call) { call(); }
 void HistoricalGapNotice() {
 	Section = "historical gaps stay visible without repeating the startup toast";
 	const auto history = u"capture-gap"_q;
-	const auto current = u"outbox-append"_q;
-	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Ready, history, {}));
-	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Ready, {}, history));
-	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::RetentionGap, current, history));
-	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Ready, current, history));
-	CHECK(ArchiveFailureNeedsToast(DesktopArchiveStatus::Unreadable, current, history));
-	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Unreadable, current, current));
-	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Maintenance, current, {}));
+	const auto current = u"outbox-evidence"_q;
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Ready, history, false));
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Ready, u"outbox-replay-held"_q, false));
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::RetentionGap, current, false));
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Unreadable, {}, false));
+	CHECK(ArchiveFailureNeedsToast(DesktopArchiveStatus::Unreadable, current, false));
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Unreadable, current, true));
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Unreadable, u"outbox-entry"_q, true));
+	CHECK(!ArchiveFailureNeedsToast(DesktopArchiveStatus::Maintenance, current, false));
+	auto losses = DesktopArchiveCaptureLosses();
+	auto details = DesktopArchiveCaptureLosses();
+	CHECK(!AccumulateArchiveCaptureIncidents({
+		{u"stream-recovery-held"_q, 1}, {u"media-copy-incomplete"_q, 2},
+		{u"unseen-delete"_q, 1}, {u"journal-replay-recovered"_q, 1}},
+		losses, details));
+	CHECK(losses.empty() && details.size() == 4);
+	CHECK(AccumulateArchiveCaptureIncidents({{u"snapshot-limited"_q, 2}}, losses, details));
+	CHECK(!AccumulateArchiveCaptureIncidents({{u"outbox-full"_q, 1}}, losses, details));
+	CHECK(losses == (DesktopArchiveCaptureLosses{{u"snapshot-limited"_q, 2}, {u"outbox-full"_q, 1}}));
+	CHECK(details == (DesktopArchiveCaptureLosses{
+		{u"stream-recovery-held"_q, 1}, {u"media-copy-incomplete"_q, 2},
+		{u"unseen-delete"_q, 1}, {u"journal-replay-recovered"_q, 1}}));
 }
 
 void Case(bool failed) {
@@ -650,9 +665,14 @@ void NativeStartupUnavailable() {
 		options.authorityReady = [&] { entered.set_value(); future.wait(); return true; };
 		options.maintenanceAllowed = [] { return false; };
 		auto readyCount = std::atomic<int>(0);
+		auto captureStopped = std::atomic<bool>(false);
 		NativeValue = {};
 		NativeValue.worker = std::make_shared<NativeStartupWorker>(std::move(options),
-			[](DesktopArchiveStatus, QString, uint64_t) {}, [&](auto) { ++readyCount; });
+			[&](DesktopArchiveStatus status, QString reason, uint64_t) {
+				if (status == DesktopArchiveStatus::Unreadable && reason == u"outbox-sequence"_q) {
+					captureStopped = true;
+				}
+			}, [&](auto) { ++readyCount; });
 		auto worker = NativeValue.worker;
 		CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
 		auto session = ProbeSession();
@@ -667,6 +687,7 @@ void NativeStartupUnavailable() {
 		CHECK(worker->StartupFailed());
 		CHECK(!worker->StartupHeld());
 		CHECK(readyCount == 0);
+		CHECK(captureStopped == !maintenance);
 		NativeQueueArchiveObservation(&session, Event(Empty(), u"unavailable-late"_q, 0));
 		auto checked = std::promise<bool>();
 		auto checkedFuture = checked.get_future();

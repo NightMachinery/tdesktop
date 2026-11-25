@@ -94,6 +94,7 @@ struct DesktopArchiveOptions {
 	QByteArray loginAuthKeyIds;
 };
 using DesktopArchiveCaptureLosses = std::map<QString, uint64_t>;
+[[nodiscard]] bool ArchiveCaptureReasonWarns(const QString &reason);
 
 enum class DesktopArchiveLifecycleResult { Retained, Lost, Held };
 

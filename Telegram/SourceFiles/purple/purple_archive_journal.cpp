@@ -310,12 +310,20 @@ bool DesktopArchiveJournal::Append(ArchiveEvent event, int byteLimit) {
 
 bool DesktopArchiveJournal::Drain(DesktopArchiveStore &store, int limit) {
 	if (WriterRetired()) return false;
+	auto previous = QString();
+	{
+		const auto lock = std::lock_guard(_mutex);
+		previous = std::exchange(_replayFailure, {});
+	}
 	if (DrainPending(store, limit)) {
+		if (!previous.isEmpty()) {
+			store.NoteCaptureLoss(u"journal-replay-recovered"_q);
+		}
 		return true;
 	}
 	const auto lock = std::lock_guard(_mutex);
-	if (_failure.isEmpty()) {
-		_failure = u"outbox-replay-held"_q;
+	if (_replayFailure.isEmpty()) {
+		_replayFailure = u"outbox-replay-held"_q;
 	}
 	return false;
 }
@@ -329,7 +337,7 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 	{
 		const auto lock = std::lock_guard(_mutex);
 		if (!_ready || !_access.current || !_access.current()) {
-			_failure = u"outbox-stale"_q;
+			_replayFailure = u"outbox-stale"_q;
 			return false;
 		}
 		sequence = _sequence;
@@ -342,7 +350,7 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 				continue;
 			}
 			if (names.size() >= 64 || !IsArchiveHash(name)) {
-				_failure = u"outbox-entry"_q;
+				_replayFailure = u"outbox-entry"_q;
 				return false;
 			}
 			names.push_back(name);
@@ -355,7 +363,7 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 		if (!event || event->key.account != _access.epoch.account
 			|| Token(_access, event->id) != name || event->order > sequence) {
 			const auto lock = std::lock_guard(_mutex);
-			_failure = u"outbox-evidence"_q;
+			_replayFailure = u"outbox-evidence"_q;
 			return false;
 		}
 		pending.push_back({name, event->order});
@@ -368,6 +376,8 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 		const auto decoded = bytes ? Decode(*bytes) : std::nullopt;
 		if (!decoded || decoded->order != pending[i].second
 			|| (i && pending[i - 1].second == pending[i].second)) {
+			const auto lock = std::lock_guard(_mutex);
+			_replayFailure = u"outbox-evidence"_q;
 			return false;
 		}
 		auto event = *decoded;
@@ -381,8 +391,8 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 				return false;
 			}
 			if (matches->size() != 1) {
-				if (!store.Gap(
-						event.id, u"unresolved-delete"_q, event.observation.observedAt)) {
+				const auto reason = matches->empty() ? u"unseen-delete"_q : u"ambiguous-delete"_q;
+				if (!store.Gap(event.id, reason, event.observation.observedAt)) {
 					return false;
 				}
 				const auto lock = std::lock_guard(_mutex);
@@ -465,7 +475,7 @@ bool DesktopArchiveJournal::DrainPending(DesktopArchiveStore &store, int limit) 
 		const auto lock = std::lock_guard(_mutex);
 		if (!_access.current()
 			|| !DesktopArchiveRemoveFile(_access.root + u"/outbox/"_q + name)) {
-			_failure = u"outbox-confirmation"_q;
+			_replayFailure = u"outbox-confirmation"_q;
 			return false;
 		}
 	}
@@ -488,7 +498,12 @@ QString DesktopArchiveJournal::failure() const {
 		return lock.owns_lock() && !_failure.isEmpty() ? _failure : u"outbox-writer-retired"_q;
 	}
 	const auto lock = std::lock_guard(_mutex);
-	return _failure;
+	return _failure.isEmpty() ? _replayFailure : _failure;
+}
+
+QString DesktopArchiveJournal::replayFailure() const {
+	const auto lock = std::lock_guard(_mutex);
+	return _replayFailure;
 }
 const DesktopArchiveJournalAccess &DesktopArchiveJournal::access() const {
 	return _access;

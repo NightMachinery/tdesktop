@@ -1469,7 +1469,9 @@ void Journal() {
 	CHECK(!store.Versions(Key()).hasGap);
 	CHECK(store.Versions(Key()).versions.size() == 1);
 	CHECK(journal.Drain(store));
-	CHECK(store.TakeCaptureLosses().empty());
+	CHECK(journal.replayFailure().isEmpty());
+	CHECK(store.TakeCaptureLosses() == (DesktopArchiveCaptureLosses{{u"journal-replay-recovered"_q, 1}}));
+	CHECK(!store.Versions(Key()).hasGap);
 	CHECK(store.Versions(Key()).versions.size() == 3);
 	CHECK(journal.Append(b));
 	CHECK(journal.Drain(store));
@@ -2146,6 +2148,28 @@ void DeleteAfterEviction() {
 	CHECK(journal.Drain(store));
 	const auto missing = store.NonChannelMessages(68);
 	CHECK(missing && missing->empty());
+	for (const auto chat : {46, 47}) {
+		const auto collision = Key(options.account, chat, 69, ArchiveChatKind::User);
+		CHECK(store.Capture(Event(Empty(), u"known-"_q + QString::number(chat), 1,
+			u"fixture"_q, ArchiveOrigin::Baseline, collision)).retained);
+	}
+	deleted.id = u"ambiguous-delete"_q;
+	deleted.key.messageId = 69;
+	CHECK(journal.Append(deleted) && journal.Drain(store));
+	CHECK(store.Gap(u"media-fixture"_q, u"media-copy-incomplete"_q, 100));
+	CHECK(store.Gap(u"stream-fixture"_q, u"stream-recovery-held"_q, 100));
+	CHECK(store.TakeCaptureLosses() == (DesktopArchiveCaptureLosses{
+		{u"unseen-delete"_q, 1}, {u"ambiguous-delete"_q, 1},
+		{u"media-copy-incomplete"_q, 1}, {u"stream-recovery-held"_q, 1}}));
+	CHECK(!store.Versions(key).hasGap);
+	CHECK(store.Execute(PlanArchiveCaptureGap({options.account, store.epoch().storeId,
+		u"capture-replay-held"_q, 100, u"capture-commit"_q, {}}, store.security())));
+	CHECK(store.Close());
+	CHECK(store.Open(options) == DesktopArchiveStatus::Ready);
+	CHECK(store.TakeCaptureLosses().empty());
+	CHECK(!store.Versions(key).hasGap);
+	CHECK(store.Gap(u"true-loss"_q, u"snapshot-limited"_q, 101));
+	CHECK(store.Versions(key).hasGap);
 	CHECK(store.Remove());
 }
 

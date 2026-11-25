@@ -216,12 +216,18 @@ A failed append records the lost observation when the worker can write, with
 an encrypted attention marker as a fallback. If neither path can write, the
 loss is still reported for the running session.
 
-An archive gap notice counts new losses by reason for the affected account.
-Durable gap IDs deduplicate retries and restarts. Existing gaps stay visible
-in History. A recoverable outbox replay hold, an observation retired by purge,
-or ordinary media playback without an archive binding does not generate a loss
-notice. Journal failures that block recovery remain visible as archive
-availability errors.
+The archive shows one message-loss notice per account session. New losses
+continue to update the reason counts in Settings and the log. An archive
+that cannot admit a writer reports its own availability error. Historic
+message-loss records stay visible in History, and stable gap IDs deduplicate
+retries and restarts.
+
+Media-only skips, unresolvable deletes and recovered replays contribute
+diagnostic counts. They leave the message-history gap indicator and the
+startup warning quiet. Replay leaves recoverable entries on disk and
+reports a capture stoppage if the journal cannot open or authenticated
+replay evidence is invalid.
+
 One dedicated writer thread per session drains at most 64 queued observations.
 Its stable sequence is persisted before each entry and is replayed unchanged.
 Accepted pts, message identity and semantic content distinguish edit identities,

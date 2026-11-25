@@ -23,6 +23,7 @@ class DesktopArchiveJournal final {
 	void BindCaptureGeneration(ArchiveEvent &event) const;
 	[[nodiscard]] ArchiveGeneration CaptureGeneration(const ArchiveChatKey &chat) const;
 	[[nodiscard]] QString failure() const;
+	[[nodiscard]] QString replayFailure() const;
 	[[nodiscard]] const DesktopArchiveJournalAccess &access() const;
 
   private:
@@ -30,6 +31,7 @@ class DesktopArchiveJournal final {
 	DesktopArchiveJournalAccess _access;
 	mutable std::timed_mutex _mutex;
 	QString _failure;
+	QString _replayFailure;
 	uint64_t _sequence = 0;
 	bool _ready = false;
 	std::atomic<bool> _captureAllowed = true;
