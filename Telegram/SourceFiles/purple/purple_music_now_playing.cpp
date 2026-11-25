@@ -212,16 +212,23 @@ void NowPlaying::updateProgressContrast() {
 	}
 	const auto preferred = anim::color(st::windowSubTextFg, st::windowFg, .15);
 	const auto base = MusicRelativeLuminance(surface);
+	const auto lightSurface = base > .18;
 	const auto rail = [&] {
-		if (base <= .18) {
+		if (!lightSurface) {
 			return MusicReadableColor(MusicReadableColor(preferred, surface, 3.), tinted, 3.);
 		}
 		const auto darkest = std::min(base, MusicRelativeLuminance(tinted));
-		const auto luminance = (darkest + .05) / 3.1 - .05;
+		const auto luminance = (darkest + .05) / 3. - .05;
 		const auto gray = 1.055 * std::pow(luminance, 1. / 2.4) - .055;
-		return QColor::fromRgbF(gray, gray, gray);
+		const auto tone = int(gray * 255.);
+		return QColor(tone, tone, tone);
 	}();
-	_progress->setColorOverrides({ .inactiveFg = rail });
+	_progress->setColorOverrides({
+		.activeFg = lightSurface
+			? std::optional(anim::color(st::windowActiveTextFg, st::windowFg, .12))
+			: std::nullopt,
+		.inactiveFg = rail,
+	});
 }
 
 void NowPlaying::setState(MusicNowPlayingState state) {
