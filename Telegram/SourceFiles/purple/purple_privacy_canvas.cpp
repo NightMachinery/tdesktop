@@ -73,12 +73,16 @@ QString RelativeDay(qint64 days) {
 	return QStringLiteral("%1%2 days").arg(days > 0 ? QStringLiteral("+") : QString()).arg(days);
 }
 
-QString Temperature(const Frame &frame, std::optional<int> celsius) {
+QString LocalizedTemperature(const Frame &frame, std::optional<int> celsius) {
 	if (!celsius) {
 		return QStringLiteral("–");
 	}
 	const auto value = frame.fahrenheit ? int(std::lround(*celsius * 1.8 + 32.)) : *celsius;
 	return frame.locale.toString(value) + QChar(0xb0);
+}
+
+QString Temperature(const Frame &frame, std::optional<int> celsius) {
+	return LocalizedTemperature(frame, celsius).replace(u'-', u'\u2212');
 }
 
 QString Chance(const Frame &frame, const HourlyWeather &hour) {
@@ -248,20 +252,30 @@ struct WeatherMetrics {
 	int icon = 0;
 	int line = 0;
 	int row = 0;
+	int curveGap = 0;
+	int curveHeight = 0;
+	int precipitationGap = 0;
 	int hourly = 0;
 };
 
-WeatherMetrics WeatherSizes(const Fonts &fonts, int unit) {
+WeatherMetrics WeatherSizes(const Fonts &fonts, int unit, int extraSpacing) {
 	const auto caption = QFontMetrics(fonts.caption).height();
 	const auto section = QFontMetrics(fonts.heading).height();
 	const auto line = QFontMetrics(fonts.label).height();
 	const auto icon = unit * 7 / 5;
 	const auto gap = std::max(1, unit / 4);
+	const auto curveGap = gap + extraSpacing / 2;
+	const auto curveHeight = unit + extraSpacing / 2;
+	const auto precipitationGap = extraSpacing / 2;
 	return {
 		.gap = gap, .inset = unit, .header = std::max(caption, section),
 		.current = QFontMetrics(fonts.current).height(), .section = section,
-		.caption = caption, .icon = icon, .line = line, .row = icon + 2 * gap,
-		.hourly = section + 3 * caption + icon + line + unit + 5 * gap,
+		.caption = caption, .icon = icon, .line = line,
+		.row = icon + 2 * gap + extraSpacing * 5 / 8,
+		.curveGap = curveGap, .curveHeight = curveHeight,
+		.precipitationGap = precipitationGap,
+		.hourly = section + 3 * caption + icon + line + curveHeight
+			+ 3 * gap + 2 * curveGap + precipitationGap,
 	};
 }
 
@@ -273,8 +287,8 @@ void Hourly(QPainter &p, QRect rect, const Frame &frame,
 	const auto timeTop = rect.y() + m.section + m.gap;
 	const auto iconTop = timeTop + m.caption + m.gap;
 	const auto tempTop = iconTop + m.icon + m.gap;
-	const auto curveTop = tempTop + m.line + m.gap;
-	const auto rainTop = curveTop + unit + m.gap;
+	const auto curveTop = tempTop + m.line + m.curveGap;
+	const auto rainTop = curveTop + m.curveHeight + m.curveGap;
 	auto lows = std::numeric_limits<int>::max();
 	auto highs = std::numeric_limits<int>::min();
 	for (const auto &hour : hours) {
@@ -308,7 +322,8 @@ void Hourly(QPainter &p, QRect rect, const Frame &frame,
 		if (hour.temperatureC) {
 			const auto span = std::max(1, highs - lows);
 			const auto mid = (lows + highs) / 2.;
-			const auto point = QPointF(center, curveTop + unit * (.5 - .63 * (*hour.temperatureC - mid) / span));
+			const auto point = QPointF(center,
+				curveTop + m.curveHeight * (.5 - .63 * (*hour.temperatureC - mid) / span));
 			p.setPen(QPen(c.accent, std::max(1, unit / 12), Qt::SolidLine, Qt::RoundCap));
 			if (previous) p.drawLine(*previous, point);
 			p.setPen(Qt::NoPen);
@@ -319,7 +334,7 @@ void Hourly(QPainter &p, QRect rect, const Frame &frame,
 			previous.reset();
 		}
 	}
-	Text(p, { rect.x(), rainTop + m.caption, rect.width(), m.caption },
+	Text(p, { rect.x(), rainTop + m.caption + m.precipitationGap, rect.width(), m.caption },
 		QStringLiteral("Chance of precipitation"), fonts.caption, c.muted);
 }
 
@@ -330,7 +345,7 @@ void Daily(QPainter &p, QRect rect, const Frame &frame,
 		QStringLiteral("Next three days"), fonts.heading, c.ink);
 	const auto fm = QFontMetrics(fonts.label);
 	auto nameW = 0;
-	auto lowW = fm.horizontalAdvance(Temperature(frame, -10));
+	auto lowW = fm.horizontalAdvance(LocalizedTemperature(frame, -10));
 	auto highW = lowW;
 	auto minimum = std::numeric_limits<int>::max();
 	auto maximum = std::numeric_limits<int>::min();
@@ -431,9 +446,11 @@ void Canvas::paintEvent(QPaintEvent *) {
 	const auto w = width() - 2 * outer;
 	const auto wide = w >= 35 * unit;
 	const auto compact = available < 24 * unit;
+	const auto extraSpacing = wide
+		? std::clamp((available - 30 * unit) / 12, 0, unit) : 0;
 	const auto fonts = Fonts{ Font(base, unit * 4 / 5), Font(base, unit),
 		Font(base, unit * 11 / 10, QFont::DemiBold), Font(base, unit * 2, QFont::DemiBold) };
-	const auto metrics = WeatherSizes(fonts, unit);
+	const auto metrics = WeatherSizes(fonts, unit, extraSpacing);
 	const auto f = Upcoming(_frame, wide ? 6 : 3);
 	const auto forecast = _frame.weather.has_value();
 	const auto visible = forecast || !_frame.update.isEmpty();
@@ -461,9 +478,12 @@ void Canvas::paintEvent(QPaintEvent *) {
 	const auto clockDateH = QFontMetrics(dateFont).height();
 	const auto date = _frame.locale.toString(_frame.local.date(), QLocale::LongFormat);
 	const auto time = Time(_frame.locale, _frame.local.time());
-	const auto zoneFont = Font(base, unit * 3 / 2, QFont::Medium);
+	const auto zoneCaption = Font(base, unit * 4 / 5 + extraSpacing / 6);
+	const auto zoneCaptionMetrics = QFontMetrics(zoneCaption);
+	const auto zoneCaptionH = zoneCaptionMetrics.height();
+	const auto zoneFont = Font(base, unit * 3 / 2 + extraSpacing * 3 / 8, QFont::Medium);
 	const auto zoneTimeH = QFontMetrics(zoneFont).height();
-	const auto zoneH = 2 * metrics.caption + zoneTimeH + metrics.gap;
+	const auto zoneH = 2 * zoneCaptionH + zoneTimeH + metrics.gap;
 	const auto reserveZone = !_frame.clocks.empty()
 		&& skyHeight > clockDateH + 2 * unit + zoneH ? zoneH : 0;
 	const auto timeLimit = reserveZone
@@ -488,8 +508,7 @@ void Canvas::paintEvent(QPaintEvent *) {
 	exclude({ clockLeft, top + clockDateH,
 		std::min(groupWidth, QFontMetrics(timeFont).horizontalAdvance(time)), timeH });
 	const auto pitch = clockWidth / columns;
-	const auto pad = unit * 3 / 4;
-	const auto caption = QFontMetrics(fonts.caption);
+	const auto pad = unit * 3 / 4 + extraSpacing / 2;
 	const auto zoneTime = QFontMetrics(zoneFont);
 	auto cells = std::vector<ClockCell>();
 	cells.reserve(clocks);
@@ -503,7 +522,8 @@ void Canvas::paintEvent(QPaintEvent *) {
 		const auto localTime = Time(_frame.locale, clock.time.time());
 		const auto relative = RelativeDay(clock.dayDifference);
 		const auto zw = std::min(pitch - 2 * pad,
-			std::max({ caption.horizontalAdvance(clock.label), caption.horizontalAdvance(relative),
+			std::max({ zoneCaptionMetrics.horizontalAdvance(clock.label),
+				zoneCaptionMetrics.horizontalAdvance(relative),
 				zoneTime.horizontalAdvance(localTime) }));
 		const auto rect = QRect(x, y, zw, zoneH);
 		cells.push_back({ rect, clock.label, localTime, relative, divider });
@@ -523,9 +543,9 @@ void Canvas::paintEvent(QPaintEvent *) {
 			p.setPen(c.rule);
 			p.drawLine(cell.divider, y + metrics.gap, cell.divider, y + zoneH - metrics.gap);
 		}
-		Text(p, { x, y, w, metrics.caption }, cell.label, fonts.caption, c.muted);
-		Text(p, { x, y + metrics.caption, w, zoneTimeH }, cell.time, zoneFont, c.ink);
-		Text(p, { x, y + metrics.caption + zoneTimeH, w, metrics.caption }, cell.relative, fonts.caption, c.muted);
+		Text(p, { x, y, w, zoneCaptionH }, cell.label, zoneCaption, c.muted);
+		Text(p, { x, y + zoneCaptionH, w, zoneTimeH }, cell.time, zoneFont, c.ink);
+		Text(p, { x, y + zoneCaptionH + zoneTimeH, w, zoneCaptionH }, cell.relative, zoneCaption, c.muted);
 	}
 
 	if (visible && w > 0) {
@@ -563,10 +583,11 @@ void Canvas::paintEvent(QPaintEvent *) {
 				const auto sectionsY = ruleY + 2 * metrics.gap + 1;
 				const auto split = wide && hourly && daily;
 				const auto divider = x + inner * 57 / 100;
-				const auto hourW = split ? divider - x - unit : inner;
+				const auto dividerGap = unit + extraSpacing / 2;
+				const auto hourW = split ? divider - x - dividerGap : inner;
 				if (hourly) Hourly(p, { x, sectionsY, hourW, hourly }, _frame, f.hours, fonts, metrics, unit, c);
 				if (daily) {
-					const auto dx = split ? divider + unit : x;
+					const auto dx = split ? divider + dividerGap : x;
 					const auto dy = sectionsY + ((hourly && !wide) ? hourly + 2 * metrics.gap : 0);
 					Daily(p, { dx, dy, x + inner - dx, daily }, _frame, f.days, fonts, metrics, unit, c);
 				}
