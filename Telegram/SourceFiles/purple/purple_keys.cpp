@@ -56,6 +56,7 @@
 #include "purple/purple_keys_ui.h"
 #include "purple/purple_keys_unread.h"
 #include "purple/purple_keys_zen.h"
+#include "purple/purple_list_filter_keys.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
 #include "purple/purple_notices.h"
@@ -3280,31 +3281,39 @@ void Keys::refreshStatusBar() {
 	state.unreadCh = _unreadSummary.ch;
 	state.unreadKnown = _unreadKnown;
 	state.zenMode = _zenMode;
+	const auto focus = QApplication::focusWidget();
+	const auto filterFocused = focus && focus->window() == _window && ListFilter::IsMarked(focus);
 	if (const auto layer = visibleLayer(); layer != ActiveLayer::None) {
 		switch (layer) {
 		case ActiveLayer::Cheatsheet:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"HELP"_q;
 			state.paneLabel = u"Keyboard Cheatsheet"_q;
-			state.rightCue = u"TAB all bindings  ·  j/k scroll  ·  / filter  ·  q/ESC close"_q;
+			state.rightCue = u"TAB all bindings · j/k scroll · i or / filter · q close"_q;
 			break;
 		case ActiveLayer::AllBindings:
-			state.badge = ModalUi::BadgeKind::Insert;
-			state.badgeText = u"FILTER"_q;
+			state.badge = ModalUi::BadgeKind::Help;
+			state.badgeText = u"BINDINGS"_q;
 			state.paneLabel = u"All Active Bindings"_q;
-			state.rightCue = u"TAB cheatsheet  ·  type to filter  ·  ESC close"_q;
+			state.rightCue = filterFocused
+				? u"TAB cheatsheet · C-n/C-p scroll · Esc list"_q
+				: u"TAB cheatsheet · j/k scroll · i or / filter · q close"_q;
 			break;
 		case ActiveLayer::Palette:
 			state.badge = ModalUi::BadgeKind::Palette;
 			state.badgeText = u"M-x"_q;
 			state.paneLabel = u"Command Palette"_q;
-			state.rightCue = u"C-n/p move  ·  RET run  ·  M-p/n history  ·  ESC close"_q;
+			state.rightCue = filterFocused
+				? u"RET run · C-n/C-p move · M-p/M-n history · Esc list"_q
+				: u"j/k move · RET run · i or / filter · q close"_q;
 			break;
 		case ActiveLayer::DescribeCommandPicker:
 			state.badge = ModalUi::BadgeKind::Palette;
 			state.badgeText = u"SPC h f"_q;
 			state.paneLabel = u"Describe Command"_q;
-			state.rightCue = u"C-n/p move  ·  RET inspect  ·  ESC close"_q;
+			state.rightCue = filterFocused
+				? u"RET inspect · C-n/C-p move · Esc list"_q
+				: u"j/k move · RET inspect · i or / filter · q close"_q;
 			break;
 		case ActiveLayer::DescribeKey:
 			state.badge = ModalUi::BadgeKind::Help;
@@ -3330,13 +3339,17 @@ void Keys::refreshStatusBar() {
 			state.badge = ModalUi::BadgeKind::Palette;
 			state.badgeText = u"UNREAD"_q;
 			state.paneLabel = u"Unread Unmuted Chats"_q;
-			state.rightCue = u"j/k move  ·  RET open  ·  m/u/* mark  ·  x read  ·  q close"_q;
+			state.rightCue = filterFocused
+				? u"RET open · C-n/C-p move · Esc list"_q
+				: u"j/k move · RET open · i or / filter · m/u/* mark · x read · q close"_q;
 			break;
 		case ActiveLayer::TopicPicker:
 			state.badge = ModalUi::BadgeKind::Local;
 			state.badgeText = u"TOPICS"_q;
 			state.paneLabel = u"Forum / Bot Topics"_q;
-			state.rightCue = u"j/k move  ·  RET open  ·  / filter  ·  u unread  ·  q close"_q;
+			state.rightCue = filterFocused
+				? u"RET open · C-n/C-p move · Esc list"_q
+				: u"j/k move · RET open · i or / filter · u unread · q close"_q;
 			break;
 		case ActiveLayer::Notice:
 			state.badge = ModalUi::BadgeKind::Help;
@@ -3348,15 +3361,25 @@ void Keys::refreshStatusBar() {
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"MESSAGES"_q;
 			state.paneLabel = u"Notice History (SPC h e)"_q;
-			state.rightCue = u"j/k move  ·  RET/o open  ·  / filter  ·  y copy  ·  c clear  ·  q close"_q;
+			state.rightCue = filterFocused
+				? u"RET open · C-n/C-p move · Esc list"_q
+				: u"j/k move · RET open · i or / filter · y copy · c clear · q close"_q;
 			break;
 		case ActiveLayer::None:
 			break;
 		}
+		if (filterFocused) {
+			state.badge = ModalUi::BadgeKind::Insert;
+			state.badgeText = u"INSERT"_q;
+		}
 		_statusBar->setState(std::move(state));
 		return;
 	}
-	if (_inspect) {
+	if (filterFocused) {
+		state.badge = ModalUi::BadgeKind::Insert;
+		state.badgeText = u"INSERT"_q;
+		state.rightCue = u"Esc list"_q;
+	} else if (_inspect) {
 		state.badge = ModalUi::BadgeKind::DescribeKey;
 		state.badgeText = u"KEY?"_q;
 		state.rightCue = u"ESC cancel"_q;

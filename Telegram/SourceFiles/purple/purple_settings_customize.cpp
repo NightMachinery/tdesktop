@@ -12,6 +12,7 @@
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_keys.h"
+#include "purple/purple_list_filter_keys.h"
 #include "purple/purple_picker.h"
 #include "purple/purple_privacy_screen.h"
 #include "purple/purple_settings_collection_ui.h"
@@ -367,7 +368,6 @@ public:
 		});
 		connect(_clear, &QPushButton::clicked, this, [this] {
 			_filter->clear();
-			_filterBeforeEdit.clear();
 			_tree->setFocus();
 		});
 		connect(_tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
@@ -477,8 +477,6 @@ protected:
 			const auto input = static_cast<QInputMethodEvent*>(event);
 			if (input->preeditString().isEmpty()) _preedit.remove(object);
 			else _preedit.insert(object);
-		} else if (event->type() == QEvent::FocusIn && object == _filter) {
-			_filterBeforeEdit = _filter->text();
 		} else if (event->type() == QEvent::FocusOut) {
 			_preedit.remove(object);
 		} else if (event->type() == QEvent::MouseButtonRelease && _confirm && object == _confirm) {
@@ -523,7 +521,12 @@ private:
 		layout->addLayout(scope);
 
 		auto filterRow = new QHBoxLayout();
-		_filter->setPlaceholderText(u"Filter settings…"_q);
+		const auto updateFilterHint = [this](bool modal) {
+			_filter->setPlaceholderText(modal ? u"i or / to filter settings"_q : u"Filter settings…"_q);
+		};
+		updateFilterHint(ModalKeysEnabled());
+		ModalKeysEnabledChanges() | rpl::on_next(updateFilterHint, lifetime());
+		ListFilter::Mark(_filter);
 		_filter->setAccessibleName(u"Filter settings"_q);
 		filterRow->addWidget(_filter, 1);
 		filterRow->addWidget(_clear);
@@ -855,11 +858,6 @@ private:
 		_inspector->setText(lines.join(u'\n'));
 	}
 
-	void startFilter() {
-		_filterBeforeEdit = _filter->text();
-		_filter->setFocus();
-	}
-
 	void selectSibling(int delta) {
 		if (!_anchor.isEmpty()) {
 			const auto previous = selected();
@@ -944,20 +942,20 @@ private:
 			return true;
 		}
 		if (object == _filter) {
-			if (cancel) {
+			if (cancel || (modal && ListFilter::Exit(key, mods))) {
 				if (!once()) return true;
-				_filter->setText(_filterBeforeEdit);
 				_tree->setFocus();
 				return true;
 			}
 			if (enter && !mods) {
 				if (!once()) return true;
-				_filterBeforeEdit = _filter->text();
 				_tree->setFocus();
+				if (modal) activateRow();
 				return true;
 			}
-			if ((key == Qt::Key_Down || key == Qt::Key_Up) && !mods) {
-				if (moving()) selectSibling(key == Qt::Key_Down ? 1 : -1);
+			if ((!mods && (key == Qt::Key_Down || key == Qt::Key_Up))
+				|| (mods == kCtrlMod && (key == Qt::Key_N || key == Qt::Key_P))) {
+				if (moving()) selectSibling((key == Qt::Key_Down || key == Qt::Key_N) ? 1 : -1);
 				return true;
 			}
 		}
@@ -997,7 +995,17 @@ private:
 			case EditorKey::Native: return false;
 			}
 		}
-		if (cancel) { if (once()) back(); return true; }
+		if (cancel || (modal && ListFilter::Exit(key, mods)
+			&& (object == _tree || object == this))) {
+			if (once()) {
+				if (modal && !_filter->text().isEmpty() && (object == _tree || object == this)) {
+					_filter->clear();
+				} else {
+					back();
+				}
+			}
+			return true;
+		}
 		if (key == Qt::Key_F6) { if (once()) changePanel(mods.testFlag(Qt::ShiftModifier)); return true; }
 		if (key == Qt::Key_Tab && !mods && object == _inspector) {
 			if (once()) _tree->setFocus();
@@ -1021,7 +1029,7 @@ private:
 			}
 		} else if (enter && !mods) { if (once()) activateRow(); }
 		else if (!modal) return false;
-		else if (key == Qt::Key_Slash && !mods) { if (once()) startFilter(); }
+		else if (ListFilter::Enter(*event, key)) { if (once()) _filter->setFocus(); }
 		else if (key == Qt::Key_Question) { if (once()) showHelp(); }
 		else if (key == Qt::Key_R && !mods) { if (once()) resetSelected(); }
 		else if (key == Qt::Key_U && !mods) { if (once()) undo(); }
@@ -1721,7 +1729,7 @@ private:
 		const auto row = selected();
 		if (row && !row->help.isEmpty()) addSheetWidget(HelpLabel(_sheet, row->help));
 		addSheetWidget(HelpLabel(_sheet, ModalKeysEnabled()
-			? u"j / k Move · h / l Fold or enter · / Filter · Return Edit\n"
+			? u"j / k Move · h / l Fold or enter · i or / Filter · Return Edit\n"
 				"t Toggle · + / − Step · r Reset · u Undo · d Review · y Copy TOML path\n"
 				"A Switch account · F6 Change panel · F8 Privacy screen outside text fields · Esc Back"_q
 			: u"Arrows Move or fold · Return Edit · F6 Change panel · Esc Back\n"
@@ -1729,7 +1737,7 @@ private:
 		addSheetWidget(HelpLabel(_sheet, u"Forms · Ctrl+Return Stage. Return inserts a newline in multiline fields."_q));
 		if (ModalKeysEnabled()) {
 			addSheetWidget(HelpLabel(_sheet, u"Collections · a Add · Shift+D Duplicate · x Remove · Shift+J/K Reorder · u Undo\n"
-				"Chat picker · / Search · Space Add the selected chat"_q));
+				"Chat picker · i or / Search · Space Add the selected chat"_q));
 		}
 		addSheetWidget(HelpLabel(_sheet, u"Review · Effects shows what changes. Lines shows the file diff. "
 			"Use [ / ] to page through Lines while it has focus. Apply changes writes this draft to one file."_q));
@@ -2172,7 +2180,6 @@ private:
 	QString _selection;
 	QString _anchor;
 	QString _accountId;
-	QString _filterBeforeEdit;
 	QLineEdit *_line = nullptr;
 	QPlainTextEdit *_multi = nullptr;
 	QComboBox *_choice = nullptr;

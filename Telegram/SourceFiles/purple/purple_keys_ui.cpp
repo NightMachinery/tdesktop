@@ -3,6 +3,7 @@
 
 #include "purple/purple_keys.h"
 #include "purple/purple_keys_colors.h"
+#include "purple/purple_list_filter_keys.h"
 
 #include "base/event_filter.h"
 #include "data/data_forum_topic.h"
@@ -202,6 +203,38 @@ int ListStep(int key, Qt::KeyboardModifiers mods, bool plainLetters) {
 		}
 	}
 	return 0;
+}
+
+using FilterResult = base::EventFilterResult;
+
+void InstallListFilter(
+		not_null<Ui::LayerWidget*> layer,
+		not_null<Ui::InputField*> field,
+		Fn<FilterResult(QKeyEvent*)> handler) {
+	const auto edit = field->rawTextEdit();
+	ListFilter::Mark(edit);
+	base::install_event_filter(edit, [=](not_null<QEvent*> event) {
+		if (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut) {
+			layer->update();
+		}
+		if (event->type() != QEvent::KeyPress) {
+			return FilterResult::Continue;
+		}
+		const auto layout = edit->textCursor().block().layout();
+		return (layout && !layout->preeditAreaText().isEmpty())
+			? FilterResult::Continue
+			: handler(static_cast<QKeyEvent*>(event.get()));
+	});
+}
+
+void ClearListFilterOrClose(
+		not_null<Ui::LayerWidget*> layer,
+		not_null<Ui::InputField*> field) {
+	if (field->getLastText().isEmpty()) {
+		layer->closeLayer();
+	} else {
+		field->setText(QString());
+	}
 }
 
 void PaintHighlightedLabel(
@@ -1022,11 +1055,7 @@ public:
 				_bindingsWidget->setFilter(_filter->getLastText());
 			}
 		}, lifetime());
-		base::install_event_filter(_filter->rawTextEdit(), [=](not_null<QEvent*> e) {
-			if (e->type() != QEvent::KeyPress) {
-				return base::EventFilterResult::Continue;
-			}
-			const auto k = static_cast<QKeyEvent*>(e.get());
+		InstallListFilter(this, _filter, [=](QKeyEvent *k) {
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
 			const auto key = ModalPhysicalKey(*k);
 			const auto step = ListStep(key, mods, false);
@@ -1036,8 +1065,14 @@ public:
 				}
 				return base::EventFilterResult::Cancel;
 			}
-			if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
-				if (AllowModalLayerKey(*k, this)) closeLayer();
+			if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
+				if (AllowModalLayerKey(*k, this)) {
+					if (ModalKeysEnabled()) {
+						setFocus();
+					} else {
+						closeLayer();
+					}
+				}
 				return base::EventFilterResult::Cancel;
 			} else if (k->key() == Qt::Key_Tab || k->key() == Qt::Key_Backtab) {
 				if (AllowModalLayerKey(*k, this)) toggleTab();
@@ -1101,9 +1136,10 @@ protected:
 		if (!AllowModalLayerKey(*e, this, step != 0)) {
 			return;
 		}
-		if (key == Qt::Key_Escape
-			|| (modal && key == Qt::Key_Q && !mods)
-			|| (key == Qt::Key_G && mods == kCtrlMod)) {
+		if (modal && ListFilter::Exit(key, mods) && _showAll) {
+			ClearListFilterOrClose(this, _filter);
+			return;
+		} else if (ListFilter::Exit(key, mods, modal) || (modal && key == Qt::Key_Q && !mods)) {
 			closeLayer();
 			return;
 		} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
@@ -1112,7 +1148,7 @@ protected:
 		} else if (step) {
 			ScrollModalLayer(*e, this, _scroll, 48 * step);
 			return;
-		} else if (modal && key == Qt::Key_Slash && !mods) {
+		} else if (modal && ListFilter::Enter(*e, key)) {
 			if (!_showAll) {
 				toggleTab();
 			}
@@ -1204,13 +1240,16 @@ protected:
 
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
-		const auto leftHint = ModalKeysEnabled()
-			? u"TAB switch view  ·  j/k scroll  ·  / filter  ·  q close"_q
-			: u"TAB switch view  ·  ↑/↓ scroll  ·  ESC close"_q;
+		const auto leftHint = !ModalKeysEnabled()
+			? u"TAB switch view · ↑/↓ scroll · Esc close"_q
+			: (_showAll && _filter->hasFocus())
+			? u"TAB cheatsheet · C-n/C-p scroll · Esc list"_q
+			: u"TAB switch view · j/k scroll · i or / filter · q close"_q;
+		const auto hintWidth = width() / 2 - 20;
 		p.drawText(
-			QRect(rtl ? (width() / 2) : 20, height() - kFooterH, width() / 2 - 20, kFooterH),
+			QRect(rtl ? (width() / 2) : 20, height() - kFooterH, hintWidth, kFooterH),
 			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
-			leftHint);
+			ElideText(st::normalFont, leftHint, hintWidth));
 
 		if (!_data.keymapError.isEmpty() || !_data.keymapPath.isEmpty()) {
 			auto prettyPath = _data.keymapPath;
@@ -1791,23 +1830,21 @@ public:
 			activateRow(_selected);
 		}, lifetime());
 
-		base::install_event_filter(_input->rawTextEdit(), [=](not_null<QEvent*> e) {
-			if (e->type() != QEvent::KeyPress) {
-				return base::EventFilterResult::Continue;
-			}
-			const auto k = static_cast<QKeyEvent*>(e.get());
-			const auto layout = _input->rawTextEdit()->textCursor().block().layout();
-			if (layout && !layout->preeditAreaText().isEmpty()) {
-				return base::EventFilterResult::Continue;
-			}
+		InstallListFilter(this, _input, [=](QKeyEvent *k) {
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
 			const auto key = ModalPhysicalKey(*k);
-			if (key == Qt::Key_Return) {
+			if (key == Qt::Key_Return || key == Qt::Key_Enter) {
 				return AllowModalLayerKey(*k, this)
 					? base::EventFilterResult::Continue
 					: base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
-				if (AllowModalLayerKey(*k, this)) cancel();
+			} else if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
+				if (AllowModalLayerKey(*k, this)) {
+					if (ModalKeysEnabled()) {
+						setFocus();
+					} else {
+						cancel();
+					}
+				}
 				return base::EventFilterResult::Cancel;
 			} else if (key == Qt::Key_F6 && !mods) {
 				if (AllowModalLayerKey(*k, this)) setFocus();
@@ -1838,11 +1875,20 @@ protected:
 		const auto key = ModalPhysicalKey(*event);
 		if (const auto step = ListStep(key, mods, ModalKeysEnabled())) {
 			if (AllowModalLayerKey(*event, this, true)) moveSelection(step);
-		} else if (key == Qt::Key_Return) {
+		} else if (key == Qt::Key_Return || key == Qt::Key_Enter) {
 			if (AllowModalLayerKey(*event, this)) activateRow(_selected);
-		} else if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
+		} else if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
+			if (AllowModalLayerKey(*event, this)) {
+				if (ModalKeysEnabled() && !_input->getLastText().isEmpty()) {
+					_input->setText(QString());
+				} else {
+					cancel();
+				}
+			}
+		} else if (ModalKeysEnabled() && key == Qt::Key_Q && !mods) {
 			if (AllowModalLayerKey(*event, this)) cancel();
-		} else if (key == Qt::Key_F6 && !mods) {
+		} else if ((key == Qt::Key_F6 && !mods)
+			|| (ModalKeysEnabled() && ListFilter::Enter(*event, key))) {
 			if (AllowModalLayerKey(*event, this)) _input->setFocusFast();
 		} else {
 			LayerWidget::keyPressEvent(event);
@@ -1941,10 +1987,15 @@ protected:
 		p.fillRect(0, height() - kFooterH, width(), 1, st::boxDividerBg->c);
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
+		const auto footer = !ModalKeysEnabled()
+			? u"C-n/C-p move · RET run · F6 search/list · Esc close"_q
+			: _input->hasFocus()
+			? u"C-n/C-p move · RET run · M-p/M-n history · Esc list"_q
+			: u"j/k move · RET run · i or / filter · q close"_q;
 		p.drawText(
 			footerRect.adjusted(14, 0, -14, 0),
 			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
-			u"C-n/p move  ·  RET run  ·  F6 search/list  ·  ESC close"_q);
+			ElideText(st::normalFont, footer, width() - 28));
 	}
 
 private:
@@ -2354,7 +2405,7 @@ public:
 		this,
 		st::defaultMultiSelectSearchField,
 		Ui::InputField::Mode::SingleLine,
-		rpl::single(u"Filter unread chats (orderless, e.g. \"dm\", \"gp\", \"bot\")..."_q)))
+		rpl::single(u"i or / to filter"_q)))
 	, _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll)) {
 		setFocusPolicy(Qt::StrongFocus);
 		_close->setClickedCallback([=] { closeLayer(); });
@@ -2373,32 +2424,18 @@ public:
 			openRow(_selected);
 		}, lifetime());
 
-		base::install_event_filter(_filter->rawTextEdit(), [=](not_null<QEvent*> e) {
-			if (e->type() != QEvent::KeyPress) {
-				return base::EventFilterResult::Continue;
-			}
-			const auto k = static_cast<QKeyEvent*>(e.get());
-			const auto layout = _filter->rawTextEdit()->textCursor().block().layout();
-			if (layout && !layout->preeditAreaText().isEmpty()) {
-				return base::EventFilterResult::Continue;
-			}
+		InstallListFilter(this, _filter, [=](QKeyEvent *k) {
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
 			const auto key = ModalPhysicalKey(*k);
-			if (key == Qt::Key_Return) {
+			if (key == Qt::Key_Return || key == Qt::Key_Enter) {
 				return AllowModalLayerKey(*k, this)
 					? base::EventFilterResult::Continue
 					: base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
-				if (!AllowModalLayerKey(*k, this)) {
-					return base::EventFilterResult::Cancel;
-				}
-				if (!_filter->getLastText().isEmpty()) {
-					_filter->setText(QString());
-					setFocus();
-				} else {
+			} else if (ListFilter::Exit(key, mods)) {
+				if (AllowModalLayerKey(*k, this)) {
 					setFocus();
 				}
-				return base::EventFilterResult::Cancel;
+				return FilterResult::Cancel;
 			} else if (const auto step = ListStep(key, mods, false)) {
 				if (AllowModalLayerKey(*k, this, true)) {
 					moveSelection(step);
@@ -2455,6 +2492,11 @@ protected:
 			return;
 		}
 
+		if (key == Qt::Key_Q && !mods) {
+			closeLayer();
+			return;
+		}
+
 		if (!_pendingConfirmTargets.empty()) {
 			if ((key == Qt::Key_Y && !mods) || key == Qt::Key_Return || key == Qt::Key_Enter) {
 				auto targets = std::move(_pendingConfirmTargets);
@@ -2464,7 +2506,6 @@ protected:
 			}
 			if ((key == Qt::Key_N && !mods)
 				|| key == Qt::Key_Escape
-				|| (key == Qt::Key_Q && !mods)
 				|| (key == Qt::Key_G && mods == kCtrlMod)) {
 				_pendingConfirmTargets.clear();
 				update();
@@ -2501,12 +2542,10 @@ protected:
 			return;
 		}
 
-		if (key == Qt::Key_Escape
-			|| (key == Qt::Key_Q && !mods)
-			|| (key == Qt::Key_G && mods == kCtrlMod)) {
-			closeLayer();
+		if (ListFilter::Exit(key, mods)) {
+			ClearListFilterOrClose(this, _filter);
 			return;
-		} else if (key == Qt::Key_Slash && !mods) {
+		} else if (ListFilter::Enter(*e, key)) {
 			_filter->setFocusFast();
 			return;
 		} else if (step) {
@@ -2623,7 +2662,9 @@ protected:
 				? u"* d mark DMs  ·  * g mark groups  ·  * c mark channels"_q
 				: (_pendingPrefix == u'g')
 				? u"g g top  ·  g r refresh"_q
-				: u"j/k move  ·  RET open  ·  / filter  ·  m/u/U/t/* mark  ·  x read  ·  q close"_q;
+				: _filter->hasFocus()
+				? u"RET open · C-n/C-p move · Esc list"_q
+				: u"j/k move · RET open · i or / filter · m/u/U/t/* mark · x read · q close"_q;
 			p.drawText(
 				footerRect.adjusted(16, 0, -16, 0),
 				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
@@ -2633,13 +2674,17 @@ protected:
 
 private:
 	void refilter() {
+		refilter(ModalUnread::SelectedPeer(_config.items, _visible, _selected));
+	}
+
+	void refilter(uint64_t selectedPeer) {
 		_visible = ModalUnread::FilterBufferItems(_config.items, _filter->getLastText());
-		_selected = std::clamp(_selected, 0, std::max(0, int(_visible.size()) - 1));
+		_selected = ModalUnread::RefilteredSelection(_config.items, _visible, selectedPeer, _selected);
 		if (_rows) {
 			_rows->setData(_config.items, _visible, _marked, _selected);
 		}
 		_scroll->scrollToY(0);
-		update();
+		syncSelection();
 	}
 
 	void moveSelection(int delta) {
@@ -2680,8 +2725,9 @@ private:
 
 	void refreshItems() {
 		if (_config.onRefresh) {
+			const auto peer = ModalUnread::SelectedPeer(_config.items, _visible, _selected);
 			_config.items = _config.onRefresh();
-			refilter();
+			refilter(peer);
 		}
 	}
 
@@ -3079,7 +3125,7 @@ public:
 		this,
 		st::defaultMultiSelectSearchField,
 		Ui::InputField::Mode::SingleLine,
-		rpl::single(u"Filter topics (orderless)..."_q)))
+		rpl::single(u"i or / to filter topics"_q)))
 	, _topicAction(_config.actionLabel.isEmpty() ? nullptr
 		: Ui::CreateChild<Ui::RoundButton>(
 			this, rpl::single(_config.actionLabel + u"  (c)"_q), st::defaultLightButton))
@@ -3135,37 +3181,25 @@ public:
 
 		_filter->changes() | rpl::on_next([=] {
 			_autoLoadPaused = false;
-			refilter(/*preserveScroll=*/false, MsgId(0));
+			refilter(/*preserveScroll=*/false, selectedRoot());
 			maybeRequestMore();
 		}, lifetime());
 		_filter->submits() | rpl::on_next([=](Qt::KeyboardModifiers) {
 			openRow(_selected);
 		}, lifetime());
 
-		base::install_event_filter(_filter->rawTextEdit(), [=](not_null<QEvent*> e) {
-			if (e->type() != QEvent::KeyPress) {
-				return base::EventFilterResult::Continue;
-			}
-			const auto k = static_cast<QKeyEvent*>(e.get());
-			const auto layout = _filter->rawTextEdit()->textCursor().block().layout();
-			if (layout && !layout->preeditAreaText().isEmpty()) {
-				return base::EventFilterResult::Continue;
-			}
+		InstallListFilter(this, _filter, [=](QKeyEvent *k) {
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
 			const auto key = ModalPhysicalKey(*k);
-			if (key == Qt::Key_Return) {
+			if (key == Qt::Key_Return || key == Qt::Key_Enter) {
 				return AllowModalLayerKey(*k, this)
 					? base::EventFilterResult::Continue
 					: base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
-				if (!AllowModalLayerKey(*k, this)) {
-					return base::EventFilterResult::Cancel;
+			} else if (ListFilter::Exit(key, mods)) {
+				if (AllowModalLayerKey(*k, this)) {
+					setFocus();
 				}
-				if (!_filter->getLastText().isEmpty()) {
-					_filter->setText(QString());
-				}
-				setFocus();
-				return base::EventFilterResult::Cancel;
+				return FilterResult::Cancel;
 			} else if (const auto step = ListStep(key, mods, false)) {
 				if (AllowModalLayerKey(*k, this, true)) {
 					moveSelection(step);
@@ -3229,6 +3263,11 @@ protected:
 		if (!AllowModalLayerKey(*e, this, step != 0 && !_pendingG)) {
 			return;
 		}
+		if (key == Qt::Key_Q && !mods) {
+			closeLayer();
+			return;
+		}
+
 		if (_pendingG) {
 			_pendingG = false;
 			if (key == Qt::Key_G && !mods) {
@@ -3245,12 +3284,10 @@ protected:
 				return;
 			}
 		}
-		if (key == Qt::Key_Escape
-			|| (key == Qt::Key_Q && !mods)
-			|| (key == Qt::Key_G && mods == kCtrlMod)) {
-			closeLayer();
+		if (ListFilter::Exit(key, mods)) {
+			ClearListFilterOrClose(this, _filter);
 			return;
-		} else if (key == Qt::Key_Slash && !mods) {
+		} else if (ListFilter::Enter(*e, key)) {
 			_filter->setFocusFast();
 			return;
 		} else if (key == Qt::Key_G && !mods) {
@@ -3269,7 +3306,7 @@ protected:
 		} else if (key == Qt::Key_U && !mods) {
 			_unreadOnly = !_unreadOnly;
 			_autoLoadPaused = false;
-			refilter(/*preserveScroll=*/false, MsgId(0));
+			refilter(/*preserveScroll=*/false, selectedRoot());
 			maybeRequestMore();
 			return;
 		} else if (key == Qt::Key_C && !mods && _topicAction) {
@@ -3343,7 +3380,10 @@ protected:
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
 		const auto hint = [&] {
-			auto out = u"j/k move  ·  RET open  ·  / filter  ·  u unread"_q;
+			if (_filter->hasFocus()) {
+				return u"RET open · C-n/C-p move · Esc list"_q;
+			}
+			auto out = u"j/k move · RET open · i or / filter · u unread"_q;
 			if (_hasMore) {
 				out += _loadTimeout.isActive() ? u"  ·  loading..."_q : u"  ·  L more"_q;
 			}
@@ -3367,15 +3407,17 @@ private:
 		callback();
 	}
 
+	MsgId selectedRoot() const {
+		return (_selected >= 0 && _selected < int(_visible.size()))
+			? _config.items[_visible[_selected]].rootId
+			: MsgId(0);
+	}
+
 	void refreshFromSource(bool preserveScroll) {
 		if (!_config.onRefresh) {
 			return;
 		}
-		const auto keepRootId = (_selected >= 0
-				&& _selected < int(_visible.size())
-				&& _visible[_selected] < int(_config.items.size()))
-			? _config.items[_visible[_selected]].rootId
-			: MsgId(0);
+		const auto keepRootId = selectedRoot();
 		auto snap = _config.onRefresh();
 		_config.items = std::move(snap.items);
 		_hasMore = snap.hasMore;
@@ -4284,7 +4326,7 @@ public:
 		this,
 		st::defaultMultiSelectSearchField,
 		Ui::InputField::Mode::SingleLine,
-		rpl::single(u"Filter notices (orderless)..."_q)))
+		rpl::single(u"i or / to filter notices"_q)))
 	, _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll)) {
 		setFocusPolicy(Qt::StrongFocus);
 		_close->setClickedCallback([=] { closeLayer(); });
@@ -4302,30 +4344,18 @@ public:
 			inspectRow(_selected);
 		}, lifetime());
 
-		base::install_event_filter(_filter->rawTextEdit(), [=](not_null<QEvent*> e) {
-			if (e->type() != QEvent::KeyPress) {
-				return base::EventFilterResult::Continue;
-			}
-			const auto k = static_cast<QKeyEvent*>(e.get());
-			const auto layout = _filter->rawTextEdit()->textCursor().block().layout();
-			if (layout && !layout->preeditAreaText().isEmpty()) {
-				return base::EventFilterResult::Continue;
-			}
+		InstallListFilter(this, _filter, [=](QKeyEvent *k) {
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
 			const auto key = ModalPhysicalKey(*k);
-			if (key == Qt::Key_Return) {
+			if (key == Qt::Key_Return || key == Qt::Key_Enter) {
 				return AllowModalLayerKey(*k, this)
 					? base::EventFilterResult::Continue
 					: base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
-				if (!AllowModalLayerKey(*k, this)) {
-					return base::EventFilterResult::Cancel;
+			} else if (ListFilter::Exit(key, mods)) {
+				if (AllowModalLayerKey(*k, this)) {
+					setFocus();
 				}
-				if (!_filter->getLastText().isEmpty()) {
-					_filter->setText(QString());
-				}
-				setFocus();
-				return base::EventFilterResult::Cancel;
+				return FilterResult::Cancel;
 			} else if (const auto step = ListStep(key, mods, false)) {
 				if (AllowModalLayerKey(*k, this, true)) {
 					moveSelection(step);
@@ -4380,6 +4410,11 @@ protected:
 		if (!AllowModalLayerKey(*e, this, step != 0 && !_pendingG)) {
 			return;
 		}
+		if (key == Qt::Key_Q && !mods) {
+			closeLayer();
+			return;
+		}
+
 		if (_pendingG) {
 			_pendingG = false;
 			if (key == Qt::Key_G && !mods) {
@@ -4387,12 +4422,10 @@ protected:
 				return;
 			}
 		}
-		if (key == Qt::Key_Escape
-			|| (key == Qt::Key_Q && !mods)
-			|| (key == Qt::Key_G && mods == kCtrlMod)) {
-			closeLayer();
+		if (ListFilter::Exit(key, mods)) {
+			ClearListFilterOrClose(this, _filter);
 			return;
-		} else if (key == Qt::Key_Slash && !mods) {
+		} else if (ListFilter::Enter(*e, key)) {
 			_filter->setFocusFast();
 			return;
 		} else if (key == Qt::Key_G && !mods) {
@@ -4475,7 +4508,9 @@ protected:
 		p.fillRect(0, height() - kFooterH, width(), 1, st::boxDividerBg->c);
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
-		const auto hint = u"j/k/gg/G move  ·  RET/o open  ·  / filter  ·  y copy  ·  c clear  ·  q close"_q;
+		const auto hint = _filter->hasFocus()
+			? u"RET open · C-n/C-p move · Esc list"_q
+			: u"j/k move · RET open · i or / filter · y copy · c clear · q close"_q;
 		p.drawText(
 			footerRect.adjusted(16, 0, -16, 0),
 			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,

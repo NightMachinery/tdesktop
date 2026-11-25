@@ -172,6 +172,9 @@ the numbers.
 
 ## Recipient picker visibility
 
+- `boxes/peer_list_box.cpp` shares the modal filter entry and exit keys with
+  the chat palette and searchable peer pickers.
+
 - `boxes/share_box.cpp`: candidate guards for default, folder-filtered and server
   search sources, plus two calls and a friend declaration for the owned share
   refresh bridge. The bridge preserves visible selection while rebuilding indexes.

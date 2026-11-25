@@ -151,11 +151,37 @@ for required_ui in (
 
 # Verify IME safety in palette filter input.
 palette_ui = between(keys_ui, "class CommandPaletteLayer", "class UnreadBufferRowsWidget")
-ordered(palette_ui, "preeditAreaText().isEmpty()", "Qt::Key_Return", "AllowModalLayerKey",
-        "Qt::Key_Escape", "Qt::Key_F6", "ListStep(key, mods, false)",
+ordered(keys_ui, "void InstallListFilter", "ListFilter::Mark(edit)", "preeditAreaText().isEmpty()",
+        "FilterResult::Continue", "handler(static_cast<QKeyEvent*>")
+ordered(palette_ui, "InstallListFilter(this, _input", "Qt::Key_Return", "AllowModalLayerKey",
+        "ListFilter::Exit", "setFocus()", "Qt::Key_F6", "ListStep(key, mods, false)",
         "Qt::AltModifier", "stepHistory(")
 ordered(palette_ui, "void keyPressEvent", "ListStep(key, mods, ModalKeysEnabled())",
         "AllowModalLayerKey(*event, this, true)", "moveSelection(step)")
+ordered(palette_ui, "void doSetInnerFocus()", "_input->setFocusFast()")
+for layer, last in (("UnreadBufferLayer", "TopicRowsWidget"), ("TopicPickerLayer", "NoticeBodyWidget"),
+                    ("ModalHelpLayer", "DescribeLayer")):
+    body = between(keys_ui, f"class {layer}", f"class {last}")
+    input_keys = between(body, "InstallListFilter(this, _filter", "\n\t\t});")
+    ordered(input_keys, "ListFilter::Exit", "AllowModalLayerKey", "setFocus()")
+    assert "setText(" not in input_keys
+    ordered(body, "void keyPressEvent", "ClearListFilterOrClose(this, _filter)", "ListFilter::Enter(*e, key)")
+unread = between(keys_ui, "class UnreadBufferLayer", "class TopicRowsWidget")
+ordered(unread, 'u"i or / to filter"_q', "_filter->submits()", "openRow(_selected)", "InstallListFilter")
+ordered(unread, "void keyPressEvent", "key == Qt::Key_Q", "closeLayer()", "_pendingConfirmTargets.empty()")
+ordered(unread, "_filter->hasFocus()", 'u"RET open · C-n/C-p move · Esc list"_q',
+        "ModalUnread::SelectedPeer", "ModalUnread::RefilteredSelection")
+notice_history = keys_ui[keys_ui.index("class NoticeHistoryLayer final"):]
+ordered(notice_history, "InstallListFilter(this, _filter", "ListFilter::Exit", "setFocus()",
+        "void keyPressEvent", "ClearListFilterOrClose(this, _filter)", "ListFilter::Enter(*e, key)")
+ordered(customize, "if (object == _filter)", "ListFilter::Exit", "_tree->setFocus()", "ListFilter::Enter(*event, key)")
+assert "_filterBeforeEdit" not in customize
+ordered(collections, "object == _search && ListFilter::Exit", "_peerList->setFocus()", "ListFilter::Enter(*key, code, false)")
+ordered(read("boxes/peer_list_box.cpp"), "Purple::InstallPickerFilter", "void PeerListBox::keyPressEvent", "Purple::HandlePickerFilter")
+ordered(read("purple/purple_picker.cpp"), "void InstallPickerFilter", "!ModalKeysEnabled()", "preeditAreaText().isEmpty()",
+        "ListFilter::Exit", "list->setFocus()", "bool HandlePickerFilter", "ListFilter::Enter", "filter->clearQuery()")
+ordered(keys, "void Keys::refreshStatusBar", "ListFilter::IsMarked(focus)", "case ActiveLayer::UnreadBuffer",
+        "if (filterFocused)", "ModalUi::BadgeKind::Insert", 'u"INSERT"_q')
 
 # Verify amx + orderless helpers exist in purple_keys_mx.h (including title-first tiering and subtitle highlights).
 for sym in ("kRecentLimit = 7", "WordInitials", "ParseTokens", "MatchToken",

@@ -161,7 +161,7 @@ native message menu includes live reaction and read-receipt details.
   curated task cards with live-resolved bindings and a footer showing the
   `keys.edn` path and status. Press `TAB` (or click the header tabs) to switch
   to the exhaustive active binding list grouped by scope, with orderless
-  filtering (`/`), `j`/`k` scrolling, and `q` / `Esc` to close.
+  filtering (`i`, `a`, or `/`), `j`/`k` scrolling, and `q` to close from the list.
 - **`SPC h k` (Describe Key) and `SPC h f` (Describe Command):** inspect any
   chord without executing it, or pick any command to see its availability, why
   it is unavailable if so, and every map where it is bound.
@@ -178,6 +178,14 @@ native message menu includes live reaction and read-receipt details.
   Hold the arrow, Control, or Alt motions to repeat them. `F6` switches between
   the search field and results. With modal input enabled, hold `j` or `k` to
   move through the focused results.
+
+With modal keys on, a list's filter opens with `i`, `a`, `/`, or a click. A
+keyboard layout that types `/` with a modifier works too. Press `Esc`, `C-[`,
+or `C-g` in the filter to keep the query and return to the list. `Esc` in the
+list clears a non-empty query first and closes once the query is empty. `q`
+closes directly from the list. Command and chat palettes still open with the
+filter focused. In the Customize collection picker, use `i` or `/` to filter
+and `a` to add the selected chat.
 
 With modal keyboard shortcuts off, **Option+X** on macOS (**Alt+X** elsewhere)
 still opens M-x in an active, unlocked account window. The palette includes
@@ -257,9 +265,12 @@ on the modal status line and cheatsheet footer.
 - **Unread unmuted chats buffer (`SPC u`, `SPC b I`):** an iBuffer-style list of
   chats that currently have unread unmuted notifications, showing profile
   pictures, `DM` / `GP` / `CH` tags, unread counts, and message previews.
-  Navigate with `j`/`k`, `C-n`/`C-p`, `g g`, `G`, filter orderless with `/`,
-  refresh with `g r`, mark with `m` / `u` / `U` / `t` / `* d` / `* g` / `* c`,
-  open with `RET` or `o`, and mark read with `r` or `x`. Marking more than one
+  Enter the orderless filter with `i`, `a`, or `/`. The status line shows
+  `INSERT` while typing and `UNREAD` in the list. `RET` opens the selected chat
+  from either focus. The selection follows the chat as results narrow or move.
+  In the list, navigate with `j`/`k`, `C-n`/`C-p`, `g g`, or `G`, refresh with
+  `g r`, mark with `m` / `u` / `U` / `t` / `* d` / `* g` / `* c`, open with `o`,
+  and mark read with `r` or `x`. Marking more than one
   chat as read asks for an explicit `y` / `RET` confirmation first because
   marking read sends read receipts.
 - **Profile pictures in modal menus:** circular peer avatars appear beside

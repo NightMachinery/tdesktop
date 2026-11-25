@@ -88,6 +88,17 @@ int main() {
 
 		const auto byHandle = FilterBufferItems(items, QStringLiteral("@alice"));
 		Check(byHandle.size() == 1 && items[byHandle[0]].peerId == 10, "username handle filter");
+		const auto selected = SelectedPeer(items, all, 1);
+		Check(selected == 40 && RefilteredSelection(items, bots, selected, 1) == 0,
+			"narrowing retains the selected chat by peer ID");
+		Check(RefilteredSelection(items, all, selected, 0) == 1,
+			"clearing a filter follows the chat to its broader-list row");
+		Check(RefilteredSelection(items, forum, selected, 1) == 0,
+			"selection clamps to the visible range when the chat is filtered out");
+		std::swap(items[1].lastTimestamp, items[3].lastTimestamp);
+		const auto refreshed = FilterBufferItems(items, QString());
+		Check(RefilteredSelection(items, refreshed, selected, 1) == 0,
+			"refresh follows the chat after ordering changes");
 
 		// 4. Mark operations.
 		QSet<uint64_t> marks;

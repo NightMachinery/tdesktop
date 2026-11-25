@@ -1,4 +1,6 @@
 #include "purple/purple_picker.h"
+#include "purple/purple_keys.h"
+#include "purple/purple_list_filter_keys.h"
 
 #include "apiwrap.h"
 #include "chat_helpers/compose/compose_show.h"
@@ -6,6 +8,7 @@
 #include "menu/menu_send_details.h"
 #include "payments/payments_form.h"
 #include "base/weak_ptr.h"
+#include "base/event_filter.h"
 #include "boxes/peer_list_controllers.h"
 #include "boxes/peers/add_bot_to_chat_box.h"
 #include "crl/crl_on_main.h"
@@ -14,9 +17,88 @@
 #include "data/data_user.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/widgets/multi_select.h"
 #include <QtCore/QCoreApplication>
+#include <QtGui/QTextBlock>
+#include <QtGui/QTextLayout>
+#include <QtWidgets/QTextEdit>
 
 namespace Purple {
+
+void InstallPickerFilter(
+		not_null<PeerListBox*> box,
+		not_null<Ui::MultiSelect*> filter,
+		not_null<PeerListContent*> list) {
+	const auto edit = filter->findChild<QTextEdit*>();
+	if (!edit) {
+		return;
+	}
+	ListFilter::Mark(edit);
+	base::install_event_filter(edit, [=](not_null<QEvent*> event) {
+		using Result = base::EventFilterResult;
+		if (!ModalKeysEnabled() || event->type() != QEvent::KeyPress) {
+			return Result::Continue;
+		}
+		const auto layout = edit->textCursor().block().layout();
+		if (layout && !layout->preeditAreaText().isEmpty()) {
+			return Result::Continue;
+		}
+		const auto press = static_cast<QKeyEvent*>(event.get());
+		const auto key = ModalPhysicalKey(*press);
+		const auto mods = press->modifiers() & ~Qt::KeypadModifier;
+		if (ListFilter::Exit(key, mods)) {
+			if (AllowModalLayerKey(*press, box)) {
+				list->setFocus();
+			}
+			return Result::Cancel;
+		} else if (mods == ListFilter::kControl && (key == Qt::Key_N || key == Qt::Key_P)) {
+			if (AllowModalLayerKey(*press, box, true)) {
+				list->selectSkip(key == Qt::Key_N ? 1 : -1);
+			}
+			return Result::Cancel;
+		}
+		return Result::Continue;
+	});
+}
+
+bool HandlePickerFilter(
+		not_null<PeerListBox*> box,
+		Ui::MultiSelect *filter,
+		not_null<PeerListContent*> list,
+		QKeyEvent *event) {
+	if (!ModalKeysEnabled() || !filter || !filter->isVisible()) {
+		return false;
+	}
+	const auto key = ModalPhysicalKey(*event);
+	const auto mods = event->modifiers() & ~Qt::KeypadModifier;
+	if (const auto edit = filter->findChild<QTextEdit*>(); edit && edit->hasFocus()) {
+		const auto layout = edit->textCursor().block().layout();
+		if (ListFilter::Exit(key, mods) && layout && !layout->preeditAreaText().isEmpty()) {
+			event->accept();
+			return true;
+		}
+		return false;
+	}
+	if (ListFilter::Enter(*event, key)) {
+		if (AllowModalLayerKey(*event, box)) filter->setInnerFocus();
+	} else if (ListFilter::Exit(key, mods) && !filter->getQuery().isEmpty()) {
+		if (AllowModalLayerKey(*event, box)) filter->clearQuery();
+	} else if (!mods && key == Qt::Key_Q) {
+		if (AllowModalLayerKey(*event, box)) box->closeBox();
+	} else if (!mods && (key == Qt::Key_Return || key == Qt::Key_Enter)) {
+		if (AllowModalLayerKey(*event, box)) list->submitted();
+	} else if ((!mods && (key == Qt::Key_J || key == Qt::Key_K))
+		|| (mods == ListFilter::kControl && (key == Qt::Key_N || key == Qt::Key_P))) {
+		if (AllowModalLayerKey(*event, box, true)) {
+			list->selectSkip((key == Qt::Key_J || key == Qt::Key_N) ? 1 : -1);
+		}
+	} else {
+		return false;
+	}
+	event->accept();
+	return true;
+}
+
 namespace {
 
 class RecipientGiftShow final : public ChatHelpers::Show {
