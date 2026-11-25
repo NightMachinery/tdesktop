@@ -126,6 +126,9 @@ int main(int argc, char **argv) {
 	Render(output, QStringLiteral("privacy-day-rain"), { 1280, 806 }, day, 14);
 	Render(output, QStringLiteral("privacy-narrow"), { 430, 820 }, night, 14);
 	Render(output, QStringLiteral("privacy-compact"), { 360, 360 }, night, 14);
+	auto offline = day;
+	offline.update = QStringLiteral("Offline · last updated 09:30 AM · Open-Meteo");
+	Render(output, QStringLiteral("privacy-compact-offline"), { 360, 360 }, offline, 14);
 	Render(output, QStringLiteral("privacy-rain-800"), { 800, 500 }, day, 14);
 	Render(output, QStringLiteral("privacy-rain-large-text"), { 800, 500 }, day, 17);
 	night.weather.reset();

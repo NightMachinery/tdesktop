@@ -437,13 +437,19 @@ void Canvas::paintEvent(QPaintEvent *) {
 	const auto f = Upcoming(_frame, wide ? 6 : 3);
 	const auto forecast = _frame.weather.has_value();
 	const auto visible = forecast || !_frame.update.isEmpty();
+	const auto weatherTitle = QStringLiteral("Local weather");
+	const auto inner = w - 2 * metrics.inset;
+	const auto updateW = QFontMetrics(fonts.caption).horizontalAdvance(_frame.update);
+	const auto titleW = QFontMetrics(fonts.heading).horizontalAdvance(weatherTitle);
+	const auto stackHeader = updateW > 0 && titleW + metrics.gap + updateW > inner;
+	const auto headerH = metrics.header + (stackHeader ? metrics.gap + metrics.caption : 0);
 	const auto hourly = !compact && !f.hours.empty() ? metrics.hourly : 0;
 	const auto daily = !compact && !f.days.empty()
 		? metrics.section + metrics.gap + int(f.days.size()) * metrics.row : 0;
 	const auto sections = wide ? std::max(hourly, daily)
 		: hourly + daily + ((hourly && daily) ? 2 * metrics.gap : 0);
 	const auto panelH = !visible ? 0
-		: 2 * metrics.inset + metrics.header + (forecast ? metrics.current + metrics.gap : 0)
+		: 2 * metrics.inset + headerH + (forecast ? metrics.current + metrics.gap : 0)
 			+ (sections ? sections + 4 * metrics.gap : 0);
 	const auto panelY = std::max(0, available - panelH);
 	const auto skyHeight = std::max(0, visible ? panelY - unit / 2 : available);
@@ -458,9 +464,10 @@ void Canvas::paintEvent(QPaintEvent *) {
 	const auto zoneFont = Font(base, unit * 3 / 2, QFont::Medium);
 	const auto zoneTimeH = QFontMetrics(zoneFont).height();
 	const auto zoneH = 2 * metrics.caption + zoneTimeH + metrics.gap;
-	const auto reserveZone = compact && !_frame.clocks.empty()
+	const auto reserveZone = !_frame.clocks.empty()
 		&& skyHeight > clockDateH + 2 * unit + zoneH ? zoneH : 0;
-	const auto timeLimit = reserveZone ? (skyHeight - clockDateH - reserveZone) * 3 / 4 : skyHeight / 2;
+	const auto timeLimit = reserveZone
+		? (skyHeight - clockDateH - reserveZone - unit) * 3 / 4 : skyHeight / 2;
 	const auto proposed = std::clamp(std::min(groupWidth / 5, timeLimit), 2 * unit, 9 * unit);
 	const auto measured = QFontMetrics(Font(base, proposed, QFont::Light)).horizontalAdvance(time);
 	const auto timeFont = Font(base, measured > groupWidth && measured > 0
@@ -526,17 +533,20 @@ void Canvas::paintEvent(QPaintEvent *) {
 		p.setBrush(c.panel);
 		p.drawRoundedRect(QRect(outer, panelY, w, panelH), unit * .75, unit * .75);
 		const auto x = outer + metrics.inset;
-		const auto inner = w - 2 * metrics.inset;
 		const auto y = panelY + metrics.inset;
-		const auto updateW = std::min(inner * 2 / 3, QFontMetrics(fonts.caption).horizontalAdvance(_frame.update));
-		Text(p, { x, y, std::max(0, inner - updateW - metrics.gap), metrics.header },
-			QStringLiteral("Local weather"), fonts.heading, c.ink);
-		Text(p, { x + inner - updateW, y, updateW, metrics.header }, _frame.update, fonts.caption,
-			c.muted, Qt::AlignRight | Qt::AlignVCenter);
+		const auto headingW = stackHeader ? inner : inner - updateW - metrics.gap;
+		Text(p, { x, y, headingW, metrics.header }, weatherTitle, fonts.heading, c.ink);
+		if (stackHeader) {
+			Text(p, { x, y + metrics.header + metrics.gap, inner, metrics.caption },
+				_frame.update, fonts.caption, c.muted);
+		} else {
+			Text(p, { x + inner - updateW, y, updateW, metrics.header }, _frame.update, fonts.caption,
+				c.muted, Qt::AlignRight | Qt::AlignVCenter);
+		}
 		if (forecast) {
 			const auto temp = Temperature(_frame, _frame.weather->temperatureC)
 				+ (_frame.fahrenheit ? u'F' : u'C');
-			const auto currentY = y + metrics.header + metrics.gap;
+			const auto currentY = y + headerH + metrics.gap;
 			const auto icon = metrics.current * 2 / 3;
 			Condition(p, { qreal(x), qreal(currentY + (metrics.current - icon) / 2), qreal(icon), qreal(icon) },
 				_frame.weather->code, _frame.day, c);
