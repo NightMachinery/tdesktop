@@ -298,6 +298,8 @@ Filter by setting, TOML path, source, or scope. Select a row to see the
 effective value, its default, where an edit will write, and the physically
 stored values from the captured files. A value may be inherited or inactive
 under the current account routing. The inspector distinguishes those cases.
+Hover the destination chip to read its full path. Action buttons show the
+keys used by Customize.
 
 Open a row to edit it. Scalar forms and supported arrays and named tables
 stage changes in memory. Collections offer the controls their format supports,

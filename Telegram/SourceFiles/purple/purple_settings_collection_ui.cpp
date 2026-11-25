@@ -3,6 +3,7 @@
 #include "purple/purple_keys_mx.h"
 #include "purple/purple_settings_tree.h"
 #include "purple/purple_settings_focus.h"
+#include "purple/purple_settings_customize_look.h"
 
 #include <QtCore/QPointer>
 #include <QtCore/QSignalBlocker>
@@ -55,6 +56,12 @@ public:
 		_parts->addWidget(_main);
 		_parts->addWidget(_form);
 		const auto main = new QVBoxLayout(_main);
+		const auto gap = fontMetrics().height();
+		main->setContentsMargins(0, gap / 3, 0, gap / 3);
+		main->setSpacing(gap / 3);
+		_formLayout->setContentsMargins(0, gap / 3, 0, gap / 3);
+		_formLayout->setSpacing(gap / 3);
+		_effects->setProperty("secondary", true);
 		auto lists = new QHBoxLayout();
 		_list->setAccessibleName(u"Selected ordered entries"_q);
 		_peerList->setAccessibleName(u"Available chats for this settings source"_q);
@@ -236,8 +243,7 @@ protected:
 private:
 	template <typename Layout>
 	QPushButton *button(Layout *layout, const QString &label, Fn<void()> run) {
-		const auto result = new QPushButton(label, this);
-		result->setAutoDefault(false);
+		const auto result = new CustomizeLook::Action(label, this);
 		layout->addWidget(result);
 		result->installEventFilter(this);
 		connect(result, &QPushButton::clicked, this, std::move(run));

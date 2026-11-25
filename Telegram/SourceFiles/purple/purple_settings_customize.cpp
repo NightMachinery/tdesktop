@@ -14,6 +14,7 @@
 #include "purple/purple_picker.h"
 #include "purple/purple_privacy_screen.h"
 #include "purple/purple_settings_collection_ui.h"
+#include "purple/purple_settings_customize_look.h"
 #include "purple/purple_settings_editor.h"
 #include "purple/purple_settings_focus.h"
 #include "purple/purple_settings_draft.h"
@@ -187,10 +188,14 @@ QLabel *Label(QWidget *parent, const QString &name = {}) {
 	return label;
 }
 
-QPushButton *Button(QWidget *parent, const QString &text) {
-	const auto result = new QPushButton(text, parent);
-	result->setAutoDefault(false);
-	return result;
+QLabel *HelpLabel(QWidget *parent, const QString &text) {
+	const auto label = Label(parent, text);
+	label->setProperty("secondary", true);
+	return label;
+}
+
+QPushButton *Button(QWidget *parent, const QString &text, QString key = {}) {
+	return new CustomizeLook::Action(text, parent, std::move(key));
 }
 
 bool IsHotkey(const SettingDescriptor &descriptor) {
@@ -297,20 +302,25 @@ public:
 	, _coverMessage(Label(_covered, u"Settings hidden while locked"_q))
 	, _coverClose(Button(_covered, u"Close"_q))
 	, _title(Label(_browser, u"Customize Purple settings"_q))
-	, _subject(Label(_browser))
+	, _subject(new CustomizeLook::Chip(_browser))
+	, _destination(new CustomizeLook::Chip(_browser))
 	, _accountsButton(Button(_browser, u"Account"_q))
 	, _filter(new QLineEdit(_browser))
 	, _clear(Button(_browser, u"Clear filter"_q))
-	, _tree(new QTreeWidget(_browser))
+	, _tree(new CustomizeLook::Tree(_browser))
 	, _inspector(Label(_browser))
 	, _feedback(Label(_browser))
-	, _edit(Button(_browser, u"Edit"_q))
-	, _reset(Button(_browser, u"Reset"_q))
-	, _undo(Button(_browser, u"Undo"_q))
-	, _reviewButton(Button(_browser, u"Review"_q))
-	, _help(Button(_browser, u"Help"_q))
+	, _edit(Button(_browser, u"Edit"_q, u"RET"_q))
+	, _reset(Button(_browser, u"Reset"_q, u"r"_q))
+	, _undo(Button(_browser, u"Undo"_q, u"u"_q))
+	, _reviewButton(Button(_browser, u"Review"_q, u"d"_q))
+	, _help(Button(_browser, u"Help"_q, u"?"_q))
 	, _sheetLayout(new QVBoxLayout(_sheet)) {
 		setAccessibleName(u"Customize Purple settings"_q);
+		setFont(st::normalFont);
+		const auto gap = fontMetrics().height();
+		_sheetLayout->setSpacing(gap / 3);
+		_sheetLayout->setContentsMargins(gap, gap, gap, gap);
 		setFocusPolicy(Qt::StrongFocus);
 		auto outer = new QVBoxLayout(this);
 		outer->setContentsMargins({});
@@ -459,17 +469,23 @@ private:
 	void setupBrowser() {
 		_browser->setAutoFillBackground(true);
 		_sheet->setAutoFillBackground(true);
-		_title->setFont(st::keysLegendTitleStyle.font);
+		_title->setFont(st::keysLegendHeaderStyle.font);
 		auto layout = new QVBoxLayout(_browser);
+		const auto gap = fontMetrics().height();
+		layout->setContentsMargins(gap, gap, gap, gap);
+		layout->setSpacing(gap / 2);
 		auto header = new QHBoxLayout();
 		header->addWidget(_title, 1);
-		header->addWidget(_subject);
 		header->addWidget(_accountsButton);
 		_accountsButton->installEventFilter(this);
 		const auto close = Button(_browser, u"Close"_q);
 		header->addWidget(close);
 		connect(close, &QPushButton::clicked, this, [this] { back(); });
 		layout->addLayout(header);
+		auto scope = new QHBoxLayout();
+		scope->addWidget(_subject, 1);
+		scope->addWidget(_destination, 2);
+		layout->addLayout(scope);
 
 		auto filterRow = new QHBoxLayout();
 		_filter->setPlaceholderText(u"Filter settings…"_q);
@@ -483,21 +499,21 @@ private:
 		_tree->setWordWrap(true);
 		_tree->setExpandsOnDoubleClick(false);
 		_tree->setFont(st::normalFont);
-		_tree->setAlternatingRowColors(true);
+		_tree->setIndentation(gap);
 		layout->addWidget(_tree, 1);
 
 		_inspector->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
 		_inspector->setAccessibleName(u"Selected setting details"_q);
 		_feedback->setAccessibleName(u"Draft status"_q);
+		_feedback->setProperty("secondary", true);
 		layout->addWidget(_inspector);
 		layout->addWidget(_feedback);
-		auto footer = new QHBoxLayout();
+		const auto footer = new CustomizeLook::Actions(_browser);
 		for (const auto button : { _edit, _reset, _undo, _reviewButton, _help }) {
-			footer->addWidget(button);
+			footer->append(button);
 			button->installEventFilter(this);
 		}
-		footer->addStretch();
-		layout->addLayout(footer);
+		layout->addWidget(footer);
 		for (const auto child : { static_cast<QWidget*>(_filter), static_cast<QWidget*>(_tree),
 			static_cast<QWidget*>(_inspector), static_cast<QWidget*>(_clear), static_cast<QWidget*>(close) }) {
 			child->installEventFilter(this);
@@ -505,20 +521,8 @@ private:
 	}
 
 	void applyPalette() {
-		auto roles = palette();
-		roles.setColor(QPalette::Window, st::windowBg->c);
-		roles.setColor(QPalette::Base, st::windowBg->c);
-		roles.setColor(QPalette::AlternateBase, st::windowBgOver->c);
-		roles.setColor(QPalette::WindowText, st::windowFg->c);
-		roles.setColor(QPalette::Text, st::windowFg->c);
-		roles.setColor(QPalette::Button, st::windowBgOver->c);
-		roles.setColor(QPalette::ButtonText, st::windowFg->c);
-		roles.setColor(QPalette::Highlight, st::activeButtonBg->c);
-		roles.setColor(QPalette::HighlightedText, st::activeButtonFg->c);
-		roles.setColor(QPalette::PlaceholderText, st::windowSubTextFg->c);
-		roles.setColor(QPalette::Disabled, QPalette::Text, st::windowSubTextFg->c);
-		setPalette(roles);
-		setAutoFillBackground(true);
+		CustomizeLook::Apply(this, st::windowBg->c, st::windowBgOver->c, st::windowFg->c,
+			st::windowSubTextFg->c, st::windowActiveTextFg->c, st::boxDividerBg->c);
 	}
 
 	bool sameSession() const {
@@ -675,8 +679,8 @@ private:
 				if (!key.isEmpty()) _expanded.insert(key);
 			}
 		}
-		_subject->setText(u"%1 · App-wide from %2"_q.arg(
-			AccountName(_opening.requester), sourceName(_opening.globalSource)));
+		_subject->setDetails(AccountName(_opening.requester),
+			u"App-wide from %1"_q.arg(sourceName(_opening.globalSource)));
 		renderTree();
 	}
 
@@ -753,6 +757,11 @@ private:
 		_undo->setEnabled(_frames.canUndo());
 		_reviewButton->setEnabled(_frames.current() && !_applyInFlight);
 		_clear->setEnabled(filtering());
+		const auto &source = row && row->scope == SettingScope::AppWide
+			? _opening.globalSource : _opening.ownSource;
+		_destination->setDetails(
+			row && !row->destination.isEmpty() ? row->destination : u"Destination"_q,
+			source ? source->file.path : u"Unavailable"_q);
 		if (!row) {
 			_inspector->clear();
 			return;
@@ -962,7 +971,8 @@ private:
 
 	void addSheetWidget(QWidget *widget) {
 		widget->installEventFilter(this);
-		_sheetLayout->addWidget(widget);
+		if (qobject_cast<QPushButton*>(widget)) _sheetLayout->addWidget(widget, 0, Qt::AlignLeft);
+		else _sheetLayout->addWidget(widget);
 	}
 
 	void clearSheet() {
@@ -1555,14 +1565,14 @@ private:
 		title->setFont(st::keysLegendTitleStyle.font);
 		addSheetWidget(title);
 		const auto row = selected();
-		if (row && !row->help.isEmpty()) addSheetWidget(Label(_sheet, row->help));
-		addSheetWidget(Label(_sheet, u"j / k Move · h / l Fold or enter · / Filter · Return Edit\n"
+		if (row && !row->help.isEmpty()) addSheetWidget(HelpLabel(_sheet, row->help));
+		addSheetWidget(HelpLabel(_sheet, u"j / k Move · h / l Fold or enter · / Filter · Return Edit\n"
 			"t Toggle · + / − Step · r Reset · u Undo · d Review · y Copy TOML path\n"
 			"A Switch account · F6 Change panel · Esc Back"_q));
-		addSheetWidget(Label(_sheet, u"Forms · Ctrl+Return Stage. Return inserts a newline in multiline fields.\n"
+		addSheetWidget(HelpLabel(_sheet, u"Forms · Ctrl+Return Stage. Return inserts a newline in multiline fields.\n"
 			"Collections · a Add · Shift+D Duplicate · x Remove · Shift+J/K Reorder · u Undo\n"
 			"Chat picker · / Search · Space Add the selected chat"_q));
-		addSheetWidget(Label(_sheet, u"Review · Effects shows what changes. Lines shows the file diff. "
+		addSheetWidget(HelpLabel(_sheet, u"Review · Effects shows what changes. Lines shows the file diff. "
 			"Use [ / ] to page through Lines while it has focus. Apply changes writes this draft to one file."_q));
 		const auto close = Button(_sheet, u"Back"_q);
 		addSheetWidget(close);
@@ -1579,7 +1589,7 @@ private:
 		title->setFont(st::keysLegendTitleStyle.font);
 		addSheetWidget(title);
 		addSheetWidget(Label(_sheet, Isolate(SettingsTree::Address(row.address)) + u" · "_q + row.destination));
-		addSheetWidget(Label(_sheet, row.help));
+		if (!row.help.isEmpty()) addSheetWidget(HelpLabel(_sheet, row.help));
 		const auto &descriptor = *row.descriptor;
 		auto focus = static_cast<QWidget*>(nullptr);
 		if (descriptor.codec == SettingCodec::Boolean) {
@@ -1616,6 +1626,7 @@ private:
 			_multi = new QPlainTextEdit(_sheet);
 			_multi->setAccessibleName(row.label);
 			_multi->setPlainText(FieldText(row));
+			_multi->setMaximumHeight(fontMetrics().height() * 9);
 			addSheetWidget(_multi);
 			focus = _multi;
 		} else {
@@ -1975,7 +1986,8 @@ private:
 	QLabel *_coverMessage;
 	QPushButton *_coverClose;
 	QLabel *_title;
-	QLabel *_subject;
+	CustomizeLook::Chip *_subject;
+	CustomizeLook::Chip *_destination;
 	QPushButton *_accountsButton;
 	QLineEdit *_filter;
 	QPushButton *_clear;
