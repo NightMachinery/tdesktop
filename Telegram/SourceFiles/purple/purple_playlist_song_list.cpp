@@ -149,7 +149,7 @@ int MusicSelectionBar::resizeGetHeight(int width) {
 		button->setVisible(visible);
 		if (visible) buttonsWidth += button->width() + gap;
 	}
-	const auto sideBySide = width >= buttonsWidth + st::purpleMusicNowCover;
+	const auto sideBySide = width >= buttonsWidth + _summary->naturalWidth() + 2 * padding;
 	_summary->resizeToWidth(std::max(1,
 		(sideBySide ? width - buttonsWidth : width) - 2 * padding));
 	const auto rowHeight = std::max(buttonHeight, _summary->height());
@@ -650,16 +650,19 @@ void PlaylistSongList::Rows::paintMusicItem(Painter &p, int index) const {
 		? st::purpleMusicTileMin : 0;
 	const auto nameTop = item.y() + (item.height()
 		- st::semiboldFont->height - st::normalFont->height) / 2;
-	const auto textWidth = std::max(0, width() - textLeft - durationWidth - sourceWidth);
+	const auto textWidth = std::max(0,
+		width() - textLeft - durationWidth - (sourceWidth ? (sourceWidth + gap) : 0));
+	const auto titleLines = (_tiles && st::semiboldFont->width(row.title) > art.width())
+		? 2 : 1;
 	const auto title = _tiles
 		? QRect(art.left(), art.bottom() + st::purpleMusicTrackInset,
-			art.width(), 2 * st::semiboldFont->height)
+			art.width(), titleLines * st::semiboldFont->height)
 		: style::rtlrect(textLeft, nameTop, textWidth, st::semiboldFont->height, width());
 	const auto sub = QRect(title.x(), title.bottom() + 1, title.width(), st::normalFont->height);
 	p.setFont(st::semiboldFont);
 	p.setPen(MusicReadableColor(playback == MusicRowPlayback::Idle
 		? st::windowFg->c : accent, bg, 4.5));
-	PaintMusicText(p, title, row.title, _tiles ? 2 : 1);
+	PaintMusicText(p, title, row.title, titleLines);
 	p.setFont(st::normalFont);
 	p.setPen(MusicReadableColor(st::windowSubTextFg->c, bg, 4.5));
 	PaintMusicText(p, sub, row.performer);

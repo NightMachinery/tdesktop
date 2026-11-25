@@ -123,10 +123,13 @@ object_ptr<Ui::RpWidget> MakeMusicHeader(
 		previous->moveToLeft(0, centerY - previous->height() / 2);
 		menu->moveToRight(0, centerY - menu->height() / 2);
 		playlist->moveToRight(menu->width() + gap, centerY - playlist->height() / 2);
-		const auto centerWidth = std::max(1, header->width() - 2 * (menu->width()
-			+ playlist->width() + 2 * gap));
-		title->resizeToNaturalWidth(centerWidth);
-		title->move((header->width() - title->width()) / 2, centerY - title->height() / 2);
+		const auto left = previous->width() + gap;
+		const auto right = header->width() - menu->width() - playlist->width()
+			- gap - st::purpleMusicShortcutGap;
+		title->resizeToNaturalWidth(std::max(1, right - left));
+		const auto x = std::clamp((header->width() - title->width()) / 2,
+			left, std::max(left, right - title->width()));
+		title->moveToLeft(x, centerY - title->height() / 2);
 	};
 	header->widthValue() | rpl::on_next(place, header->lifetime());
 	playlist->widthValue() | rpl::on_next(place, header->lifetime());

@@ -147,6 +147,7 @@ int NowPlaying::resizeGetHeight(int width) {
 	const auto progressTop = compactMode
 		? 2 * padding + std::max(side, metadataHeight + transportHeight())
 		: padding + side - st::normalFont->height;
+	_time->resizeToNaturalWidth(width);
 	const auto progressHeight = std::max(_time->height(), st::normalFont->height);
 	_time->moveToRight(padding, progressTop, width);
 	_progress->setGeometryToLeft(compactMode ? padding : left, progressTop,
@@ -163,6 +164,7 @@ void NowPlaying::setState(MusicNowPlayingState state) {
 	const auto changed = _state.title != state.title
 		|| _state.artist != state.artist || _state.album != state.album
 		|| _state.cover.cacheKey() != state.cover.cacheKey();
+	const auto transportChanged = _state.playing != state.playing || _state.loading != state.loading;
 	if (_state.cover.cacheKey() != state.cover.cacheKey()) {
 		_tint = {};
 		if (!state.cover.isNull()) {
@@ -178,20 +180,22 @@ void NowPlaying::setState(MusicNowPlayingState state) {
 	}
 	if (_play) {
 		using Button = Media::Player::PlayButton;
-		_play->setState(_state.loading ? Button::State::Cancel
-			: _state.playing ? Button::State::Pause : Button::State::Play);
+		if (transportChanged) {
+			_play->setState(_state.loading ? Button::State::Cancel
+				: _state.playing ? Button::State::Pause : Button::State::Play);
+			if (anim::Disabled()) _play->finishTransform();
+		}
 		_previous->setDisabled(!_state.previousAvailable);
 		_next->setDisabled(!_state.nextAvailable);
 	}
 	_progress->setDisabled(_state.durationSeconds <= 0 || _state.loading);
 	if (_state.seeking) return;
 	_progress->setValue(_state.progress);
-	const auto time = Ui::FormatDurationText(_state.elapsedSeconds)
-		+ u" / "_q + Ui::FormatDurationText(_state.durationSeconds);
+	const auto time = u'\u2066' + Ui::FormatDurationText(_state.elapsedSeconds)
+		+ u" / "_q + Ui::FormatDurationText(_state.durationSeconds) + u'\u2069';
 	if (_timeText != time) {
 		_timeText = time;
 		_time->setText(time);
-		_time->resizeToNaturalWidth(width());
 		resizeToWidth(width());
 	}
 }
