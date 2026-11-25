@@ -67,9 +67,7 @@ public:
 		_formLayout->setAlignment(Qt::AlignTop);
 		_effects->setProperty("secondary", true);
 		for (const auto list : { _list, _peerList }) {
-			list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-			list->setTextElideMode(Qt::ElideRight);
-			list->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+			CustomizeLook::ConfigureCollectionList(list);
 		}
 		_list->setAccessibleName(u"Selected ordered entries"_q);
 		_peerList->setAccessibleName(u"Available chats for this settings source"_q);
@@ -80,8 +78,19 @@ public:
 			_search->hide();
 			_peerList->hide();
 		}
-		_lists->addWidget(_list);
-		if (_config.peerField) _lists->addWidget(_peerList);
+		if (_config.members && _config.peerField) {
+			const auto column = [&](QListWidget *list, const QString &title) {
+				const auto layout = new QVBoxLayout();
+				layout->addWidget(new QLabel(title, _main));
+				layout->addWidget(list);
+				_lists->addLayout(layout);
+			};
+			column(_list, u"Members"_q);
+			column(_peerList, u"Available chats"_q);
+		} else {
+			_lists->addWidget(_list);
+			if (_config.peerField) _lists->addWidget(_peerList);
+		}
 		main->addLayout(_lists);
 		for (const auto label : { _effects, _status }) {
 			label->setWordWrap(true);
@@ -203,8 +212,7 @@ public:
 protected:
 	void resizeEvent(QResizeEvent *event) override {
 		QWidget::resizeEvent(event);
-		const auto narrow = width() < 72 * fontMetrics().averageCharWidth();
-		_lists->setDirection(narrow ? QBoxLayout::TopToBottom : QBoxLayout::LeftToRight);
+		_lists->setDirection(CustomizeLook::CollectionListDirection(width(), fontMetrics()));
 	}
 
 	bool eventFilter(QObject *object, QEvent *event) override {
@@ -375,6 +383,7 @@ private:
 				})) continue;
 			const auto entry = new QListWidgetItem(choice.avatar, choice.label, _peerList);
 			entry->setData(Qt::UserRole, choice.literal);
+			entry->setToolTip(choice.label);
 			if (choice.literal == selected) _peerList->setCurrentItem(entry);
 		}
 		if (!_peerList->currentItem() && _peerList->count()) _peerList->setCurrentRow(0);
@@ -400,7 +409,7 @@ private:
 				: item.label;
 			const auto entry = new QListWidgetItem(choice ? choice->avatar : QIcon(),
 				item.recognized ? name : u"Skipped value · "_q + name, _list);
-			entry->setToolTip(item.line ? u"Source line %1"_q.arg(item.line) : QString());
+			entry->setToolTip(item.line ? u"%1\nSource line %2"_q.arg(entry->text()).arg(item.line) : entry->text());
 		}
 		if (!_items.empty()) _list->setCurrentRow(std::clamp(selection, 0, int(_items.size()) - 1));
 		effect();

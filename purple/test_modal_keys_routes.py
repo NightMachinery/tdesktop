@@ -131,8 +131,11 @@ ordered(collections, 'u"Add"_q, ModalKeysEnabled() ? u"a"_q', 'u"Enter ID"_q',
         'u"Duplicate"_q', 'u"Delete"_q', 'u"Move up"_q',
         "&QAbstractItemModel::rowsMoved", "moveTo(from, to)",
         "code == Qt::Key_D", "edit(Op::Duplicate)", "code == Qt::Key_A", "add()", "edit(Op::Erase)")
-assert "setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff)" in collections
-ordered(collections, "void resizeEvent", "QBoxLayout::TopToBottom", "QBoxLayout::LeftToRight")
+look = read("purple/purple_settings_customize_look.h")
+ordered(collections, "ConfigureCollectionList(list)", "void resizeEvent", "CollectionListDirection(width(), fontMetrics())")
+ordered(look, "void ConfigureCollectionList", "setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff)", "Qt::ElideRight")
+ordered(look, "CollectionListDirection(", "QBoxLayout::TopToBottom", "QBoxLayout::LeftToRight")
+ordered(customize, "void activateRow()", "if (row->listCaseFix)", "stage(std::move(fixed), SettingScalar(*row->listCaseFix))", "showForm")
 ordered(collections, "void add()", "_config.peerField", "addPeer()", "edit(Op::Insert)")
 # Verify new native UI surfaces reuse stock Ui::KeysLegend & Ui::LayerWidget, not Toasts/ASCII TextBox.
 assert "Ui::Toast::Show" not in keys, "Modal UI must not fall back to plain Toast popups"

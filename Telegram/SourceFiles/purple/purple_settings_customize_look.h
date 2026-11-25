@@ -6,6 +6,7 @@
 #include <QtGui/QPainter>
 #include <QtWidgets/QBoxLayout>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QListWidget>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QStyledItemDelegate>
 #include <QtWidgets/QTreeWidget>
@@ -240,6 +241,20 @@ inline void AppendAction(QBoxLayout *layout, QPushButton *button) {
 		layout->addWidget(row);
 	}
 	row->append(button);
+}
+
+inline void ConfigureCollectionList(QListWidget *list) {
+	list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	list->setTextElideMode(Qt::ElideRight);
+	list->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+}
+
+inline QBoxLayout::Direction CollectionListDirection(
+		int width,
+		const QFontMetrics &metrics) {
+	return width < 72 * metrics.averageCharWidth()
+		? QBoxLayout::TopToBottom
+		: QBoxLayout::LeftToRight;
 }
 
 class Chip final : public QLabel {

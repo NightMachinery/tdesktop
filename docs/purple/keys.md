@@ -200,7 +200,8 @@ Customize settings…** also opens the editor with modal keys off.
   when focused. In a collection, `a` adds, `i` enters a chat ID, `Shift+D`
   duplicates, `Shift+R` renames, `x` removes, and `Shift+J` / `Shift+K`
   reorder where supported. Plain-letter shortcuts yield to text fields.
-  At narrow widths, the Members lists stack vertically. In the chat picker,
+  At narrow widths, Available chats stacks below Members and Tab reaches each
+  action through vertical scrolling. In the chat picker,
   `/` focuses search and `Space` or **Add** adds the selected chat.
   Use **Enter ID** to type a chat ID.
 - Use `u` to undo staged edits and `d` to review them. In **Lines**,
