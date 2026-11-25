@@ -15,9 +15,13 @@
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_item_helpers.h"
+#include "history/view/history_view_context_menu.h"
+#include "history/view/history_view_element.h"
 #include "lang/lang_keys.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
+#include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
 #include "mtproto/facade.h"
 #include "mtproto/mtp_instance.h"
@@ -29,6 +33,8 @@
 #include "purple/purple_music_bookmark.h"
 #include "purple/purple_music_diagnostics.h"
 #include "purple/purple_music_index_service.h"
+#include "purple/purple_music_now_playing.h"
+#include "purple/purple_music_widgets.h"
 #include "purple/purple_music_source_roster.h"
 #include "purple/purple_playlist_player.h"
 #include "purple/purple_playlist_song_list.h"
@@ -38,6 +44,7 @@
 #include "purple/purple_playlists_service.h"
 #include "rpl/variable.h"
 #include "settings/settings_common.h"
+#include "storage/storage_account.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/boxes/single_choice_box.h"
@@ -52,6 +59,7 @@
 #include "window/section_memento.h"
 #include "window/section_widget.h"
 #include "window/window_controller.h"
+#include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
 
 #include "styles/style_boxes.h"
@@ -79,6 +87,7 @@ namespace Purple {
 namespace {
 
 constexpr auto kHideChatsPref = "purple.music.show-chats";
+constexpr auto kScanRetryPref = "purple.music.scan-retry";
 constexpr auto kSearchPageSize = 100;
 constexpr auto kRefreshDelay = crl::time(180);
 constexpr auto kConnectionPollDelay = crl::time(1500);
@@ -125,6 +134,27 @@ struct Scan {
 	bool head = false;
 };
 
+struct ScanSchedule {
+	MusicScanPacer pacer;
+	QPointer<QWidget> owner;
+	quint64 retryPeer = 0;
+};
+
+std::shared_ptr<ScanSchedule> ScanScheduleFor(Main::Session &session) {
+	static auto schedules = std::map<Main::Session*, std::shared_ptr<ScanSchedule>>();
+	if (const auto i = schedules.find(&session); i != schedules.end()) {
+		return i->second;
+	}
+	auto result = std::make_shared<ScanSchedule>();
+	const auto saved = session.local().readPref<QString>(kScanRetryPref);
+	const auto until = saved.section(u' ', 0, 0).toLongLong();
+	result->pacer.restore(crl::now(), until - QDateTime::currentMSecsSinceEpoch());
+	result->retryPeer = saved.section(u' ', 1, 1).toULongLong();
+	schedules.emplace(&session, result);
+	session.lifetime().add([key = &session] { schedules.erase(key); });
+	return result;
+}
+
 class MusicSection final : public Window::SectionWidget {
 public:
 	MusicSection(QWidget *parent, not_null<Window::SessionController*> controller);
@@ -138,12 +168,15 @@ public:
 	[[nodiscard]] bool allowsModalKeys(QWidget *focus) const;
 	[[nodiscard]] bool searchContains(QWidget *widget) const;
 	void focusSearch(bool search);
+	void navigate(TrackListAction action, int repeat);
+	void act(MusicTrackAction action, uint64_t key = 0);
 
 private:
 	enum class CatalogRead {
 		Reload,
 		Append,
 		Scan,
+		Tail,
 	};
 
 	void doSetInnerFocus() override;
@@ -167,27 +200,33 @@ private:
 	void requestMissingDialogs();
 	void showMenu(not_null<Ui::IconButton*> button);
 	void toggleTrack(quint64 documentId);
+	void markTracks(std::vector<uint64_t> ids);
 	void updateSelection();
-	bool playSelection();
-	void saveSelection(const std::vector<MusicIndexEntry> &tracks);
+	void updatePlayback();
+	bool playSelection(bool visibleOnly = false);
+	void saveSelection(const std::vector<MusicIndexEntry> &tracks, bool visibleOnly);
 	[[nodiscard]] PlaylistResolveSong resolveSong(const MusicIndexEntry &entry) const;
 	[[nodiscard]] std::optional<PlaylistAddSongInput> captureTrack(
 		const MusicIndexEntry &entry) const;
 	void play(quint64 documentId);
 	void copyOrgLink(quint64 documentId);
+	void fillTrackActions(not_null<Ui::PopupMenu*> menu, uint64_t key);
+	void performTrackAction(MusicTrackAction action, const std::vector<PlaylistMessage> &messages);
 	void playResolved(const MusicIndexEntry &entry);
 
 	not_null<Ui::VerticalLayout*> _content;
 	not_null<Ui::InputField*> _search;
 	not_null<Ui::SlideWrap<Ui::FlatLabel>*> _status;
 	Ui::SlideWrap<Ui::RoundButton> *_more = nullptr;
-	Ui::SlideWrap<Ui::RoundButton> *_playChosen = nullptr;
+	Ui::RpWidget *_playChosen = nullptr;
 	QPointer<PlaylistSongList> _list;
 	base::unique_qptr<Ui::PopupMenu> _menu;
+	std::shared_ptr<ScanSchedule> _schedule;
 	MTP::Sender _api;
 	base::Timer _refreshTimer;
 	base::Timer _readTimer;
 	base::Timer _connectionTimer;
+	base::Timer _scanTimer;
 	mtpRequestId _request = 0;
 	FilterId _folder = 0;
 	QString _folderName;
@@ -197,13 +236,20 @@ private:
 	std::vector<MusicIndexEntry> _rows;
 	std::vector<MusicIndexEntry> _selection;
 	rpl::variable<int> _selectionCount = 0;
+	rpl::variable<int> _hiddenSelectionCount = 0;
 	QString _displayedSearch;
 	std::optional<MusicIndexCursor> _cursor;
+	uint64_t _unfilteredCursor = 0;
+	int _unfilteredTop = 0;
+	bool _restoreUnfiltered = false;
 	std::unique_ptr<DesktopPlaylistResolver> _resolver;
 	std::unique_ptr<DesktopPlaylistResolver> _bookmarkResolver;
+	std::unique_ptr<DesktopPlaylistResolver> _actionResolver;
 	uint64_t _route = 0;
 	uint64_t _query = 0;
+	quint64 _loadingDocument = 0;
 	bool _moreAvailable = false;
+	bool _tail = false;
 	bool _reading = false;
 	bool _snapshotHeld = false;
 	bool _scanIncomplete = false;
@@ -211,6 +257,8 @@ private:
 	bool _savingSelection = false;
 	bool _waitingMainDialogs = false;
 	bool _waitingArchiveDialogs = false;
+	bool _waitingForScanner = false;
+	bool _savingPage = false;
 	bool _offline = false;
 	int _loadedMainDialogs = 0;
 	int _loadedArchiveDialogs = 0;
@@ -252,70 +300,35 @@ MusicSection::MusicSection(
 	not_null<Window::SessionController*> controller)
 : Window::SectionWidget(parent, controller)
 , _content(Ui::CreateChild<Ui::VerticalLayout>(this))
-, _search(_content->add(object_ptr<Ui::InputField>(
-	_content,
-	st::purpleMusicSearch,
-	Ui::InputField::Mode::SingleLine,
-	tr::lng_purple_music_search()), st::purpleMusicSearchMargin))
+, _search(_content->add(MakeMusicFilter(_content, MusicEffectiveShortcuts(false).filter),
+	st::purpleMusicSearchMargin))
 , _status(_content->add(object_ptr<Ui::SlideWrap<Ui::FlatLabel>>(
 	_content,
 	object_ptr<Ui::FlatLabel>(_content, QString(), st::boxLabel),
 	st::purpleMusicStatusMargin)))
+, _schedule(ScanScheduleFor(session()))
 , _api(&session().mtp())
 , _refreshTimer([=] { refresh(); })
 , _readTimer([=] {
 	read(_search->getLastText().trimmed() == _displayedSearch
 		? CatalogRead::Scan : CatalogRead::Reload);
 })
-, _connectionTimer([=] { pollConnection(); }) {
+, _connectionTimer([=] { pollConnection(); })
+, _scanTimer([=] { scan(); }) {
 	setFocusPolicy(Qt::StrongFocus);
-	_search->customUpDown(true);
-	const auto searchIcon = Ui::CreateChild<Ui::RpWidget>(_search);
-	searchIcon->setAttribute(Qt::WA_TransparentForMouseEvents);
-	searchIcon->paintRequest() | rpl::on_next([=] {
-		auto painter = QPainter(searchIcon);
-		st::purpleMusicSearchIcon.paintInCenter(painter, searchIcon->rect());
-	}, searchIcon->lifetime());
-	_search->sizeValue() | rpl::on_next([=](QSize size) {
-		searchIcon->resize(st::purpleMusicSearchIconWidth, size.height());
-		searchIcon->moveToLeft(0, 0, size.width());
-	}, searchIcon->lifetime());
-	searchIcon->raise();
-	const auto header = _content->insert(0, object_ptr<Ui::RpWidget>(_content));
-	header->setFixedHeight(st::purpleMusicHeaderHeight);
-	const auto back = Ui::CreateChild<Ui::IconButton>(
-		header, st::purpleMusicBack);
-	back->setAccessibleName(tr::lng_purple_music_back(tr::now));
-	back->setClickedCallback([=] { controller->showBackFromStack(); });
-	const auto title = Ui::CreateChild<Ui::FlatLabel>(
-		header, tr::lng_purple_music_title(), st::purpleMusicTitle);
-	const auto playlists = Ui::CreateChild<Ui::RoundButton>(
-		header, tr::lng_purple_playlists_title(), st::defaultLightButton);
-	playlists->setTextTransform(Ui::RoundButtonTextTransform::NoTransform);
-	playlists->setClickedCallback([=] {
-		if (current()) ShowPlaylistsBox(controller);
-	});
-	const auto menu = Ui::CreateChild<Ui::IconButton>(header, st::purpleMusicMore);
-	menu->setAccessibleName(tr::lng_purple_music_options(tr::now));
-	menu->setClickedCallback([=] { showMenu(menu); });
-	const auto placeHeader = [=] {
-		const auto center = st::purpleMusicHeaderHeight / 2;
-		const auto margin = st::purpleMusicMargin;
-		back->moveToLeft(margin - st::purpleMusicToolbarGap,
-			center - back->height() / 2, header->width());
-		menu->moveToRight(margin - st::purpleMusicToolbarGap,
-			center - menu->height() / 2, header->width());
-		const auto actionsWidth = margin + menu->width();
-		playlists->moveToRight(actionsWidth,
-			center - playlists->height() / 2, header->width());
-		const auto titleLeft = margin + back->width();
-		title->resizeToWidth(std::max(1,
-			header->width() - titleLeft - actionsWidth - playlists->width()));
-		title->moveToLeft(titleLeft, center - title->height() / 2,
-			header->width());
-	};
-	playlists->setWidthChangedCallback(placeHeader);
-	header->widthValue() | rpl::on_next(placeHeader, lifetime());
+	const auto keys = MusicEffectiveShortcuts(false);
+	_content->insert(0, MakeMusicHeader(
+		_content,
+		keys.playlists,
+		[=] { controller->showBackFromStack(); },
+		[=] { if (current()) ShowPlaylistsBox(controller); },
+		[=](not_null<Ui::IconButton*> button) { showMenu(button); }
+	), st::purpleMusicListMargin);
+	_content->insert(1, MakeMusicNowPlaying(_content, &session(), true, keys), st::purpleMusicNowMargin);
+	_content->insert(2, MakeMusicViewControl(_content, MusicTilesValue(), [](bool tiles) {
+		if (tiles != MusicTiles()) ToggleMusicTiles();
+	}, keys.view), st::purpleMusicActionMargin);
+
 	const auto addAction = [=](
 			rpl::producer<QString> text,
 			const style::RoundButton &buttonStyle,
@@ -347,14 +360,49 @@ MusicSection::MusicSection(
 	rpl::merge(session().data().chatsFilters().changed(), std::move(changes))
 		| rpl::on_next(updateFolderButton, lifetime());
 	updateFolderButton();
-	_playChosen = addAction(
-		tr::lng_purple_music_play_selected(lt_count, _selectionCount.value()
-			| rpl::map([](int count) { return float64(count); })
-			| tr::to_count()),
-		st::defaultActiveButton, style::al_left, [=] { playSelection(); });
-	_playChosen->hide(anim::type::instant);
+	_list = _content->add(object_ptr<PlaylistSongList>(
+		_content, std::vector<PlaylistSongListRow>(), 0, 0,
+		[=](uint64_t id) { play(id); },
+		Fn<void(std::vector<uint64_t>)>(), PlaylistSongList::Mode::Library),
+		st::purpleMusicListMargin);
+	_list->setArtworkSession(&session());
+	MusicTilesValue() | rpl::on_next([=](bool tiles) {
+		_list->setTiles(tiles);
+	}, lifetime());
+	_list->setSelectionActions([=](uint64_t id) { toggleTrack(id); },
+		[=] { return playSelection(); },
+		[=](std::vector<uint64_t> ids) { markTracks(std::move(ids)); });
+	_list->setKeyHandler([=](QKeyEvent *event) {
+		if (event->modifiers() & ~Qt::KeypadModifier) return false;
+		const auto key = event->key();
+		if (key != Qt::Key_Home && key != Qt::Key_End) return false;
+		navigate(key == Qt::Key_Home ? TrackListAction::First : TrackListAction::Last, 1);
+		return true;
+	});
+	_list->setCopyOrgLinkAction(crl::guard(this, [=](uint64_t id) { copyOrgLink(id); }));
+	_list->setContextActions([=](not_null<Ui::PopupMenu*> menu, uint64_t id) {
+		fillTrackActions(menu, id);
+	});
+	_list->navigationEvents() | rpl::on_next([=] {
+		if (_list->selectedDocument()) _snapshotHeld = true;
+	}, lifetime());
 	_more = addAction(tr::lng_purple_music_more(),
 		st::defaultLightButton, style::al_right, [=] { read(CatalogRead::Append); });
+	auto summary = rpl::combine(
+		_selectionCount.value(),
+		_hiddenSelectionCount.value(),
+		[](int count, int hidden) {
+			return hidden ? u"%1 marked · %2 hidden"_q.arg(count).arg(hidden)
+				: count ? u"%1 marked"_q.arg(count) : QString();
+		});
+	_playChosen = _content->add(MakeMusicSelectionBar(_content, std::move(summary), {
+		.play = [=] { playSelection(); },
+		.queue = [=] { if (!_selection.empty()) act(MusicTrackAction::Queue, _selection.front().document); },
+		.add = [=] { if (!_selection.empty()) act(MusicTrackAction::AddToPlaylist, _selection.front().document); },
+		.forward = [=] { if (!_selection.empty()) act(MusicTrackAction::Forward, _selection.front().document); },
+		.more = [=] { _list->showActions(); },
+		.clear = [=] { _selection.clear(); updateSelection(); },
+	}, keys), st::purpleMusicActionMargin);
 	_more->hide(anim::type::instant);
 	_status->hide(anim::type::instant);
 	widthValue() | rpl::on_next([=](int width) {
@@ -365,23 +413,27 @@ MusicSection::MusicSection(
 	heightValue() | rpl::on_next([=] { updateListHeight(); }, lifetime());
 	_content->heightValue() | rpl::on_next([=] { updateListHeight(); }, lifetime());
 	_search->changes() | rpl::on_next([=] {
+		const auto query = _search->getLastText().trimmed();
+		if (_displayedSearch.isEmpty() && !query.isEmpty() && !_restoreUnfiltered) {
+			_unfilteredCursor = _list->selectedDocument();
+			_unfilteredTop = _list->scrollTop();
+			_restoreUnfiltered = true;
+		}
 		++_query;
 		_reading = false;
 		_transientNotice.clear();
-		if (_search->getLastText().trimmed() != _displayedSearch) {
+		if (query != _displayedSearch) {
 			_more->hide(anim::type::instant);
 			_readTimer.callOnce(kRefreshDelay);
 		} else {
 			_more->toggle(_moreAvailable, anim::type::instant);
+			if (query.isEmpty()) _restoreUnfiltered = false;
 		}
 		updateStatus();
 	}, lifetime());
 	_search->submits() | rpl::on_next([=] {
-		if (playSelection()) return;
-		if (_list && !_rows.empty() && !_reading) {
-			const auto selected = _list->selectedDocument();
-			play(selected ? selected : _rows.front().document);
-		}
+		AcceptMusicFilter(controller->window().widget());
+		_list->focusSelected();
 	}, lifetime());
 	const auto &data = session().data();
 	data.chatsFilters().changed()
@@ -399,6 +451,18 @@ MusicSection::MusicSection(
 		if (_scope && !_snapshotHeld && !_readTimer.isActive()) {
 			_readTimer.callOnce(kRefreshDelay);
 		}
+	}, lifetime());
+	const auto player = Media::Player::instance();
+	player->trackChanged() | rpl::on_next([=](AudioMsgId::Type type) {
+		if (type != AudioMsgId::Type::Song) return;
+		if (base::take(_loadingDocument)) _resolver.reset();
+		updatePlayback();
+	}, lifetime());
+	player->updatedNotifier() | rpl::on_next([=](const Media::Player::TrackState &state) {
+		if (state.id.type() == AudioMsgId::Type::Song) updatePlayback();
+	}, lifetime());
+	player->stops(AudioMsgId::Type::Song) | rpl::on_next([=] {
+		updatePlayback();
 	}, lifetime());
 	Core::App().passcodeLockChanges() | rpl::on_next([=](bool locked) {
 		if (locked) reset();
@@ -424,15 +488,16 @@ std::shared_ptr<Window::SectionMemento> MusicSection::createMemento() {
 
 void MusicSection::doSetInnerFocus() {
 	if (ModalKeysInNormal(controller()->window().widget())) {
-		setFocus();
+		if (_list) _list->focusSelected();
+		else setFocus();
 	} else {
 		_search->setFocusFast();
 	}
 }
 
 void MusicSection::keyPressEvent(QKeyEvent *event) {
-	if (_list && !event->modifiers() && isVisible() && current()) {
-		if (event->key() == Qt::Key_Down
+	if (!event->modifiers() && !isHidden() && current()) {
+		if (_list && event->key() == Qt::Key_Down
 			&& _search->rawTextEdit()->hasFocus()
 			&& !_reading
 			&& _displayedSearch == _search->getLastText().trimmed()
@@ -445,11 +510,17 @@ void MusicSection::keyPressEvent(QKeyEvent *event) {
 				return;
 			}
 		}
-		const auto focus = QApplication::focusWidget();
-		if (event->key() == Qt::Key_Escape && focus
-			&& _list->isAncestorOf(focus)) {
+		if (event->key() == Qt::Key_Escape
+			&& ModalKeysInNormal(controller()->window().widget())) {
 			event->accept();
-			doSetInnerFocus();
+			if (_list && _list->cancelRangeMark()) {
+				return;
+			} else if (!_selection.empty()) {
+				_selection.clear();
+				updateSelection();
+			} else {
+				controller()->showBackFromStack();
+			}
 			return;
 		}
 	}
@@ -500,8 +571,23 @@ void MusicSection::focusSearch(bool search) {
 	if (search) {
 		_search->setFocusFast();
 	} else if (searchContains(QApplication::focusWidget())) {
-		setFocus();
+		_search->setText(QString());
+		if (_list) _list->focusSelected();
+		else setFocus();
 	}
+}
+
+void MusicSection::navigate(TrackListAction action, int repeat) {
+	if (!_list) return;
+	if (!_reading && _tail && action == TrackListAction::First) {
+		read(CatalogRead::Reload);
+		return;
+	} else if (!_reading && _moreAvailable && action == TrackListAction::Last) {
+		read(CatalogRead::Tail);
+		return;
+	}
+	_snapshotHeld = true;
+	_list->navigate(action, repeat);
 }
 
 bool MusicSection::current() const {
@@ -531,15 +617,23 @@ void MusicSection::reset(bool keepRows) {
 	++_query;
 	_readTimer.cancel();
 	_connectionTimer.cancel();
+	_scanTimer.cancel();
+	_waitingForScanner = false;
+	_savingPage = false;
+	if (_schedule->owner == this) _schedule->owner.clear();
 	_scope.reset();
 	_resolver.reset();
+	_loadingDocument = 0;
+	updatePlayback();
 	_bookmarkResolver.reset();
+	_actionResolver.reset();
 	_pending.clear();
 	_savingSelection = false;
 	_cursor.reset();
 	_reading = false;
 	_snapshotHeld = false;
 	_moreAvailable = false;
+	_tail = false;
 	_scanIncomplete = false;
 	_configuring = false;
 	_waitingMainDialogs = false;
@@ -631,11 +725,23 @@ void MusicSection::refresh(bool force) {
 			}
 			_indexError.clear();
 			_scope = result.roster->scope;
+			read(CatalogRead::Reload);
+			if (_schedule->owner && _schedule->owner != this) {
+				_waitingForScanner = true;
+				updateStatus();
+				return;
+			}
+			_schedule->owner = this;
 			auto queuedPeers = std::set<quint64>();
 			for (const auto &cursor : result.roster->sources) {
 				if (!inRoster(cursor.peer)) continue;
 				if (cursor.latest) {
-					_pending.push_back({ .saved = cursor, .head = true });
+					_pending.push_back({
+						.saved = cursor,
+						.offset = cursor.headBefore.value_or(0),
+						.newest = cursor.headNewest.value_or(0),
+						.head = true,
+					});
 					queuedPeers.insert(cursor.peer);
 				} else if (!cursor.complete) {
 					addBackfill(cursor);
@@ -643,9 +749,13 @@ void MusicSection::refresh(bool force) {
 				}
 			}
 			_chatsToScan = int(queuedPeers.size());
-			read(CatalogRead::Reload);
+			const auto retry = std::ranges::find_if(_pending, [&](const Scan &scan) {
+				return scan.saved.peer == _schedule->retryPeer;
+			});
+			if (retry != _pending.end()) {
+				std::rotate(_pending.begin(), retry, std::next(retry));
+			}
 			scan();
-			updateStatus();
 		}));
 }
 
@@ -656,7 +766,10 @@ void MusicSection::addBackfill(MusicSourceCursor cursor) {
 }
 
 void MusicSection::scan() {
-	if (!current() || !_scope || _request) return;
+	if (!current() || !_scope || _request || _savingPage
+		|| _schedule->owner != this) {
+		return;
+	}
 	if (!rosterCurrent()) {
 		refresh();
 		return;
@@ -666,9 +779,21 @@ void MusicSection::scan() {
 	}
 	_offline = IsOfflineState(session());
 	if (_pending.empty()) {
+		_schedule->owner.clear();
 		updateStatus();
 		return;
 	}
+	if (_offline) {
+		updateStatus();
+		return;
+	}
+	const auto now = crl::now();
+	if (const auto delay = _schedule->pacer.delay(now)) {
+		_scanTimer.callOnce(std::min(delay, qint64(60000)));
+		updateStatus();
+		return;
+	}
+	_schedule->pacer.sent(now);
 	const auto next = _pending.front();
 	_pending.pop_front();
 	const auto peer = session().data().peer(PeerId(uint64(next.saved.peer)));
@@ -694,6 +819,7 @@ void MusicSection::scan() {
 		if (_route != route) return;
 		_request = 0;
 		_offline = IsOfflineState(session());
+		_schedule->pacer.succeeded();
 		if (rosterCurrent() && inRoster(next.saved.peer)) {
 			advance(next, result);
 		} else {
@@ -703,6 +829,16 @@ void MusicSection::scan() {
 		if (_route != route) return;
 		_request = 0;
 		_offline = IsOfflineState(session());
+		if (const auto delay = _schedule->pacer.retry(
+				crl::now(), error.code(), error.type())) {
+			_pending.push_front(next);
+			_schedule->retryPeer = next.saved.peer;
+			const auto until = QDateTime::currentMSecsSinceEpoch() + delay;
+			session().local().writePref<QString>(kScanRetryPref,
+				QString::number(until) + u' ' + QString::number(next.saved.peer));
+			scan();
+			return;
+		}
 		_scanIncomplete = true;
 		_failedPeers.insert(next.saved.peer);
 		++_serverSearchErrors;
@@ -711,7 +847,7 @@ void MusicSection::scan() {
 		}
 		if (next.head) addBackfill(next.saved);
 		scan();
-	}).handleFloodErrors().send();
+	}).handleAllErrors().send();
 	updateStatus();
 }
 
@@ -780,7 +916,14 @@ void MusicSection::advance(Scan next, const MTPmessages_Messages &result) {
 	const auto finished = boundary || !anyMessages;
 	auto saved = next.saved;
 	if (next.head) {
-		if (finished && next.newest) saved.latest = next.newest;
+		if (finished) {
+			if (next.newest) saved.latest = next.newest;
+			saved.headBefore.reset();
+			saved.headNewest.reset();
+		} else {
+			saved.headBefore = oldest;
+			saved.headNewest = next.newest;
+		}
 	} else {
 		if (oldest) saved.before = oldest;
 		if (next.newest && !saved.latest) saved.latest = next.newest;
@@ -788,9 +931,11 @@ void MusicSection::advance(Scan next, const MTPmessages_Messages &result) {
 	}
 	const auto hasTracks = !rows.empty();
 	const auto savedCount = int(rows.size());
+	_savingPage = true;
 	SaveMusicIndexPage(&session(), *_scope, next.saved, saved, std::move(rows),
 		crl::guard(this, [=](MusicIndexSaveResult saveResult) mutable {
 			if (_route != route || !current() || folder() != _folder) return;
+			_savingPage = false;
 			if (!saveResult.ok) {
 				_scanIncomplete = true;
 				_failedPeers.insert(next.saved.peer);
@@ -799,6 +944,10 @@ void MusicSection::advance(Scan next, const MTPmessages_Messages &result) {
 					_lastServerError = saveResult.error;
 				}
 			} else {
+				if (_schedule->retryPeer == saved.peer) {
+					_schedule->retryPeer = 0;
+					session().local().clearPref(kScanRetryPref);
+				}
 				_tracksIndexedInScan += savedCount;
 				if (!finished) {
 					next.saved = saved;
@@ -822,6 +971,7 @@ void MusicSection::advance(Scan next, const MTPmessages_Messages &result) {
 
 void MusicSection::read(CatalogRead mode) {
 	const auto append = mode == CatalogRead::Append;
+	const auto tail = mode == CatalogRead::Tail;
 	const auto text = _search->getLastText().trimmed();
 	if (!current() || !_scope || folder() != _folder
 		|| (append && (!_moreAvailable || _reading || text != _displayedSearch))
@@ -833,11 +983,11 @@ void MusicSection::read(CatalogRead mode) {
 		return;
 	}
 	const auto query = ++_query;
-	if (mode != CatalogRead::Scan) _snapshotHeld = append;
+	if (mode != CatalogRead::Scan) _snapshotHeld = append || tail;
 	_reading = true;
 	updateStatus();
 	ReadMusicIndexPage(&session(), *_scope, text,
-		_peers, append ? _cursor : std::nullopt,
+		_peers, append ? _cursor : std::nullopt, tail,
 		crl::guard(this, [=](MusicIndexPageResult result) {
 			if (query != _query || !current() || folder() != _folder) return;
 			_reading = false;
@@ -860,7 +1010,8 @@ void MusicSection::read(CatalogRead mode) {
 				_cursor.reset();
 			}
 			_displayedSearch = text;
-			_moreAvailable = result.rows.size() == kSearchPageSize;
+			_tail = tail;
+			_moreAvailable = !tail && result.rows.size() == kSearchPageSize;
 			if (!result.rows.empty()) {
 				const auto &last = result.rows.back();
 				_cursor = MusicIndexCursor{ last.postedAt, last.document };
@@ -872,54 +1023,41 @@ void MusicSection::read(CatalogRead mode) {
 				}
 			}
 			render();
+			if (tail) _list->navigate(TrackListAction::Last);
 		}));
 }
 
 void MusicSection::render() {
-	const auto selected = _list ? _list->selectedDocument() : 0;
-	const auto top = _list ? _list->scrollTop() : 0;
-	const auto focus = QApplication::focusWidget();
-	const auto hadFocus = _list && focus
-		&& (focus == _list || _list->isAncestorOf(focus));
-	delete _list.data();
+	const auto restore = _displayedSearch.isEmpty()
+		&& _search->getLastText().trimmed().isEmpty() && base::take(_restoreUnfiltered);
+	const auto selected = restore ? _unfilteredCursor : _list->selectedDocument();
+	const auto top = restore ? _unfilteredTop : _list->scrollTop();
 	_more->toggle(current() && _moreAvailable, anim::type::instant);
-	updateSelection();
-	if (!current()) return;
-	if (_rows.empty()) {
-		updateStatus();
-		return;
-	}
 	auto rows = std::vector<PlaylistSongListRow>();
 	for (const auto &track : _rows) {
-		if (!inRoster(track.peer)) continue;
+		if (!current() || !inRoster(track.peer)) continue;
+		const auto peer = session().data().peerLoaded(PeerId(uint64(track.peer)));
 		rows.push_back({
 			.documentId = track.document,
 			.title = track.title,
 			.performer = track.performer,
 			.duration = Ui::FormatDurationText(track.duration),
+			.message = FullMsgId(PeerId(uint64(track.peer)), MsgId(track.message)),
+			.audioDocument = track.document,
+			.source = peer ? peer->name() : QString(),
 		});
 	}
-	if (!rows.empty()) {
-		_list = _content->insert(_content->count() - 1, object_ptr<PlaylistSongList>(
-			_content, std::move(rows), selected, top,
-			[=](uint64_t id) { play(id); },
-			Fn<void(std::vector<uint64_t>)>(), PlaylistSongList::Mode::Library),
-			st::purpleMusicListMargin);
-		_list->setSelectionActions([=](uint64_t id) { toggleTrack(id); },
-			[=] { return playSelection(); });
-		_list->setCopyOrgLinkAction(crl::guard(this, [=](uint64_t id) { copyOrgLink(id); }));
-		_list->navigationEvents() | rpl::on_next([=] {
-			_snapshotHeld = true;
-		}, _list->lifetime());
-	}
+	_list->setRows(std::move(rows), selected, top);
 	updateSelection();
+	updatePlayback();
 	updateStatus();
-	if (hadFocus && _list) _list->focusSelected();
+	if (hasFocus()) _list->focusSelected();
 }
 
 void MusicSection::updateListHeight() {
 	if (!_list) return;
-	_list->setViewportLimit(std::max(1, height() - _list->y() - _more->height()));
+	_list->setViewportLimit(std::max(1, height() - _list->y()
+		- (_more ? _more->height() : 0) - (_playChosen ? _playChosen->height() : 0)));
 }
 
 void MusicSection::setStatus(const QString &text) {
@@ -950,9 +1088,11 @@ void MusicSection::updateStatus() {
 		.totalChatsInFolder = int(_peers.size()),
 		.configuring = _configuring,
 		.reading = _reading,
-		.scanning = _request != 0 || !_pending.empty(),
+		.scanning = _request != 0 || _savingPage || !_pending.empty()
+			|| _waitingForScanner,
 		.chatsToScan = _chatsToScan,
 		.chatsScanned = int(_completedPeers.size()),
+		.retrySeconds = _schedule->pacer.retrySeconds(crl::now()),
 		.chatsFailed = int(_failedPeers.size()),
 		.serverSearchErrors = _serverSearchErrors,
 		.lastServerError = _lastServerError,
@@ -1008,13 +1148,18 @@ void MusicSection::pollConnection() {
 	const auto offline = IsOfflineState(session());
 	const auto offlineChanged = (offline != _offline);
 	_offline = offline;
-	if (offlineChanged) {
+	if (offlineChanged || _schedule->pacer.retrySeconds(crl::now()) > 0) {
 		updateStatus();
 	}
 	if (_offline) {
 		_dialogStallTicks = 0;
 		return;
 	}
+	if (_waitingForScanner && !_schedule->owner) {
+		refresh(true);
+		return;
+	}
+	if (offlineChanged && _schedule->owner == this) scan();
 	auto &data = session().data();
 	if (!data.chatsFilters().loaded()) {
 		if (++_dialogStallTicks >= 3) {
@@ -1071,10 +1216,27 @@ void MusicSection::toggleTrack(quint64 documentId) {
 	updateSelection();
 }
 
+void MusicSection::markTracks(std::vector<uint64_t> ids) {
+	if (_savingSelection || !rosterCurrent()
+		|| _displayedSearch != _search->getLastText().trimmed()) {
+		return;
+	}
+	_snapshotHeld = true;
+	const auto keys = std::set<uint64_t>(ids.begin(), ids.end());
+	for (const auto &row : _rows) {
+		if (keys.contains(row.document)) _selection.push_back(row);
+	}
+	updateSelection();
+}
+
 void MusicSection::updateSelection() {
+	auto visible = std::set<uint64_t>();
+	for (const auto &row : _rows) visible.insert(row.document);
 	_selectionCount = int(_selection.size());
-	_playChosen->toggle(current() && !_selection.empty(), anim::type::instant);
-	_playChosen->entity()->setDisabled(_savingSelection);
+	_hiddenSelectionCount = int(std::ranges::count_if(_selection, [&](const auto &entry) {
+		return !visible.contains(entry.document);
+	}));
+	_playChosen->setEnabled(!_savingSelection);
 	if (_list) {
 		auto chosen = std::set<uint64_t>();
 		for (const auto &entry : _selection) chosen.insert(entry.document);
@@ -1083,22 +1245,51 @@ void MusicSection::updateSelection() {
 	updateListHeight();
 }
 
-bool MusicSection::playSelection() {
+void MusicSection::updatePlayback() {
+	if (!_list) return;
+	const auto state = Media::Player::instance()->getState(AudioMsgId::Type::Song);
+	const auto document = state.id.audio();
+	auto id = quint64(0);
+	auto playback = MusicRowPlayback::Idle;
+	if (document && &document->session() == &session()
+		&& !Media::Player::IsStoppedOrStopping(state.state)) {
+		id = document->id;
+		playback = Media::Player::IsPausedOrPausing(state.state)
+			? MusicRowPlayback::Paused
+			: (state.waitingForData || state.state == Media::Player::State::Starting)
+			? MusicRowPlayback::Loading
+			: MusicRowPlayback::Playing;
+	}
+	_list->setMusicPlayback(id, playback, _loadingDocument);
+}
+
+bool MusicSection::playSelection(bool visibleOnly) {
 	if (_selection.empty()) return false;
 	if (_savingSelection) return true;
 	if (!rosterCurrent()) {
 		refresh();
 		return true;
 	}
-	auto tracks = _selection;
-	if (!std::ranges::all_of(tracks, [=](const auto &entry) { return inRoster(entry.peer); })) {
-		refresh();
+	auto tracks = std::vector<MusicIndexEntry>();
+	auto marked = std::set<uint64_t>();
+	for (const auto &entry : _selection) marked.insert(entry.document);
+	for (const auto &entry : _rows) {
+		if (inRoster(entry.peer) && marked.contains(entry.document)) {
+			tracks.push_back(entry);
+		}
+	}
+	if (tracks.empty() || (!visibleOnly && tracks.size() != _selection.size())
+		|| _displayedSearch != _search->getLastText().trimmed()) {
+		_transientNotice = u"Clear the filter or clear hidden marks to play the selection."_q;
+		updateStatus();
 		return true;
 	}
 	auto requests = std::vector<PlaylistResolveSong>();
 	requests.reserve(tracks.size());
 	for (const auto &entry : tracks) requests.push_back(resolveSong(entry));
 	_savingSelection = true;
+	_loadingDocument = 0;
+	updatePlayback();
 	updateSelection();
 	_transientNotice = tr::lng_purple_playlists_resolving(tr::now);
 	updateStatus();
@@ -1117,13 +1308,15 @@ bool MusicSection::playSelection() {
 				updateStatus();
 				return;
 			}
-			saveSelection(tracks);
+			saveSelection(tracks, visibleOnly);
 		}));
 	_resolver->start();
 	return true;
 }
 
-void MusicSection::saveSelection(const std::vector<MusicIndexEntry> &tracks) {
+void MusicSection::saveSelection(
+		const std::vector<MusicIndexEntry> &tracks,
+		bool visibleOnly) {
 	auto songs = std::vector<PlaylistAddSongInput>();
 	songs.reserve(tracks.size());
 	for (const auto &entry : tracks) {
@@ -1139,7 +1332,7 @@ void MusicSection::saveSelection(const std::vector<MusicIndexEntry> &tracks) {
 	}
 	if (tracks.size() == 1) {
 		_savingSelection = false;
-		_selection.clear();
+		if (!visibleOnly) _selection.clear();
 		updateSelection();
 		_transientNotice.clear();
 		updateStatus();
@@ -1161,7 +1354,7 @@ void MusicSection::saveSelection(const std::vector<MusicIndexEntry> &tracks) {
 		_savingSelection = false;
 		if (result && result.edit && rosterCurrent()
 			&& std::ranges::all_of(tracks, [=](const auto &entry) { return bool(captureTrack(entry)); })) {
-			_selection.clear();
+			if (!visibleOnly) _selection.clear();
 			_transientNotice.clear();
 			updateStatus();
 			updateSelection();
@@ -1186,10 +1379,21 @@ void MusicSection::play(quint64 documentId) {
 	const auto row = std::ranges::find(_rows, documentId, &MusicIndexEntry::document);
 	if (row == _rows.end() || !inRoster(row->peer)) return;
 	const auto entry = *row;
+	if (captureTrack(entry)) {
+		_resolver.reset();
+		_loadingDocument = 0;
+		playResolved(entry);
+		return;
+	}
 	const auto route = _route;
+	_loadingDocument = documentId;
+	updatePlayback();
 	_resolver = std::make_unique<DesktopPlaylistResolver>(
 		&session(), std::vector{ resolveSong(entry) }, crl::guard(this, [=](auto results) {
-			if (_route != route || !rosterCurrent()) return;
+			if (_route != route) return;
+			_loadingDocument = 0;
+			updatePlayback();
+			if (!rosterCurrent()) return;
 			if (results.size() == 1 && results.front().status == PlaylistSongStatus::Ready) {
 				playResolved(entry);
 			} else {
@@ -1250,6 +1454,138 @@ void MusicSection::copyOrgLink(quint64 documentId) {
 	_bookmarkResolver->start();
 }
 
+void MusicSection::fillTrackActions(not_null<Ui::PopupMenu*> menu, uint64_t key) {
+	menu->addAction(tr::lng_purple_playlists_play(tr::now), [=] { play(key); });
+	menu->addAction(u"Add to queue"_q, [=] { act(MusicTrackAction::Queue, key); });
+	menu->addAction(tr::lng_context_forward_msg(tr::now), [=] { act(MusicTrackAction::Forward, key); });
+	menu->addAction(tr::lng_context_to_msg(tr::now), [=] { act(MusicTrackAction::GoTo, key); });
+	menu->addAction(tr::lng_purple_playlists_add(tr::now),
+		[=] { act(MusicTrackAction::AddToPlaylist, key); });
+	menu->addAction(tr::lng_context_copy_link(tr::now),
+		[=] { act(MusicTrackAction::CopyMessageLink, key); });
+	if (!_selection.empty()) {
+		menu->addAction(u"Clear marks"_q, [=] {
+			_selection.clear();
+			updateSelection();
+		});
+	}
+	if (_hiddenSelectionCount.current()) {
+		if (_hiddenSelectionCount.current() < _selectionCount.current()) {
+			menu->addAction(u"Play visible marks"_q, [=] { playSelection(true); });
+		}
+		menu->addAction(u"Clear hidden marks"_q, [=] {
+			std::erase_if(_selection, [=](const MusicIndexEntry &entry) {
+				return std::ranges::find(_rows, entry.document, &MusicIndexEntry::document)
+					== _rows.end();
+			});
+			updateSelection();
+		});
+	}
+}
+
+void MusicSection::act(MusicTrackAction action, uint64_t key) {
+	if (!_list || !rosterCurrent()
+		|| _displayedSearch != _search->getLastText().trimmed()) {
+		return;
+	}
+	if (action == MusicTrackAction::Menu) {
+		_list->showActions();
+		return;
+	}
+	if (!key) key = _list->selectedDocument();
+	if ((action == MusicTrackAction::GoTo || action == MusicTrackAction::CopyMessageLink)
+		&& _selection.size() > 1
+		&& std::ranges::find(_selection, key, &MusicIndexEntry::document) != _selection.end()) {
+		_transientNotice = u"Choose one track for this action."_q;
+		updateStatus();
+		return;
+	}
+	const auto group = (action == MusicTrackAction::Forward
+		|| action == MusicTrackAction::Queue || action == MusicTrackAction::AddToPlaylist)
+		&& std::ranges::find(_selection, key, &MusicIndexEntry::document) != _selection.end();
+	auto entries = std::vector<MusicIndexEntry>();
+	for (const auto &row : _rows) {
+		if (row.document == key || (group
+			&& std::ranges::find(_selection, row.document, &MusicIndexEntry::document)
+				!= _selection.end())) {
+			entries.push_back(row);
+		}
+	}
+	if (group && entries.size() != _selection.size()) {
+		_transientNotice = u"Clear the filter or clear hidden marks first."_q;
+		updateStatus();
+		return;
+	}
+	if (entries.empty()) return;
+	auto requests = std::vector<PlaylistResolveSong>();
+	for (const auto &entry : entries) requests.push_back(resolveSong(entry));
+	const auto route = _route;
+	const auto query = _query;
+	_actionResolver = std::make_unique<DesktopPlaylistResolver>(
+		&session(), std::move(requests), crl::guard(this, [=](auto results) {
+			if (route != _route || query != _query || !rosterCurrent()) return;
+			auto messages = std::vector<PlaylistMessage>();
+			for (const auto &entry : entries) {
+				if (!captureTrack(entry)) break;
+				messages.push_back({
+					FullMsgId(PeerId(uint64(entry.peer)), MsgId(entry.message)), entry.document,
+				});
+			}
+			if (messages.size() != entries.size() || results.size() != entries.size()) {
+				_transientNotice = tr::lng_purple_music_track_unavailable(tr::now);
+				updateStatus();
+				return;
+			}
+			performTrackAction(action, messages);
+		}));
+	_actionResolver->start();
+}
+
+void MusicSection::performTrackAction(
+		MusicTrackAction action,
+		const std::vector<PlaylistMessage> &messages) {
+	switch (action) {
+	case MusicTrackAction::AddToPlaylist:
+		ShowPlaylistPicker(controller(), messages);
+		return;
+	case MusicTrackAction::Queue:
+		_transientNotice = AppendAccountMusicQueue(&session(), messages)
+			? u"Added to the playback queue."_q
+			: tr::lng_purple_music_track_unavailable(tr::now);
+		break;
+	case MusicTrackAction::Forward: {
+		auto items = MessageIdsList();
+		for (const auto &message : messages) {
+			const auto source = session().data().message(message.id);
+			if (!source || !source->allowsForward()) break;
+			items.push_back(message.id);
+		}
+		if (items.size() == messages.size()) {
+			if (Window::ShowForwardMessagesBox(controller(), std::move(items))) return;
+		}
+		_transientNotice = u"Some of these tracks cannot be forwarded."_q;
+	} break;
+	case MusicTrackAction::GoTo:
+		if (const auto source = session().data().message(messages.front().id)) {
+			controller()->showMessage(source, Window::SectionShow::Way::Forward);
+			return;
+		}
+		_transientNotice = tr::lng_purple_music_track_unavailable(tr::now);
+		break;
+	case MusicTrackAction::CopyMessageLink:
+		if (const auto source = session().data().message(messages.front().id);
+			source && source->hasDirectLink() && !IsAnchoredEphemeral(source)) {
+			HistoryView::CopyPostLink(controller(), source->fullId(), HistoryView::Context::History);
+			return;
+		}
+		_transientNotice = u"No message link is available for this track."_q;
+		break;
+	case MusicTrackAction::Menu:
+		return;
+	}
+	updateStatus();
+}
+
 PlaylistResolveSong MusicSection::resolveSong(const MusicIndexEntry &entry) const {
 	const auto peer = session().data().peer(PeerId(uint64(entry.peer)));
 	const auto token = peer->isSelf()
@@ -1288,7 +1624,15 @@ void MusicSection::playResolved(const MusicIndexEntry &entry) {
 	}
 	_transientNotice.clear();
 	updateStatus();
-	Media::Player::instance()->play(AudioMsgId(item->media()->document(), id));
+	const auto player = Media::Player::instance();
+	const auto state = player->getState(AudioMsgId::Type::Song);
+	const auto document = item->media()->document();
+	if (state.id.audio() == document && !Media::Player::IsStoppedOrStopping(state.state)) {
+		if (Media::Player::IsPausedOrPausing(state.state)) player->play(AudioMsgId::Type::Song);
+	} else {
+		player->play(AudioMsgId(document, id));
+	}
+	updatePlayback();
 }
 
 MusicSection *MusicForWidget(
@@ -1345,6 +1689,23 @@ void FocusMusicSearch(
 	}
 }
 
+void NavigateMusic(
+		not_null<Window::SessionController*> controller,
+		QWidget *focus,
+		TrackListAction action,
+		int repeat) {
+	if (const auto music = MusicForWidget(controller, focus)) {
+		music->navigate(action, repeat);
+	}
+}
+
+void ActOnMusic(
+		not_null<Window::SessionController*> controller,
+		QWidget *focus,
+		MusicTrackAction action) {
+	if (const auto music = MusicForWidget(controller, focus)) music->act(action);
+}
+
 bool ToggleMusicSection(not_null<Window::SessionController*> controller) {
 	if (!MusicWindowCurrent(controller)) return false;
 	for (const auto child : controller->content()->children()) {
@@ -1370,8 +1731,22 @@ void UpdateMusicSidebar(QWidget *widget, bool suppress, bool restore) {
 }
 
 bool MusicHidesChats(const Window::SectionWidget *section) {
-	return dynamic_cast<const MusicSection*>(section)
-		&& MusicHideChatsCurrent();
+	return MusicHidesInfo(section) && MusicHideChatsCurrent();
+}
+
+bool MusicHidesInfo(const Window::SectionWidget *section) {
+	return dynamic_cast<const MusicSection*>(section) != nullptr;
+}
+
+bool MusicOwnsSongTransport(const Window::SectionWidget *section) {
+	if (!MusicHidesInfo(section) || Core::App().passcodeLocked()) return false;
+	const auto player = Media::Player::instance();
+	const auto type = AudioMsgId::Type::Song;
+	if (player->getActiveType() != type) return false;
+	const auto state = player->getState(type);
+	const auto document = state.id.audio();
+	return document && &document->session() == &section->session()
+		&& !Media::Player::IsStoppedOrStopping(state.state);
 }
 
 bool MusicHideChatsCurrent() {

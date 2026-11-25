@@ -25,6 +25,8 @@ struct MusicSourceCursor {
 	std::optional<qint64> before;
 	std::optional<qint64> latest;
 	bool complete = false;
+	std::optional<qint64> headBefore;
+	std::optional<qint64> headNewest;
 };
 
 struct MusicIndexScope {
@@ -49,7 +51,8 @@ public:
 		MusicIndexScope scope,
 		const QString &query,
 		const std::vector<quint64> &visiblePeers,
-		std::optional<MusicIndexCursor> cursor);
+		std::optional<MusicIndexCursor> cursor,
+		bool tail = false);
 	[[nodiscard]] std::optional<qint64> count(
 		MusicIndexScope scope,
 		const std::vector<quint64> &visiblePeers);

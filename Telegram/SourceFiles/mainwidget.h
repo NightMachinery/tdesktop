@@ -384,6 +384,7 @@ private:
 	std::vector<std::unique_ptr<StackItem>> _stack;
 
 	int _playerHeight = 0;
+	bool _musicHidesSongPlayer = false;
 	int _callTopBarHeight = 0;
 	int _exportTopBarHeight = 0;
 	int _contentScrollAddToY = 0;

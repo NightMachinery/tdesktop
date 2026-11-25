@@ -3,6 +3,7 @@
 #include "purple/purple_music_source_roster.h"
 
 #include <QtCore/QCoreApplication>
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 
@@ -33,6 +34,35 @@ Purple::MusicDiagnosticsSnapshot ReadyMusicFolder() {
 
 int main(int argc, char **argv) {
 	const auto app = QCoreApplication(argc, argv);
+
+	{
+		auto clock = qint64(4000);
+		auto pacer = Purple::MusicScanPacer();
+		pacer.sent(clock);
+		Check(pacer.delay(clock) == 350, "normal pages are paced");
+		const auto wait = pacer.retry(clock, 420, u"FLOOD_WAIT_12"_q);
+		Check(wait == 12000, "server deadline is exact");
+		clock += 11999;
+		Check(pacer.delay(clock) == 1 && pacer.retrySeconds(clock) == 1,
+			"no other page starts before the server deadline");
+		auto restarted = Purple::MusicScanPacer();
+		restarted.restore(clock, pacer.delay(clock));
+		Check(restarted.delay(clock) == 1, "restart respects the remaining wait");
+		++clock;
+		Check(!restarted.delay(clock) && !pacer.delay(clock),
+			"the queue can resume at the deadline");
+		for (auto attempt = 0; attempt != 8; ++attempt) {
+			const auto base = 1000 << attempt;
+			const auto delay = pacer.retry(clock, 500, u"INTERNAL"_q);
+			Check(delay >= base && delay < base * 5 / 4,
+				"temporary failure uses bounded exponential backoff with jitter");
+			clock += delay;
+		}
+		Check(!pacer.retry(clock, 500, u"INTERNAL"_q),
+			"persistent transient failure eventually lets the queue move on");
+		Check(!pacer.retry(clock, 400, u"CHANNEL_PRIVATE"_q),
+			"permanent failure is not retried");
+	}
 
 	// 1. Explicit-only Music folders (no category flags) must not block on
 	// main/archive dialog list loading.
@@ -113,6 +143,9 @@ int main(int argc, char **argv) {
 		Check(progress.contains(u"2/5 chats scanned"_q)
 			&& progress.contains(u"14 tracks found"_q),
 			"scanning progress reports counts", progress);
+		s.retrySeconds = 12;
+		Check(Purple::DescribeMusicState(s) == u"Indexing 2 of 5, continues in 12 s"_q,
+			"wait shows progress without reporting a failed chat");
 		s.offline = true;
 		const auto paused = Purple::DescribeMusicState(s);
 		Check(paused.contains(u"Offline (paused)"_q), "offline scanning state", paused);

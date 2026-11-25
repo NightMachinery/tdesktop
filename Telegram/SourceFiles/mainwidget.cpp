@@ -914,6 +914,9 @@ void MainWidget::handleAudioUpdate(const Media::Player::TrackState &state) {
 	} else if (state.state == State::StoppedAtStart) {
 		Media::Player::instance()->stopAndClose();
 	}
+	if (_musicHidesSongPlayer != Purple::MusicOwnsSongTransport(_mainSection.data())) {
+		updateControlsGeometry();
+	}
 
 	if (item) {
 		session().data().requestItemRepaint(item);
@@ -2551,7 +2554,8 @@ void MainWidget::paintEvent(QPaintEvent *e) {
 }
 
 int MainWidget::getMainSectionTop() const {
-	return _callTopBarHeight + _exportTopBarHeight + _playerHeight + Purple::RecordingStripHeight(this);
+	const auto playerHeight = _musicHidesSongPlayer ? 0 : _playerHeight;
+	return _callTopBarHeight + _exportTopBarHeight + playerHeight + Purple::RecordingStripHeight(this);
 }
 
 int MainWidget::getThirdSectionTop() const {
@@ -2675,8 +2679,9 @@ void MainWidget::updateControlsGeometry() {
 			_dialogs->stopWidthAnimation();
 		}
 	}
+	const auto musicHidesInfo = Purple::MusicHidesInfo(_mainSection.data());
 	if (isThreeColumn()) {
-		if (!_thirdSection
+		if (!musicHidesInfo && !_thirdSection
 			&& !_controller->takeThirdSectionFromLayer()) {
 			auto params = Window::SectionShow(
 				Window::SectionShow::Way::ClearStack,
@@ -2708,14 +2713,18 @@ void MainWidget::updateControlsGeometry() {
 				}
 			}
 		}
-	} else {
+	} else if (!musicHidesInfo) {
 		destroyThirdSection();
 		_thirdShadow.destroy();
 		_zenThirdShadowHide.onWidgetDestroyed();
 	}
+	_musicHidesSongPlayer = Purple::MusicOwnsSongTransport(_mainSection.data());
+	Purple::UpdateMusicSidebar(_player.data(), _musicHidesSongPlayer, _player && _player->toggled());
+	const auto playerHeight = _musicHidesSongPlayer ? 0 : _playerHeight;
 	const auto mainSectionTop = getMainSectionTop();
 	const auto musicWide = !isOneColumn() && Purple::MusicHidesChats(_mainSection.data());
 	const auto zenWide = !isOneColumn() && _controller->purpleZenHidden();
+	const auto hideThird = zenWide || musicHidesInfo;
 	const auto hideChats = musicWide || (zenWide && _controller->purpleZenChatsHidden());
 	Purple::UpdateMusicSidebar(_dialogs.get(), hideChats, !isOneColumn());
 	Purple::UpdateMusicSidebar(_sideShadow.get(), hideChats, !isOneColumn());
@@ -2728,8 +2737,8 @@ void MainWidget::updateControlsGeometry() {
 			w->show();
 		}
 	};
-	syncZenHide(_zenThirdSectionHide, _thirdSection.data(), zenWide);
-	syncZenHide(_zenThirdShadowHide, _thirdShadow.data(), zenWide);
+	syncZenHide(_zenThirdSectionHide, _thirdSection.data(), hideThird);
+	syncZenHide(_zenThirdShadowHide, _thirdShadow.data(), hideThird);
 	auto dialogsWidth = _dialogs
 		? int(base::SafeRound(_a_dialogsWidth.value(_dialogsWidth)))
 		: isOneColumn()
@@ -2748,7 +2757,7 @@ void MainWidget::updateControlsGeometry() {
 			_player->resizeToWidth(dialogsWidth);
 			_player->moveToLeft(0, _callTopBarHeight + _exportTopBarHeight);
 		}
-		Purple::PlaceRecordingStrip(this, 0, _callTopBarHeight + _exportTopBarHeight + _playerHeight, dialogsWidth);
+		Purple::PlaceRecordingStrip(this, 0, _callTopBarHeight + _exportTopBarHeight + playerHeight, dialogsWidth);
 		const auto mainSectionGeometry = QRect(
 			0,
 			mainSectionTop,
@@ -2764,8 +2773,8 @@ void MainWidget::updateControlsGeometry() {
 			_contentScrollAddToY);
 		if (_hider) _hider->setGeometry(0, 0, dialogsWidth, height());
 	} else {
-		auto thirdSectionWidth = (_thirdSection && !zenWide) ? _thirdColumnWidth : 0;
-		if (_thirdSection && !zenWide) {
+		auto thirdSectionWidth = (_thirdSection && !hideThird) ? _thirdColumnWidth : 0;
+		if (_thirdSection && !hideThird) {
 			auto thirdSectionTop = getThirdSectionTop();
 			_thirdSection->setGeometry(
 				width() - thirdSectionWidth,
@@ -2789,7 +2798,7 @@ void MainWidget::updateControlsGeometry() {
 				st::lineWidth,
 				shadowHeight);
 		}
-		if (_thirdShadow && !zenWide) {
+		if (_thirdShadow && !hideThird) {
 			_thirdShadow->setGeometryToLeft(
 				width() - thirdSectionWidth - st::lineWidth,
 				shadowTop,
@@ -2813,7 +2822,7 @@ void MainWidget::updateControlsGeometry() {
 				dialogsWidth,
 				_callTopBarHeight + _exportTopBarHeight);
 		}
-		Purple::PlaceRecordingStrip(this, dialogsWidth, _callTopBarHeight + _exportTopBarHeight + _playerHeight, mainSectionWidth);
+		Purple::PlaceRecordingStrip(this, dialogsWidth, _callTopBarHeight + _exportTopBarHeight + playerHeight, mainSectionWidth);
 		_history->setGeometryWithTopMoved(QRect(
 			dialogsWidth,
 			mainSectionTop,
@@ -2873,7 +2882,8 @@ void MainWidget::refreshResizeAreas() {
 		_firstColumnResizeArea.destroy();
 	}
 
-	if (isThreeColumn() && !zen && _thirdSection) {
+	if (isThreeColumn() && !zen && _thirdSection
+		&& !Purple::MusicHidesInfo(_mainSection.data())) {
 		ensureThirdColumnResizeAreaCreated();
 		_thirdColumnResizeArea->setGeometryToLeft(
 			_thirdSection->x(),
@@ -3007,6 +3017,7 @@ auto MainWidget::thirdSectionForCurrentMainSection(
 void MainWidget::updateThirdColumnToCurrentChat(
 		Dialogs::Key key,
 		bool canWrite) {
+	if (Purple::MusicHidesInfo(_mainSection.data())) return;
 	auto saveOldThirdSection = [&] {
 		if (saveThirdSectionToStackBack()) {
 			_stack.back()->setThirdSectionMemento(

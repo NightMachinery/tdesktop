@@ -36,6 +36,9 @@ namespace Purple {
 	not_null<Window::SessionController*> controller);
 void ToggleZenChatList(not_null<Window::SessionController*> controller);
 
+struct MusicShortcutHints;
+[[nodiscard]] MusicShortcutHints MusicEffectiveShortcuts(bool chat);
+
 [[nodiscard]] bool HandleModalKeys(QObject *receiver, QEvent *event);
 [[nodiscard]] bool HandleModalWindowHints(QWidget *receiver, QEvent *event);
 [[nodiscard]] int ModalPhysicalKey(const QKeyEvent &event);
@@ -73,6 +76,7 @@ void BuildModalKeysSetting(::Settings::Builder::SectionBuilder &builder);
 
 [[nodiscard]] bool ModalKeysEnabled();
 [[nodiscard]] bool ModalKeysInNormal(not_null<MainWindow*> window);
+void AcceptMusicFilter(not_null<MainWindow*> window);
 [[nodiscard]] rpl::producer<bool> ModalKeysEnabledChanges();
 [[nodiscard]] bool MxShortcutInStockMode();
 [[nodiscard]] rpl::producer<QString> MxShortcutInStockModeLabel();

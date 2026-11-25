@@ -59,6 +59,9 @@
 #include "purple/purple_list_filter_keys.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
+#include "purple/purple_music_widgets.h"
+#include "purple/purple_chat_music.h"
+#include "purple/purple_playlist_song_list.h"
 #include "purple/purple_notices.h"
 #include "purple/purple_peek_controls.h"
 #include "purple/purple_picker.h"
@@ -468,6 +471,17 @@ enum class Action {
 	AddContact,
 	OpenScheduled,
 	OpenMusic,
+	MusicFirstTrack,
+	MusicMarkTrack,
+	MusicRangeMark,
+	MusicMarkPage,
+	MusicToggleTiles,
+	MusicForwardTracks,
+	MusicGoToMessage,
+	MusicAddToPlaylist,
+	MusicQueueTracks,
+	MusicCopyMessageLink,
+	MusicTrackMenu,
 	OpenPlaylists,
 	OpenChatInfo,
 	OpenChatMedia,
@@ -660,6 +674,39 @@ const Command kCommands[] = {
 	{ Action::OpenMusic, "open-music", "playback", "",
 		"audio library songs tracks",
 		[] { return tr::lng_purple_music_title(tr::now); } },
+	{ Action::MusicFirstTrack, "music-first-track", "playback", "Needs Music",
+		"top start first song",
+		[] { return u"First track"_q; } },
+	{ Action::MusicMarkTrack, "music-mark-track", "playback", "Needs Music",
+		"select current song",
+		[] { return u"Mark track"_q; } },
+	{ Action::MusicRangeMark, "music-mark-range", "playback", "Needs Music",
+		"select contiguous songs",
+		[] { return u"Mark range of tracks"_q; } },
+	{ Action::MusicMarkPage, "music-mark-page", "playback", "Needs Music",
+		"select all visible songs",
+		[] { return u"Mark visible tracks"_q; } },
+	{ Action::MusicToggleTiles, "music-toggle-view", "playback", "Needs Music",
+		"grid tiles list layout",
+		[] { return u"Toggle Music List or Tiles"_q; } },
+	{ Action::MusicForwardTracks, "music-forward-tracks", "playback", "Needs Music",
+		"send share songs",
+		[] { return tr::lng_context_forward_msg(tr::now); } },
+	{ Action::MusicGoToMessage, "music-go-to-message", "playback", "Needs Music",
+		"jump source history",
+		[] { return tr::lng_context_to_msg(tr::now); } },
+	{ Action::MusicAddToPlaylist, "music-add-to-playlist", "playback", "Needs Music",
+		"save songs collection",
+		[] { return tr::lng_purple_playlists_add(tr::now); } },
+	{ Action::MusicQueueTracks, "music-queue-tracks", "playback", "Needs Music",
+		"play later enqueue",
+		[] { return u"Add tracks to queue"_q; } },
+	{ Action::MusicCopyMessageLink, "music-copy-message-link", "playback", "Needs Music",
+		"copy address source song",
+		[] { return tr::lng_context_copy_link(tr::now); } },
+	{ Action::MusicTrackMenu, "music-track-menu", "playback", "Needs Music",
+		"context options song",
+		[] { return u"Track actions"_q; } },
 	{ Action::OpenPlaylists, "open-playlists", "playback", "",
 		"queue collections music songs",
 		[] { return tr::lng_purple_playlists_title(tr::now); } },
@@ -709,7 +756,7 @@ const Command kCommands[] = {
 	{ Action::MessageMenu, "message-hint-menu", "messages", "Needs visible messages",
 		"context options actions popup bubble",
 		[] { return tr::lng_purple_keys_message_menu(tr::now); } },
-	{ Action::TogglePlayback, "playback-toggle", "playback", "Needs active audio in this account",
+	{ Action::TogglePlayback, "playback-toggle", "music playback", "Needs active audio in this account",
 		"music audio song play pause resume",
 		[] { return tr::lng_shortcuts_media_play_pause(tr::now); } },
 	{ Action::StopPlayback, "playback-stop", "playback", "Needs active audio in this account",
@@ -1815,8 +1862,51 @@ std::vector<Data::ForumTopic*> OrderedForumTopics(not_null<Data::Forum*> forum) 
 	return out;
 }
 
-bool Available(Action action, const Target &target) {
+std::optional<TrackListAction> MusicNavigation(Action action) {
 	switch (action) {
+	case Action::MoveUp:
+	case Action::PreviousChat: return TrackListAction::Up;
+	case Action::MoveDown:
+	case Action::NextChat: return TrackListAction::Down;
+	case Action::HistoryHalfUp: return TrackListAction::HalfUp;
+	case Action::HistoryHalfDown: return TrackListAction::HalfDown;
+	case Action::OlderMessagesPage: return TrackListAction::PageUp;
+	case Action::NewerMessagesPage: return TrackListAction::PageDown;
+	case Action::MusicFirstTrack: return TrackListAction::First;
+	case Action::LatestMessages: return TrackListAction::Last;
+	case Action::OpenChat: return TrackListAction::Play;
+	case Action::MusicMarkTrack: return TrackListAction::Mark;
+	case Action::MusicRangeMark: return TrackListAction::RangeMark;
+	case Action::MusicMarkPage: return TrackListAction::MarkPage;
+	case Action::FocusChats:
+		return MusicTiles() ? std::optional(TrackListAction::Left) : std::nullopt;
+	case Action::FocusConversation:
+		return MusicTiles() ? std::optional(TrackListAction::Right) : std::nullopt;
+	default: return std::nullopt;
+	}
+}
+
+std::optional<MusicTrackAction> MusicAction(Action action) {
+	switch (action) {
+	case Action::MusicForwardTracks: return MusicTrackAction::Forward;
+	case Action::MusicGoToMessage: return MusicTrackAction::GoTo;
+	case Action::MusicAddToPlaylist: return MusicTrackAction::AddToPlaylist;
+	case Action::MusicQueueTracks: return MusicTrackAction::Queue;
+	case Action::MusicCopyMessageLink: return MusicTrackAction::CopyMessageLink;
+	case Action::MusicTrackMenu: return MusicTrackAction::Menu;
+	default: return std::nullopt;
+	}
+}
+
+bool Available(Action action, const Target &target) {
+	if (MusicAction(action)) return target.contextMap == MapKind::Music;
+	if (target.contextMap == MapKind::Music && MusicNavigation(action)) return true;
+	switch (action) {
+	case Action::MusicFirstTrack:
+	case Action::MusicMarkTrack:
+	case Action::MusicRangeMark:
+	case Action::MusicMarkPage: return false;
+	case Action::MusicToggleTiles: return target.contextMap == MapKind::Music;
 	case Action::WindowHint:
 	case Action::WindowHintMenu: return target.controller != nullptr;
 	case Action::MoveUp:
@@ -1849,12 +1939,12 @@ bool Available(Action action, const Target &target) {
 	case Action::OpenChatInfo:
 	case Action::OpenPinnedMessages: return target.chat.thread() != nullptr;
 	case Action::OpenChatMedia:
-	case Action::OpenChatMusic:
 	case Action::OpenChatFiles:
 	case Action::OpenChatLinks:
 	case Action::OpenChatVoice:
 	case Action::OpenChatGifs:
 	case Action::OpenChatPolls: return target.chat.peer() != nullptr;
+	case Action::OpenChatMusic: return target.chat.thread() != nullptr;
 	case Action::AttachFiles: return bool(target.attach);
 	case Action::OpenHistoryCalendar: return bool(target.chat);
 	case Action::Search: return !target.messages.scheduled;
@@ -2000,8 +2090,25 @@ std::vector<EffectiveBinding> EffectiveBindings(
 	}
 	for (const auto &b : km.bindings) {
 		if (b.map == MapKind::Normal && !directKeys.contains(b.keys.front())) {
-			result.push_back({ b.action, b.keys, MapKind::Normal, false });
+			const auto firstTrack = contextMap == MapKind::Music
+				&& b.action == Action::OlderMessagesPage
+				&& b.keys == Chord{ Qt::Key_G, Qt::Key_G };
+			result.push_back({
+				firstTrack ? Action::MusicFirstTrack : b.action,
+				b.keys,
+				MapKind::Normal,
+				false,
+			});
 		}
+	}
+	if (contextMap == MapKind::Music) {
+		result.push_back({ Action::MusicMarkTrack, { Qt::Key_M }, MapKind::Music, false });
+		result.push_back({ Action::MusicRangeMark, { Qt::Key_V }, MapKind::Music, false });
+		result.push_back({ Action::MusicMarkPage,
+			{ QKeyCombination(Qt::ShiftModifier, Qt::Key_V).toCombined() }, MapKind::Music, false });
+		result.push_back({ Action::NextTrack, { Qt::Key_N }, MapKind::Music, false });
+		result.push_back({ Action::PreviousTrack,
+			{ QKeyCombination(Qt::ShiftModifier, Qt::Key_N).toCombined() }, MapKind::Music, false });
 	}
 	return result;
 }
@@ -2094,6 +2201,7 @@ public:
 	[[nodiscard]] bool ownsChatListFocus() const;
 	void fullscreenChanged(bool fullscreen);
 	[[nodiscard]] bool isNormal() const { return _normal; }
+	void acceptMusicFilter() { enterNormal(true, false); }
 	[[nodiscard]] int statusBarHeight() const;
 	void updateLayout(QRect body);
 	void refreshColumns();
@@ -2125,7 +2233,7 @@ private:
 		int key,
 		const Target &target) const;
 	void clearPrefix(RepeatPolicy keepMotion = RepeatPolicy::Never, bool keepChatCursor = false);
-	void enterNormal(bool silent = true);
+	void enterNormal(bool silent = true, bool clearMusicFilter = true);
 	void enterInsert(bool silent = true);
 	void showFeedback(QString text, bool isError = false, int durationMs = 0);
 	void schedulePendingNoticeFlush();
@@ -3437,11 +3545,13 @@ void Keys::stepTopic(const Target &target, int delta, bool unreadOnly) {
 	current->showThread(topics[nextIdx]);
 }
 
-void Keys::enterNormal(bool silent) {
+void Keys::enterNormal(bool silent, bool clearMusicFilter) {
 	clearPrefix();
 	_normal = true;
-	if (const auto current = owner()) {
-		FocusMusicSearch(current, windowFocusWidget(), false);
+	if (clearMusicFilter) {
+		if (const auto current = owner()) {
+			FocusMusicSearch(current, windowFocusWidget(), false);
+		}
 	}
 	if (!silent) {
 		showFeedback(tr::lng_purple_keys_normal(tr::now));
@@ -4466,6 +4576,16 @@ void Keys::dispatch(Action action, const Target &target, int count, ScrollPress 
 	const auto repeat = (FindCommand(action).repeat != RepeatPolicy::Never)
 		? std::clamp(count, 1, kMaxCount)
 		: 1;
+	if (target.contextMap == MapKind::Music) {
+		if (const auto trackAction = MusicAction(action)) {
+			ActOnMusic(current, target.focus, *trackAction);
+			return;
+		}
+		if (const auto navigation = MusicNavigation(action)) {
+			NavigateMusic(current, target.focus, *navigation, repeat);
+			return;
+		}
+	}
 	using Native = Shortcuts::Command;
 	const auto launch = [this, window = QPointer(_window.get())](Native native) {
 		if (!Shortcuts::Launch(std::vector<Native>{ native }) && window) {
@@ -4501,6 +4621,20 @@ void Keys::dispatch(Action action, const Target &target, int count, ScrollPress 
 		}
 	};
 	switch (action) {
+	case Action::MusicFirstTrack:
+	case Action::MusicMarkTrack:
+	case Action::MusicRangeMark:
+	case Action::MusicMarkPage:
+	case Action::MusicForwardTracks:
+	case Action::MusicGoToMessage:
+	case Action::MusicAddToPlaylist:
+	case Action::MusicQueueTracks:
+	case Action::MusicCopyMessageLink:
+	case Action::MusicTrackMenu:
+		break;
+	case Action::MusicToggleTiles:
+		ToggleMusicTiles();
+		break;
 	case Action::EnterNormalMode:
 		enterNormal(false);
 		break;
@@ -4706,8 +4840,11 @@ void Keys::dispatch(Action action, const Target &target, int count, ScrollPress 
 		clearPrefix();
 		target.attach();
 		break;
-	case Action::OpenChatMedia:
 	case Action::OpenChatMusic:
+		clearPrefix();
+		ShowChatMusicBox(current, target.chat.thread());
+		break;
+	case Action::OpenChatMedia:
 	case Action::OpenChatFiles:
 	case Action::OpenChatLinks:
 	case Action::OpenChatVoice:
@@ -5865,9 +6002,56 @@ bool ModalKeysEnabled() {
 	return Enabled();
 }
 
+MusicShortcutHints MusicEffectiveShortcuts(bool chat) {
+	if (!Enabled()) return {};
+	if (chat) {
+		return {
+			.previous = { u"N"_q },
+			.togglePlayback = { u","_q, u"p"_q },
+			.next = { u"n"_q },
+			.view = { u","_q, u"t"_q },
+			.play = { u"RET"_q },
+			.queue = { u","_q, u"q"_q },
+			.add = { u","_q, u"a"_q },
+			.forward = { u","_q, u"F"_q },
+			.more = { u","_q, u"."_q },
+			.clear = { u"Esc"_q },
+			.filter = { u"/"_q },
+		};
+	}
+	const auto bindings = EffectiveBindings(true, MapKind::Music);
+	const auto shortest = [&](Action action) {
+		const auto chords = ChordsForAction(action, bindings);
+		const auto best = std::ranges::min_element(chords, {}, [](const QStringList &keys) {
+			return keys.size();
+		});
+		return best == chords.end() ? QStringList() : *best;
+	};
+	return {
+		.previous = shortest(Action::PreviousTrack),
+		.togglePlayback = shortest(Action::TogglePlayback),
+		.next = shortest(Action::NextTrack),
+		.view = shortest(Action::MusicToggleTiles),
+		.playlists = shortest(Action::OpenPlaylists),
+		.play = shortest(Action::OpenChat),
+		.queue = shortest(Action::MusicQueueTracks),
+		.add = shortest(Action::MusicAddToPlaylist),
+		.forward = shortest(Action::MusicForwardTracks),
+		.more = shortest(Action::MusicTrackMenu),
+		.clear = { u"Esc"_q },
+		.filter = shortest(Action::Search),
+	};
+}
+
 bool ModalKeysInNormal(not_null<MainWindow*> window) {
 	const auto keys = FindKeys(window.get());
 	return Enabled() && (!keys || keys->isNormal());
+}
+
+void AcceptMusicFilter(not_null<MainWindow*> window) {
+	if (const auto keys = FindKeys(window.get()); Enabled() && keys) {
+		keys->acceptMusicFilter();
+	}
 }
 
 rpl::producer<bool> ModalKeysEnabledChanges() {

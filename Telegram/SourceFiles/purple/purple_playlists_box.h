@@ -19,5 +19,8 @@ void ShowPlaylistBox(
 void ShowPlaylistPicker(
 	not_null<Window::SessionController*> controller,
 	PlaylistMessage message);
+void ShowPlaylistPicker(
+	not_null<Window::SessionController*> controller,
+	std::vector<PlaylistMessage> messages);
 
 } // namespace Purple

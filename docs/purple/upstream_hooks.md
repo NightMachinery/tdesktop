@@ -2040,7 +2040,11 @@ worker's pending database transactions. The existing playlist menu hook in
 ### Music layout and chat palette
 
 - `mainwidget.cpp` uses Purple's Music-only sidebar preference when placing the
-  chat area. The dialog width preference still belongs to the regular chat layout.
+  chat area. It also suspends the third-column widget, shadow, and resize area
+  while Music is open, and skips automatic third-column changes until Music
+  closes. The regular layout keeps its saved sidebar preferences.
+- `mainwidget.cpp` and `mainwidget.h` let Purple's Music section take over the
+  song toolbar and its layout space when its own transport is active.
 - `boxes/peer_list_box.cpp` compares raw queries for Purple's chat palette so
   punctuation, handles and international phone numbers reach its exact matcher.
   The palette opens at the compact picker height.

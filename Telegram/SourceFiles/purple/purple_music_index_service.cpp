@@ -390,12 +390,13 @@ void ReadMusicIndexPage(
 		QString query,
 		std::vector<quint64> visiblePeers,
 		std::optional<MusicIndexCursor> cursor,
+		bool tail,
 		Fn<void(MusicIndexPageResult)> done) {
 	Request(session,
 		[scope, query = std::move(query),
-			visiblePeers = std::move(visiblePeers), cursor](MusicIndex &index)
+			visiblePeers = std::move(visiblePeers), cursor, tail](MusicIndex &index)
 		-> MusicIndexPageResult {
-			auto rows = index.page(scope, query, visiblePeers, cursor);
+			auto rows = index.page(scope, query, visiblePeers, cursor, tail);
 			if (!rows) {
 				return { false, {}, 0, index.lastError().isEmpty()
 					? u"page read failed"_q : index.lastError() };

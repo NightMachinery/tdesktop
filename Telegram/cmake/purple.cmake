@@ -281,8 +281,14 @@ PRIVATE
     purple/purple_music_index.h
     purple/purple_music_index_service.cpp
     purple/purple_music_index_service.h
+    purple/purple_music_now_playing.cpp
+    purple/purple_music_now_playing.h
+    purple/purple_music_widgets.cpp
+    purple/purple_music_widgets.h
     purple/purple_music_section.cpp
     purple/purple_music_section.h
+    purple/purple_chat_music.cpp
+    purple/purple_chat_music.h
     purple/purple_music_source_roster.cpp
     purple/purple_music_source_roster.h
     purple/purple_playlists_resolve_queue.cpp

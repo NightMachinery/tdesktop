@@ -123,7 +123,7 @@ public:
 	PlaylistView(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller,
-		std::optional<PlaylistMessage> message,
+		std::vector<PlaylistMessage> messages,
 		QString playlistId = {},
 		std::optional<uint64_t> focusedDocumentId = std::nullopt);
 	void start();
@@ -155,7 +155,7 @@ private:
 	base::weak_ptr<Main::Session> _session;
 	AccountKey _account;
 	std::optional<AccountRoutingSnapshot> _route;
-	std::optional<PlaylistMessage> _message;
+	std::vector<PlaylistMessage> _messages;
 	std::optional<PlaylistStoreRead> _snapshot;
 	std::optional<PlaylistUndoRecord> _undo;
 	PlaylistPlaybackStatus _playback;
@@ -271,7 +271,7 @@ private:
 PlaylistView::PlaylistView(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller,
-		std::optional<PlaylistMessage> message,
+		std::vector<PlaylistMessage> messages,
 		QString playlistId,
 		std::optional<uint64_t> focusedDocumentId)
 : _box(box)
@@ -279,7 +279,7 @@ PlaylistView::PlaylistView(
 , _session(base::make_weak(&controller->session()))
 , _account(SessionAccountKey(&controller->session()))
 , _route(CaptureAccountSyncRouting(&controller->session()))
-, _message(std::move(message))
+, _messages(std::move(messages))
 , _playlistId(std::move(playlistId))
 , _status(box->addRow(object_ptr<Ui::FlatLabel>(box, QString(), st::boxLabel)))
 , _playbackLabel(box->addRow(object_ptr<Ui::FlatLabel>(box, QString(), st::boxLabel)))
@@ -301,7 +301,7 @@ bool PlaylistView::current() const {
 }
 
 void PlaylistView::start() {
-	_box->setTitle(_message
+	_box->setTitle(!_messages.empty()
 		? tr::lng_purple_playlists_add() : tr::lng_purple_playlists_title());
 	_box->setWidth(st::boxWideWidth);
 	const auto weak = base::make_weak(this);
@@ -473,7 +473,7 @@ void PlaylistView::render() {
 		}
 		if (!_deleted && folders) {
 			if (_folder.isEmpty()) {
-				if (!_message) {
+				if (_messages.empty()) {
 					button(tr::lng_filters_new(), [=] {
 						if (const auto self = weak.get()) self->nameFolder({});
 					});
@@ -497,7 +497,7 @@ void PlaylistView::render() {
 					if (const auto self = weak.get()) self->showFolder({});
 				});
 				label(rpl::single(folder == hyper ? u"Hyper"_q : folders->names.at(folder)));
-				if (!_message && folder != hyper) {
+				if (_messages.empty() && folder != hyper) {
 					button(tr::lng_filters_context_edit(), [=] {
 						if (const auto self = weak.get()) self->nameFolder(folder);
 					});
@@ -521,7 +521,7 @@ void PlaylistView::render() {
 				}
 			}
 		}
-		if (!_message) {
+		if (_messages.empty()) {
 			button(_deleted ? tr::lng_purple_playlists_title() : tr::lng_purple_playlists_deleted(), [=] {
 				if (const auto self = weak.get()) self->showLibrary(!self->_deleted);
 			});
@@ -548,17 +548,20 @@ void PlaylistView::render() {
 			const auto entry = entries[i];
 			auto text = entry.title;
 			if (!_deleted) text += u" ("_q + QString::number(qulonglong(entry.visibleSongCount)) + u")"_q;
-			if (_message) {
+			if (!_messages.empty()) {
 				const auto &playlist = library.playlists.at(entry.id);
-				const auto song = playlist.songs->find(_message->documentId);
-				if (song != end(*playlist.songs) && song->second.value.source) {
+				const auto contains = std::ranges::all_of(_messages, [&](const PlaylistMessage &message) {
+					const auto song = playlist.songs->find(message.documentId);
+					return song != end(*playlist.songs) && bool(song->second.value.source);
+				});
+				if (contains) {
 					text = tr::lng_purple_playlists_contains(tr::now, lt_name, text);
 				}
 			}
 			button(rpl::single(text), [=] {
 				const auto self = weak.get();
 				if (!self) return;
-				if (self->_message) self->add(entry.id);
+				if (!self->_messages.empty()) self->add(entry.id);
 				else if (self->_deleted) self->edit({ .kind = PlaylistAccountEditKind::Restore, .playlistId = entry.id });
 				else self->showDetail(entry.id);
 			});
@@ -892,12 +895,12 @@ void PlaylistView::edit(PlaylistAccountEdit request) {
 			self->_playlistId.clear();
 			self->_page = 0;
 		}
-		if (ok && kind == PlaylistAccountEditKind::Create && !self->_message) self->_playlistId = id;
+		if (ok && kind == PlaylistAccountEditKind::Create && self->_messages.empty()) self->_playlistId = id;
 		self->receive(std::move(result), kind == PlaylistAccountEditKind::Undo);
 		const auto afterRender = weak.get();
 		if (!afterRender || !afterRender->current()
 			|| generation != afterRender->_generation) return;
-		if (ok && kind == PlaylistAccountEditKind::Create && afterRender->_message) afterRender->add(id);
+		if (ok && kind == PlaylistAccountEditKind::Create && !afterRender->_messages.empty()) afterRender->add(id);
 		if (ok && kind == PlaylistAccountEditKind::AddSongs) {
 			const auto msg = added
 				? tr::lng_purple_playlists_added(tr::now)
@@ -934,13 +937,18 @@ void PlaylistView::reorder(std::vector<uint64_t> documentIds) {
 }
 
 void PlaylistView::add(const QString &id) {
-	if (!current() || _busy || !_message) return;
-	const auto input = CapturePlaylistSong(_session.get(), *_message);
-	if (!input) {
-		_status->setText(tr::lng_purple_playlists_song_missing(tr::now));
-		return;
+	if (!current() || _busy || _messages.empty()) return;
+	auto songs = std::vector<PlaylistAddSongInput>();
+	songs.reserve(_messages.size());
+	for (const auto &message : _messages) {
+		const auto input = CapturePlaylistSong(_session.get(), message);
+		if (!input) {
+			_status->setText(tr::lng_purple_playlists_song_missing(tr::now));
+			return;
+		}
+		songs.push_back(*input);
 	}
-	edit({ .kind = PlaylistAccountEditKind::AddSongs, .playlistId = id, .songs = { *input } });
+	edit({ .kind = PlaylistAccountEditKind::AddSongs, .playlistId = id, .songs = std::move(songs) });
 }
 
 void PlaylistView::play(std::optional<uint64_t> documentId) {
@@ -1010,11 +1018,11 @@ void PlaylistView::updateSongPlayback() {
 
 void Open(
 		not_null<Window::SessionController*> controller,
-		std::optional<PlaylistMessage> message,
+		std::vector<PlaylistMessage> messages,
 		QString playlistId = {},
 		std::optional<uint64_t> focusedDocumentId = std::nullopt) {
 	controller->show(Box<Ui::GenericBox>([=](not_null<Ui::GenericBox*> box) {
-		const auto view = box->lifetime().make_state<PlaylistView>(box, controller, message, playlistId, focusedDocumentId);
+		const auto view = box->lifetime().make_state<PlaylistView>(box, controller, messages, playlistId, focusedDocumentId);
 		view->start();
 	}));
 }
@@ -1044,20 +1052,30 @@ void AddPlaylistsMenuRow(
 }
 
 void ShowPlaylistsBox(not_null<Window::SessionController*> controller) {
-	Open(controller, std::nullopt);
+	Open(controller, {});
 }
 
 void ShowPlaylistBox(
 		not_null<Window::SessionController*> controller,
 		const QString &playlistId,
 		std::optional<uint64_t> focusedDocumentId) {
-	Open(controller, std::nullopt, playlistId, focusedDocumentId);
+	Open(controller, {}, playlistId, focusedDocumentId);
 }
 
 void ShowPlaylistPicker(
 		not_null<Window::SessionController*> controller,
 		PlaylistMessage message) {
-	if (CapturePlaylistSong(&controller->session(), message)) Open(controller, message);
+	ShowPlaylistPicker(controller, std::vector{ message });
+}
+
+void ShowPlaylistPicker(
+		not_null<Window::SessionController*> controller,
+		std::vector<PlaylistMessage> messages) {
+	if (!messages.empty() && std::ranges::all_of(messages, [=](const PlaylistMessage &message) {
+		return bool(CapturePlaylistSong(&controller->session(), message));
+	})) {
+		Open(controller, std::move(messages));
+	}
 }
 
 } // namespace Purple

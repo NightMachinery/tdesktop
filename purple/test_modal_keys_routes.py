@@ -839,7 +839,18 @@ dispatch = between(keys, "void Keys::dispatch", "void Keys::showHelpLayer")
 ordered(dispatch, "case Action::EnterInsertMode:", "enterInsert(false)", "FocusMusicSearch(current, target.focus, true)")
 ordered(dispatch, "case Action::Search:", "MapKind::Music", "enterInsert(true)",
         "FocusMusicSearch(current, target.focus, true)", "launch(Native::Search)")
-assert "MusicHidesChats(_mainSection.data())" in read("mainwidget.cpp")
+geometry = between(read("mainwidget.cpp"), "void MainWidget::updateControlsGeometry", "void MainWidget::destroyThirdSection")
+ordered(geometry, "MusicHidesInfo(_mainSection.data())", "MusicHidesChats(_mainSection.data())",
+        "hideThird = zenWide || musicHidesInfo", "hideChats = musicWide || (zenWide && _controller->purpleZenChatsHidden())",
+        "UpdateMusicSidebar(_dialogs.get(), hideChats", "_thirdSection.data(), hideThird")
+ordered(keys, "std::vector<EffectiveBinding> EffectiveBindings", "MapKind::Chats",
+        "!directKeys.contains(b.keys.front())", "contextMap == MapKind::Music",
+        "firstTrack ? Action::MusicFirstTrack : b.action")
+ordered(dispatch, "MapKind::Music", "MusicAction(action)", "ActOnMusic",
+        "MusicNavigation(action)", "NavigateMusic", "case Action::OpenChat:")
+ordered(read("purple/purple_playlist_song_list.cpp"), "void PlaylistSongList::Rows::keyPressEvent",
+        "Qt::Key_Return || key == Qt::Key_Enter", "e->isAutoRepeat()", "Mode::Playlist && *action == TrackListAction::Play",
+        "return;", "navigate(*action, 1)")
 notice_probe = read("test/test_purple_notices.cpp")
 assert re.search(r"option\(PURPLE_BUILD_NOTICE_TEST_PROBES[^)]*OFF\)", purple_cmake)
 assert "$<$<NOT:$<CONFIG:Release>>:PURPLE_BUILD_NOTICE_TEST_PROBES>" in purple_cmake

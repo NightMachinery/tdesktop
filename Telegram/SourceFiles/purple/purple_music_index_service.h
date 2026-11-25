@@ -65,6 +65,7 @@ void ReadMusicIndexPage(
 	QString query,
 	std::vector<quint64> visiblePeers,
 	std::optional<MusicIndexCursor> cursor,
+	bool tail,
 	Fn<void(MusicIndexPageResult)> done);
 
 } // namespace Purple
