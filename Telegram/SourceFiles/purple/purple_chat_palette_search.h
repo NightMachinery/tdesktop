@@ -101,6 +101,23 @@ inline int NameTier(QStringView name, QStringView term, bool converted) {
 	return name.contains(term) ? (converted ? 5 : 2) : 8;
 }
 
+inline bool ExactAlternativeName(const std::vector<Term> &terms, const QString &name) {
+	const auto words = name.simplified().split(u' ', Qt::SkipEmptyParts);
+	if (words.size() != qsizetype(terms.size())) {
+		return false;
+	}
+	auto converted = false;
+	for (auto i = qsizetype(0); i != words.size(); ++i) {
+		if (terms[i].literal == words[i]) {
+			continue;
+		} else if (!terms[i].alternatives.contains(words[i])) {
+			return false;
+		}
+		converted = true;
+	}
+	return converted;
+}
+
 inline std::optional<int> Rank(
 		const std::vector<Term> &terms,
 		const QString &name,
@@ -113,6 +130,9 @@ inline std::optional<int> Rank(
 	const auto originalAddress = address.toCaseFolded();
 	const auto originalNote = note.toCaseFolded();
 	const auto original = originalName + u' ' + originalAddress + u' ' + originalNote;
+	if (ExactAlternativeName(terms, foldedName)) {
+		return 1;
+	}
 	auto result = 0;
 	for (const auto &term : terms) {
 		auto tier = std::min(NameTier(foldedName, term.literal, false),

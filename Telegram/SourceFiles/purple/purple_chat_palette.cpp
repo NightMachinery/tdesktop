@@ -95,18 +95,17 @@ std::optional<int> Rank(
 		const std::vector<ChatPaletteSearch::Term> &terms,
 		const QString &phone) {
 	const auto user = peer->asUser();
-	if (user && !phone.isEmpty()
-		&& ChatPaletteSearch::Fold(user->phone()).text.contains(phone)) {
-		return 6;
-	}
+	const auto phoneMatch = user && !phone.isEmpty()
+		&& ChatPaletteSearch::Fold(user->phone()).text.contains(phone);
 	const auto username = peer->username();
 	const auto address = (username.isEmpty() ? QString() : u'@' + username)
 		+ (user ? u' ' + user->phone() : QString());
-	return ChatPaletteSearch::Rank(
+	const auto rank = ChatPaletteSearch::Rank(
 		terms,
 		PeerLabel(peer),
 		address,
 		user ? user->note().text : QString());
+	return phoneMatch ? std::optional<int>(std::min(rank.value_or(6), 6)) : rank;
 }
 
 struct SearchState {
@@ -366,6 +365,15 @@ public:
 		const auto width = window ? window->widget()->bodyWidget()->width() : 0;
 		return std::clamp(width - st::purpleChatPaletteInset,
 			st::boxWideWidth, st::purpleChatPaletteMaxWidth);
+	}
+
+	rpl::producer<int> boxHeightValue() const override {
+		const auto window = _window.get();
+		return window
+			? window->widget()->bodyWidget()->widthValue() | rpl::map([] {
+				return st::boxMaxListHeight;
+			}) | rpl::type_erased
+			: rpl::single(st::boxMaxListHeight) | rpl::type_erased;
 	}
 
 	void peerListSearchRefreshRows() override {
