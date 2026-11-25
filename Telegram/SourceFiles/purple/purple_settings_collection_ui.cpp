@@ -472,13 +472,23 @@ private:
 			_status->setText(u"Peer lists contain unique entries."_q);
 			return;
 		}
-		clearForm();
+		const auto descriptor = FindSettingDescriptor(_config.address);
+		if (!descriptor) {
+			_status->setText(u"This collection no longer has an editable settings descriptor."_q);
+			return;
+		}
+		const auto id = descriptor->id;
 		const auto item = insert ? Structures::Item() : _items[at];
+		const auto objectDescriptor = (_config.named && !insert) ? FindSettingDescriptor(item.address) : nullptr;
+		if (_config.named && !insert && !objectDescriptor) {
+			_status->setText(u"This record does not have an editable settings descriptor."_q);
+			return;
+		}
+		const auto objectId = objectDescriptor ? objectDescriptor->id : SettingId::Count;
+		clearForm();
 		auto name = static_cast<QLineEdit*>(nullptr);
 		auto literal = static_cast<QPlainTextEdit*>(nullptr);
-		const auto descriptor = FindSettingDescriptor(_config.address);
-		const auto id = descriptor->id;
-		const auto namedCopy = descriptor && Structures::NeedsCopyName(descriptor->id);
+		const auto namedCopy = Structures::NeedsCopyName(id);
 		const auto needsName = (_config.named && (insert || op == Op::Rename || op == Op::Duplicate))
 			|| (op == Op::Duplicate && namedCopy);
 		auto uses = (_config.named && (op == Op::Rename || op == Op::Erase))
@@ -501,7 +511,7 @@ private:
 		}
 		if ((insert && !_config.peerField && readers.empty()) || op == Op::Replace) {
 			literal = new QPlainTextEdit(QString::fromUtf8(insert
-				? Structures::RecordTemplate(descriptor->id) : item.literal), _form);
+				? Structures::RecordTemplate(id) : item.literal), _form);
 			literal->setAccessibleName(u"One TOML value or inline record"_q);
 			field(literal);
 		}
@@ -523,7 +533,7 @@ private:
 		_formBaseline = _formInput();
 		const auto cancel = button(_formLayout, u"Cancel"_q, [this] { back(); });
 		_accept = button(_formLayout, op == Op::Erase ? u"Remove from draft"_q : u"Keep change"_q,
-			[this, op, at, item, name, literal, error, insert, id, liveFields] {
+			[this, op, at, item, name, literal, error, insert, id, objectId, liveFields] {
 				if (!_config.current()) return;
 				const auto contents = name ? name->text().trimmed() : QString();
 				if (insert && _config.peerField) {
@@ -562,7 +572,7 @@ private:
 							const auto replacement = std::find_if(_items.begin(), _items.end(), [&](const auto &other) {
 								return other.address != address && other.label == contents;
 							});
-							const auto preset = FindSettingDescriptor(address)->id == SettingId::PresetObject;
+							const auto preset = objectId == SettingId::PresetObject;
 							if (replacement == _items.end() && (!preset || contents != u"normal"_q)) {
 								error->setText(u"Choose an existing replacement for the referenced record."_q);
 								return;

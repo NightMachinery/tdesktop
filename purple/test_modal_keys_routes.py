@@ -88,6 +88,10 @@ ordered(customize, "void chooseAccount", "SessionAccountKey(session) != key", "e
 ordered(customize, "void showCollection", "LiveSessionFor(target.account)", "PeerCatalogue(session, *field)",
         "CreateSettingsCollection", "stageIntent(std::move(intent), key)")
 collections = read("purple/purple_settings_collection_ui.cpp")
+collection_edit = collections[collections.index("void edit(Op op)"):collections.index("bool run(std::vector<SettingsEdit>")]
+ordered(collection_edit, "FindSettingDescriptor(_config.address)", "if (!descriptor)", "return;", "descriptor->id")
+ordered(collection_edit, "FindSettingDescriptor(item.address)", "if (_config.named && !insert && !objectDescriptor)", "return;")
+assert not re.search(r"FindSettingDescriptor\([^\n]+\)->", collections)
 ordered(collections, 'u"Add"_q, [this] { edit(Op::Insert)', 'u"Duplicate"_q, [this] { edit(Op::Duplicate)',
         'u"Delete"_q, [this] { edit(Op::Erase)', 'u"Move up"_q, [this] { move(-1)',
         "&QAbstractItemModel::rowsMoved", "moveTo(from, to)",
