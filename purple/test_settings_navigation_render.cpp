@@ -1,6 +1,7 @@
 #include "ui/effects/animations.h"
 #include "ui/integration.h"
 #include "ui/style/style_core.h"
+#include "ui/style/style_core_direction.h"
 #include "ui/style/style_core_palette.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
@@ -89,8 +90,9 @@ Ui::SettingsButton *Row(
 bool Render(
 		not_null<Canvas*> canvas,
 		not_null<Ui::VerticalLayout*> layout,
-		const QString &out) {
-	layout->resizeToWidth(style::ConvertScale(540));
+		const QString &out,
+		int width) {
+	layout->resizeToWidth(style::ConvertScale(width));
 	canvas->resize(layout->size());
 	canvas->show();
 	layout->show();
@@ -103,7 +105,7 @@ bool Render(
 } // namespace
 
 int main(int argc, char **argv) {
-	if (argc != 5) {
+	if (argc != 6) {
 		return 2;
 	}
 	auto app = QApplication(argc, argv);
@@ -111,6 +113,11 @@ int main(int argc, char **argv) {
 	Ui::Integration::Set(&integration);
 	auto animations = Ui::Animations::Manager();
 	const auto scale = QString::fromLatin1(argv[1]).toInt();
+	const auto mode = QString::fromLatin1(argv[5]);
+	const auto rtl = (mode == QStringLiteral("rtl"));
+	const auto narrow = (mode != QStringLiteral("wide"));
+	style::SetRightToLeft(rtl);
+	QApplication::setLayoutDirection(style::LayoutDirection());
 	for (const auto *file : { "OpenSans-Regular.ttf", "OpenSans-SemiBold.ttf" }) {
 		QFontDatabase::addApplicationFont(
 			QStringLiteral("Telegram/lib_ui/fonts/") + QString::fromLatin1(file));
@@ -133,15 +140,24 @@ int main(int argc, char **argv) {
 	Row(&landing, tr("lng_purple_settings_customize"));
 	Ui::AddDivider(&landing);
 	Ui::AddSkip(&landing);
-	const auto archive = Row(&landing, tr("lng_purple_settings_archive"));
-	const auto archiveText = tr("lng_purple_settings_archive");
+	const auto archiveText = rtl
+		? QStringLiteral("أرشيف ومساحة التخزين")
+		: tr("lng_purple_settings_archive");
+	const auto archive = Row(&landing, archiveText);
 	const auto &buttonStyle = st::settingsButton;
 	const auto usage = Ui::CreateChild<Ui::FlatLabel>(
 		archive,
-		tr("lng_purple_archive_usage").replace(QStringLiteral("{size}"), QStringLiteral("1.2 GiB")),
+		st::wrap_rtl(narrow ? QStringLiteral("1.2 GiB+") : QStringLiteral("1.2 GiB")),
 		buttonStyle.rightLabel);
 	usage->show();
 	archive->widthValue() | rpl::on_next([=](int width) {
+		if (rtl) {
+			auto padding = buttonStyle.padding;
+			padding.setRight(std::max(
+				padding.right(),
+				width - padding.left() - archive->fullTextWidth()));
+			archive->setPaddingOverride(padding);
+		}
 		usage->resizeToNaturalWidth(width - buttonStyle.padding.left()
 			- buttonStyle.padding.right() - buttonStyle.style.font->width(archiveText)
 			- st::settingsButtonRightSkip);
@@ -167,15 +183,21 @@ int main(int argc, char **argv) {
 		&media, rpl::single(tr("lng_purple_media_recording")));
 	Row(&media, tr("lng_purple_recording_keep_chats"));
 	Ui::AddSkip(&media);
-	const auto landingSaved = Render(&landingCanvas, &landing, out + QStringLiteral("-landing.png"));
-	const auto mediaSaved = Render(&mediaCanvas, &media, out + QStringLiteral("-media.png"));
+	const auto landingSaved = Render(
+		&landingCanvas, &landing, out + QStringLiteral("-landing.png"), narrow ? 320 : 540);
+	const auto mediaSaved = Render(&mediaCanvas, &media, out + QStringLiteral("-media.png"), 540);
 	const auto saved = landingSaved && mediaSaved;
 	const auto divider = help->parentWidget();
 	const auto gap = recording->y() - divider->geometry().bottom() - 1;
 	const auto inset = st::defaultVerticalListSkip + st::defaultSubsectionTitlePadding.top();
-	const auto geometry = gap == inset;
+	const auto title = style::rtlrect(buttonStyle.padding.left(), 0,
+		buttonStyle.style.font->width(archiveText), archive->height(), archive->width());
+	const auto fits = archive->rect().contains(usage->geometry())
+		&& !title.intersects(usage->geometry());
+	const auto geometry = gap == inset && fits;
 	std::cout << "Scale " << scale << ": Media heading inset " << gap
-		<< " px (stock " << inset << "), PNGs "
+		<< " px (stock " << inset << "), archive label " << (fits ? "fits" : "overlaps")
+		<< ", PNGs "
 		<< (saved ? "saved" : "failed") << '\n';
 	return (saved && geometry) ? 0 : 1;
 }

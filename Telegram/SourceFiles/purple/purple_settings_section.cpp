@@ -492,11 +492,12 @@ void BuildPurpleScreenTimeSection(SectionBuilder &builder) {
 	};
 }
 
-auto ArchiveSummaryValue(not_null<Main::Session*> session) {
+auto ArchiveSummaryValue(not_null<Main::Session*> session, bool compact = false) {
 	return rpl::single(rpl::empty) | rpl::then(ArchiveStorageChanges())
-		| rpl::map([weak = base::make_weak(session.get())] {
+		| rpl::map([weak = base::make_weak(session.get()), compact] {
 			const auto live = weak.get();
-			return live ? ArchiveStorageSummary(live) : QString();
+			return !live ? QString()
+				: compact ? ArchiveStorageSizeLabel(live) : ArchiveStorageSummary(live);
 		});
 }
 
@@ -922,9 +923,7 @@ void BuildPurpleSection(SectionBuilder &builder) {
 			.targetSection = page.id,
 			.icon = { page.icon },
 			.label = page.id == ArchiveSettings::Id()
-				? ArchiveSummaryValue(builder.session()) | rpl::map([](const QString &summary) {
-					return summary.section(u'\n', -1);
-				})
+				? ArchiveSummaryValue(builder.session(), true)
 				: rpl::producer<QString>(),
 		});
 	}

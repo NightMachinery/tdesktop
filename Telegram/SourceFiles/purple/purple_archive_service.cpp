@@ -1,4 +1,6 @@
 #include "purple/purple_archive_service.h"
+
+#include "ui/style/style_core_direction.h"
 #include "purple/purple_recording_store.h"
 #include "base/unixtime.h"
 #include "base/weak_ptr.h"
@@ -257,11 +259,21 @@ bool PersistedLoginAuthority(const QString &root, const QString &dataName,
 	return found && foundAuthKey && prefs.stream.status() == QDataStream::Ok && prefs.stream.atEnd();
 }
 
+struct ArchiveMeasurement {
+	uint64_t bytes;
+	bool complete;
+};
+
+using ArchiveReport = Fn<void(
+	DesktopArchiveStatus,
+	QString,
+	std::optional<ArchiveMeasurement>)>;
+
 class ArchiveWorker final {
   public:
 	using Task = std::function<void(DesktopArchiveStore &)>;
 	ArchiveWorker(DesktopArchiveOptions options,
-		Fn<void(DesktopArchiveStatus, QString, uint64_t)> report,
+		ArchiveReport report,
 		Fn<void(std::shared_ptr<DesktopArchiveJournal>)> ready)
 		: _state(std::make_shared<State>()) {
 		_state->report = std::move(report);
@@ -273,7 +285,7 @@ class ArchiveWorker final {
 		}).detach();
 	}
 	static std::unique_ptr<ArchiveWorker> RemovalOnly(DesktopArchiveOptions options,
-		bool resolveSlot, Fn<void(DesktopArchiveStatus, QString, uint64_t)> report) {
+		bool resolveSlot, ArchiveReport report) {
 		auto result = std::unique_ptr<ArchiveWorker>(new ArchiveWorker());
 		const auto state = result->_state;
 		state->report = std::move(report);
@@ -345,7 +357,7 @@ class ArchiveWorker final {
 				if (!store.Gap(event.id, reason, event.observation.observedAt)) {
 					const auto status = store.status();
 					state->report(status == DesktopArchiveStatus::Ready
-						? DesktopArchiveStatus::RetentionGap : status, reason, 0);
+						? DesktopArchiveStatus::RetentionGap : status, reason, std::nullopt);
 				}
 			};
 			if (!journal) {
@@ -366,7 +378,7 @@ class ArchiveWorker final {
 				const auto reason = journal->failure().isEmpty()
 					? u"capture-startup-append"_q : journal->failure();
 				if (!journal->Attention(reason, event.observation.observedAt)) {
-					state->report(DesktopArchiveStatus::RetentionGap, reason, 0);
+					state->report(DesktopArchiveStatus::RetentionGap, reason, std::nullopt);
 				}
 				gap(reason);
 				return;
@@ -449,7 +461,7 @@ class ArchiveWorker final {
 		std::optional<uint64_t> streamBytes;
 	};
 	struct State {
-		Fn<void(DesktopArchiveStatus, QString, uint64_t)> report;
+		ArchiveReport report;
 		Fn<void(std::shared_ptr<DesktopArchiveJournal>)> ready;
 		std::mutex mutex;
 		std::condition_variable condition;
@@ -512,12 +524,12 @@ class ArchiveWorker final {
 				state->startupFailed = true;
 				state->startupHeld = true;
 				startupHeld = true;
-				state->report(DesktopArchiveStatus::Unreadable, u"login-authority-held"_q, 0);
+				state->report(DesktopArchiveStatus::Unreadable, u"login-authority-held"_q, std::nullopt);
 			} else if (!DesktopArchiveStore::Recover(options)) {
 				state->startupFailed = true;
 				state->startupHeld = true;
 				startupHeld = true;
-				state->report(DesktopArchiveStatus::RemovalPending, u"logout-recovery"_q, 0);
+				state->report(DesktopArchiveStatus::RemovalPending, u"logout-recovery"_q, std::nullopt);
 			} else {
 				static_cast<void>(store.Open(std::move(options)));
 				if (!store.epoch().storeId.isEmpty()) {
@@ -585,8 +597,7 @@ class ArchiveWorker final {
 			state->ready(fresh);
 		};
 
-		auto usageBytes = uint64_t(0);
-		auto usageComplete = false;
+		auto measurement = std::optional<ArchiveMeasurement>();
 		auto nextUsage = std::chrono::steady_clock::time_point();
 		auto nextReport = std::chrono::steady_clock::time_point();
 		auto reportedStatus = DesktopArchiveStatus::Disabled;
@@ -603,10 +614,11 @@ class ArchiveWorker final {
 			nextReport = now + std::chrono::seconds(1);
 			reportedStatus = store.status();
 			reportedFailure = failure;
-			if (store.Current() && (!usageComplete || now >= nextUsage)) {
+			if (store.Current() && (!measurement || !measurement->complete || now >= nextUsage)) {
 				const auto usage = store.Usage();
-				usageBytes = usage ? TotalArchiveUsage(*usage).value_or(0) : usageBytes;
-				usageComplete = usage && store.UsageComplete();
+				if (const auto bytes = usage ? TotalArchiveUsage(*usage) : std::nullopt) {
+					measurement = ArchiveMeasurement{ *bytes, store.UsageComplete() };
+				}
 				nextUsage = now + std::chrono::seconds(60);
 			}
 			if (journal && !journal->WriterRetired() && !journal->failure().isEmpty()) {
@@ -615,7 +627,7 @@ class ArchiveWorker final {
 			const auto gap = !journalFailure.isEmpty()
 				&& store.status() == DesktopArchiveStatus::Ready;
 			state->report(gap ? DesktopArchiveStatus::RetentionGap : store.status(),
-				journalFailure.isEmpty() ? store.failure() : journalFailure, usageBytes);
+				journalFailure.isEmpty() ? store.failure() : journalFailure, measurement);
 		};
 		report();
 		auto streamCursor = QString();
@@ -752,7 +764,7 @@ class ArchiveWorker final {
 				}
 			}
 			if (!state->removed) {
-				state->report(DesktopArchiveStatus::RemovalPending, u"logout-removal-pending"_q, 0);
+				state->report(DesktopArchiveStatus::RemovalPending, u"logout-removal-pending"_q, std::nullopt);
 			}
 		}
 		ownedStore.reset();
@@ -770,7 +782,7 @@ struct ArchiveSession {
 	std::shared_ptr<std::atomic<bool>> routing = std::make_shared<std::atomic<bool>>(true);
 	DesktopArchiveStatus status = DesktopArchiveStatus::Disabled;
 	QString failure;
-	uint64_t bytes = 0;
+	std::optional<ArchiveMeasurement> usage;
 };
 std::map<Main::Session*, ArchiveSession> Sessions;
 std::set<Main::Session*> Retired;
@@ -815,8 +827,11 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 	const auto routing = value.routing;
 	value.worker = std::make_shared<ArchiveWorker>(
 		std::move(options),
-		[weak, accountKey, routing, app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString failure, uint64_t bytes) {
-			crl::on_main([weak, accountKey, routing, app, status, failure = std::move(failure), bytes] {
+		[weak, accountKey, routing, app = QPointer<Core::Application>(&Core::App())](
+				DesktopArchiveStatus status,
+				QString failure,
+				std::optional<ArchiveMeasurement> usage) {
+			crl::on_main([weak, accountKey, routing, app, status, failure = std::move(failure), usage] {
 				if (!app) {
 					return;
 				}
@@ -838,14 +853,16 @@ ArchiveSession &For(not_null<Main::Session*> session) {
 				if (!failure.isEmpty()
 					&& (i->second.status != status || i->second.failure != failure)) {
 					LOG(("Purple Archive: status=%1 reason=%2 measured_bytes=%3.")
-						.arg(int(status)).arg(failure).arg(bytes));
+						.arg(int(status)).arg(failure).arg(usage ? usage->bytes : 0));
 				}
 				i->second.status = status;
 				if ((!failure.isEmpty() && (failure != u"capture-gap"_q || i->second.failure.isEmpty()))
 					|| (status == DesktopArchiveStatus::Ready && i->second.failure.startsWith(u"purge-"_q))) {
 					i->second.failure = failure;
 				}
-				i->second.bytes = bytes;
+				if (usage) {
+					i->second.usage = usage;
+				}
 				if (firstFailure && status != DesktopArchiveStatus::RemovalPending
 					&& Core::App().domain().started()
 					&& Core::App().domain().active().maybeSession() == live) {
@@ -953,7 +970,7 @@ void RemoveArchiveAtLogout(Main::Account &account) {
 			? QString::fromLatin1(QCryptographicHash::hash(authority, QCryptographicHash::Sha256).toHex())
 			: u"unavailable"_q;
 		static_cast<void>(ArchiveWorker::RemovalOnly(std::move(options), !session,
-			[app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString, uint64_t) {
+			[app = QPointer<Core::Application>(&Core::App())](DesktopArchiveStatus status, QString, std::optional<ArchiveMeasurement>) {
 				if (status == DesktopArchiveStatus::RemovalPending) {
 					crl::on_main([app] {
 						if (app) {
@@ -1517,6 +1534,21 @@ QString FormatArchiveSize(uint64_t bytes) {
 	return number + ' ' + QString::fromLatin1(units[unit]);
 }
 
+QString ArchiveStorageSizeLabel(not_null<Main::Session*> session) {
+	if (Retired.contains(session.get())) {
+		return {};
+	}
+	const auto &usage = For(session).usage;
+	if (!usage) {
+		return {};
+	}
+	auto label = FormatArchiveSize(usage->bytes);
+	if (!usage->complete) {
+		label += u'+';
+	}
+	return st::wrap_rtl(label);
+}
+
 QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 	if (Retired.contains(session.get())) {
 		return tr::lng_purple_archive_removal_pending(tr::now);
@@ -1531,7 +1563,7 @@ QString ArchiveStorageSummary(not_null<Main::Session*> session) {
 	// WHY: a gap row is permanent, so showing only the gap text would hide the usage for the store's whole life.
 	const auto usage = [&] {
 		return tr::lng_purple_archive_usage(
-			tr::now, lt_size, FormatArchiveSize(value.bytes));
+			tr::now, lt_size, FormatArchiveSize(value.usage ? value.usage->bytes : 0));
 	};
 	if (value.status == DesktopArchiveStatus::RetentionGap
 		|| (value.status == DesktopArchiveStatus::Ready && !value.failure.isEmpty())) {

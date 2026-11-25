@@ -311,13 +311,29 @@ Ui::SettingsButton *SectionBuilder::addSectionButton(SectionArgs &&args) {
 	const auto wctx = std::get_if<WidgetContext>(&_context);
 	const auto showOther = wctx ? wctx->showOther : nullptr;
 	const auto target = args.targetSection;
-	return addButton({
+	auto mirroredTitle = (args.label && st::rtl())
+		? rpl::duplicate(args.title)
+		: rpl::producer<QString>();
+	const auto button = addButton({
 		.title = std::move(args.title),
 		.icon = std::move(args.icon),
 		.label = std::move(args.label),
 		.onClick = [=] { showOther(target); },
 		.keywords = std::move(args.keywords),
 	});
+	if (button && mirroredTitle) {
+		rpl::combine(
+			button->widthValue(),
+			std::move(mirroredTitle)
+		) | rpl::on_next([=](int width, const QString &) {
+			auto padding = button->st().padding;
+			padding.setRight(std::max(
+				padding.right(),
+				width - padding.left() - button->fullTextWidth()));
+			button->setPaddingOverride(padding);
+		}, button->lifetime());
+	}
+	return button;
 }
 
 void SectionBuilder::addDivider() {

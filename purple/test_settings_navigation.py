@@ -28,11 +28,15 @@ def routes():
     builder = (SOURCE / "settings/settings_builder.cpp").read_text()
     playback = (SOURCE / "purple/purple_media_playback.cpp").read_text()
     recording = (SOURCE / "purple/purple_recording_settings.cpp").read_text()
+    archive = (SOURCE / "purple/purple_archive_service.cpp").read_text()
     ordered(purple, "const auto kPages = std::array", "ArchiveSettings::Id()",
             "WorkActivitySettings::Id()", "MediaSettings::Id()", "PrivacySettings::Id()",
             "AccountsSettings::Id()", "DiagnosticsSettings::Id()", ".parentId = PurpleSettings::Id()")
     ordered(purple, "void BuildPurpleSection", "advanced/purple_customize_settings",
             "for (const auto &page : kPages)", "builder.addSectionButton", "AddVersionRow")
+    ordered(purple, "builder.addSectionButton", "ArchiveSummaryValue(builder.session(), true)")
+    ordered(archive, "QString ArchiveStorageSizeLabel", "FormatArchiveSize(usage->bytes)",
+            "if (!usage->complete)", "label += u'+'", "return st::wrap_rtl(label)")
     ordered(purple, "void BuildArchiveSettings", "ArchiveSummaryValue(session)",
             "purple/archive_cleanup", "advanced/purple_archive_trash",
             "advanced/purple_archive_edits", 'u"trash"_q', "LocalStorageId()",
@@ -105,8 +109,12 @@ def render(build, qt, out):
                    XDG_CACHE_HOME=str(fixture / "cache"))
         for name, colors in (("light", ""), ("dark", str(theme))):
             for scale in (100, 150):
-                subprocess.run([str(exe), str(scale), colors, str(text), str(out / f"{name}-{scale}")],
+                subprocess.run([str(exe), str(scale), colors, str(text), str(out / f"{name}-{scale}"), "wide"],
                                cwd=ROOT, env=env, check=True)
+        for direction in ("ltr", "rtl"):
+            subprocess.run([
+                str(exe), "150", str(theme), str(text), str(out / f"narrow-{direction}-150"), direction,
+            ], cwd=ROOT, env=env, check=True)
 
 
 def main():

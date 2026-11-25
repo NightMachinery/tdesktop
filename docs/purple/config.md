@@ -1454,8 +1454,9 @@ Purple has its own section directly under Settings. It uses Telegram's stock
 section navigation and settings controls. **Customize settings…** comes first,
 followed by **Archive & storage**, **Work Mode & activity**, **Media**,
 **Privacy & controls**, **Accounts, files & sync**, and **Diagnostics & logs**.
-The archive row reports this account's measured usage. The archive page links
-to the existing cleanup reviews and Telegram's separate media cache.
+The archive row shows this account's measured size. A trailing `+` marks a
+scan still in progress. The archive page includes the full storage summary,
+cleanup reviews, and Telegram's separate media cache.
 
 Search at the top of the Purple page covers Purple and its subpages. Global
 Settings search covers them as well. Selecting a search result opens its page
