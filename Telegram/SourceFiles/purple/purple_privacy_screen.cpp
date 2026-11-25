@@ -177,6 +177,10 @@ bool WeatherPermitted() {
 	return !Core::App().settings().proxy().isEnabled();
 }
 
+bool WeatherSettingsVisible() {
+	return !Core::App().passcodeLocked() && !PrivacyScreenActiveAny();
+}
+
 class WeatherStore final : public QObject {
 public:
 	static WeatherStore &Instance() {
@@ -939,9 +943,17 @@ void PrivacyBackdropWidget::paintEvent(QPaintEvent *) {
 				}
 				const auto x = body.x() + hour * span;
 				const auto y = panelTop + 2 * unit;
-				text(QRect(x, y, span, unit),
-					locale.toString(entry.time.time(), QLocale::ShortFormat),
-					unit - unit / 5, muted);
+				auto hourLabel = locale.toString(entry.time.time(), QLocale::ShortFormat);
+				const auto repeated = std::any_of(forecast->hours.begin(),
+					forecast->hours.end(), [&](const auto &other) {
+						return other.time.date() == entry.time.date()
+							&& other.time.time() == entry.time.time()
+							&& other.time.offsetFromUtc() != entry.time.offsetFromUtc();
+					});
+				if (repeated) {
+					hourLabel += u' ' + entry.time.timeZoneAbbreviation();
+				}
+				text(QRect(x, y, span, unit), hourLabel, unit - unit / 5, muted);
 				text(QRect(x, y + unit, span, unit),
 					(wide ? u"%1 · %2 · %3%"_q.arg(
 						TemperatureLabel(entry.temperatureC), entry.condition).arg(entry.precipitation)
@@ -1073,7 +1085,7 @@ void RaisePrivacyScreen(not_null<::MainWindow*> window) {
 }
 
 void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller) {
-	if (Core::App().passcodeLocked() || PrivacyScreenActiveAny()) {
+	if (!WeatherSettingsVisible()) {
 		return;
 	}
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
@@ -1102,8 +1114,7 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 		const auto weak = QPointer(box.get());
 		const auto generation = box->lifetime().make_state<int>(0);
 		const auto accept = [=](const GeoPoint &cell) {
-			if (weak && WeatherPermitted() && !Core::App().passcodeLocked()
-				&& !PrivacyScreenActiveAny()) {
+			if (weak && WeatherPermitted() && WeatherSettingsVisible()) {
 				ChangeWeatherSource("place", cell);
 				box->closeBox();
 			}
@@ -1114,6 +1125,9 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 			choice->setClickedCallback([=] { accept(cell); });
 		};
 		const auto search = [=] {
+			if (!WeatherSettingsVisible()) {
+				return;
+			}
 			if (!WeatherPermitted()) {
 				status->setText(u"Weather search is paused while the app proxy is on."_q);
 				return;
@@ -1126,8 +1140,7 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 			results->clear();
 			status->setText(u"Looking up places…"_q);
 			WeatherStore::Instance().findPlaces(query, [=](std::vector<GeoPoint> places) {
-				if (!weak || serial != *generation || Core::App().passcodeLocked()
-					|| PrivacyScreenActiveAny()) {
+				if (!weak || serial != *generation || !WeatherSettingsVisible()) {
 					return;
 				}
 				status->setText(places.empty()
@@ -1150,7 +1163,7 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 			st::defaultLightButton));
 		address->setClickedCallback([=] {
 			const auto query = field->getLastText().trimmed();
-			if (query.isEmpty() || !WeatherPermitted()) {
+			if (query.isEmpty() || !WeatherPermitted() || !WeatherSettingsVisible()) {
 				return;
 			}
 			const auto serial = ++*generation;
@@ -1158,7 +1171,7 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 			status->setText(u"Apple receives the address you submit. Looking it up…"_q);
 			Platform::ResolveWeatherAddress(query, [=](Core::GeoLocation location) {
 				if (!weak || serial != *generation || !WeatherPermitted()
-					|| Core::App().passcodeLocked() || PrivacyScreenActiveAny()) {
+					|| !WeatherSettingsVisible()) {
 					return;
 				}
 				const auto cell = location.exact()
@@ -1192,6 +1205,9 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 			WeatherChanges.fire({});
 		});
 		box->addButton(rpl::single(u"Use approximate location"_q), [=] {
+			if (!WeatherSettingsVisible()) {
+				return;
+			}
 			if (!WeatherPermitted()) {
 				status->setText(u"Disable the app proxy before requesting location."_q);
 				return;
