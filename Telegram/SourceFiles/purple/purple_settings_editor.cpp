@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_settings_editor.h"
 
 #include "purple/purple_media_reply.h"
+#include "purple/purple_settings_structures.h"
 
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStringDecoder>
@@ -283,6 +284,33 @@ bool SettingsEditorOpeningMatches(
 		&& (!opening.current || opening.current());
 }
 
+SettingsEditorPreparation ReprepareSettingsEditorEdit(
+		DesktopAccountConfig &routing,
+		const SettingsEditorOpening &opening,
+		const SettingsEditorReview &review) {
+	const auto conflict = SettingsEditorPreparation{ .status = Status::StaleRevision,
+		.error = u"The route or an edited source changed. Keep the draft for comparison or edit it again."_q };
+	const auto &old = review._target.destination;
+	const auto &target = old.role == SettingsOpenRole::AppWide ? opening.appWide : opening.own;
+	if (!target || opening.requester != review._opening.requester
+		|| opening.workMode != review._opening.workMode) {
+		return conflict;
+	}
+	const auto &current = target->destination;
+	if (current.owner != old.owner || current.global != old.global || current.root != old.root
+		|| current.rootIdentity != old.rootIdentity || current.accountsIdentity != old.accountsIdentity
+		|| current.accountDirectoryIdentity != old.accountDirectoryIdentity
+		|| current.file.account != old.file.account || current.file.path != old.file.path
+		|| current.file.input.state != old.file.input.state) {
+		return conflict;
+	}
+	const auto group = std::get_if<std::vector<SettingsEdit>>(&review._intent);
+	if (!group || !SettingsStructures::CanReplay(old.file.input.bytes, current.file.input.bytes, *group)) {
+		return conflict;
+	}
+	return PrepareSettingsEditorEdit(routing, opening, review._intent);
+}
+
 SettingsEditorPreparation PrepareSettingsEditorEdit(
 		DesktopAccountConfig &routing,
 		const SettingsEditorOpening &opening,
@@ -303,9 +331,13 @@ SettingsEditorPreparation PrepareSettingsEditorEdit(
 				.address = edits->front().address };
 		}
 		route = *first;
+		const auto oneMediaArray = route == Route::MediaReply && std::all_of(edits->begin(), edits->end(),
+			[&](const SettingsEdit &edit) {
+				return edit.address == edits->front().address && std::holds_alternative<SettingsArrayEdit>(edit.operation);
+			});
 		for (const auto &edit : *edits) {
 			if (RouteFor(edit.address) != route
-				|| (edits->size() > 1 && (route == Route::AccountRow || route == Route::MediaReply))) {
+				|| (edits->size() > 1 && (route == Route::AccountRow || (route == Route::MediaReply && !oneMediaArray)))) {
 				return { .status = Status::Unsupported,
 					.error = u"Review edits to each settings destination and purpose separately."_q,
 					.address = edit.address };
@@ -370,6 +402,15 @@ SettingsEditorPreparation PrepareSettingsEditorEdit(
 	}
 	review->_revision = map.revision;
 	review->_intent = std::move(intent);
+	if (const auto group = std::get_if<std::vector<SettingsEdit>>(&review->_intent)) {
+		for (const auto &operation : *group) {
+			if (!ranges::contains(preview.changedAddresses, operation.address)) {
+				preview.changedAddresses.push_back(operation.address);
+			}
+		}
+	} else {
+		preview.changedAddresses.push_back({ u"lists"_q, std::get<SettingsEditorMembers>(review->_intent).list, u"members"_q });
+	}
 	const auto candidate = review->replay(source);
 	if (candidate.status != SettingsEditStatus::Changed) {
 		return { .status = FromCore(candidate.status), .error = candidate.error,

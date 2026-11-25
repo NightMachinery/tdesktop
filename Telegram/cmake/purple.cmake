@@ -135,6 +135,10 @@ PRIVATE
     purple/purple_settings_editor.cpp
     purple/purple_settings_editor.h
     purple/purple_settings_draft.h
+    purple/purple_settings_structures.cpp
+    purple/purple_settings_structures.h
+    purple/purple_settings_collection_ui.cpp
+    purple/purple_settings_collection_ui.h
     purple/purple_settings_tree.cpp
     purple/purple_settings_tree.h
     purple/purple_settings_customize.cpp

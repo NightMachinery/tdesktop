@@ -244,6 +244,45 @@ void Refusals() {
 	}
 }
 
+void CollectionAndConflictCases() {
+	auto f = Fixture();
+	const auto prepared = f.scalar(A, { u"premium"_q, u"enabled_p"_q }, false);
+	CHECK(prepared.review);
+	if (!prepared.review) return;
+	const auto original = Get(f.root);
+	Put(f.root, original + "\n# unrelated external edit\n");
+	const auto opening = CaptureSettingsEditorOpening(f.routing, A);
+	const auto rebased = ReprepareSettingsEditorEdit(f.routing, opening, *prepared.review);
+	CHECK(rebased.review && rebased.review->preview().after.contains("# unrelated external edit"));
+	if (rebased.review) {
+		const auto before = ReadSettingsFileInput(f.root);
+		CHECK(ApplySettingsEditorEdit(f.routing, *rebased.review, Current).status == SettingsEditorStatus::Saved);
+		CHECK(Get(f.root) == rebased.review->preview().after);
+		CHECK(f.routing.takeEditorGlobalReload(f.root, before, ReadSettingsFileInput(f.root)));
+		CHECK(!f.routing.takeEditorGlobalReload(f.root, before, ReadSettingsFileInput(f.root)));
+	}
+	Put(f.root, QByteArray(original).replace("true # stay", "false # external"));
+	CHECK(ReprepareSettingsEditorEdit(f.routing, CaptureSettingsEditorOpening(f.routing, A), *prepared.review).status
+		== SettingsEditorStatus::StaleRevision);
+
+	Put(f.other, "version=2\n[media_reply.sets.fixture]\npeers=['user:123']\nvoice='both'\n");
+	const auto peerPath = SettingAddress{u"media_reply"_q, u"sets"_q, u"fixture"_q, u"peers"_q};
+	const auto insert = SettingsEdit{ peerPath, SettingsArrayEdit{ .operation = SettingsCollectionOp::Insert,
+		.index = 1, .value = QString(u"channel:456"_q) } };
+	const auto move = SettingsEdit{ peerPath, SettingsArrayEdit{ .operation = SettingsCollectionOp::Move,
+		.index = 1, .destination = 0 } };
+	const auto media = f.prepare(B, std::vector{ insert, move });
+	CHECK(media.review && media.review->preview().route == SettingsEditorRoute::MediaReply);
+	if (media.review) {
+		CHECK(media.review->preview().after.indexOf("channel:456") < media.review->preview().after.indexOf("user:123"));
+		CHECK(ApplySettingsEditorEdit(f.routing, *media.review, Current).status == SettingsEditorStatus::Saved);
+		CHECK(Get(f.other) == media.review->preview().after);
+		CHECK(!f.routing.observeAccountSave(B, true));
+	}
+	CHECK(f.prepare(B, std::vector{ move, Scalar({ u"media_reply"_q, u"text"_q }, QString(u"Reply"_q)) }).status
+		== SettingsEditorStatus::Unsupported);
+}
+
 void SaveCases() {
 	{
 		auto f = Fixture();
@@ -386,6 +425,7 @@ int main(int argc, char **argv) {
 	ScopeCases();
 	MembershipCases();
 	Refusals();
+	CollectionAndConflictCases();
 	SaveCases();
 	std::printf("%d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;

@@ -80,7 +80,18 @@ ordered(customize, "void protectionChanged()", "setCurrentWidget(_covered)",
 ordered(customize, "QEvent::InputMethod", "preeditString()", "QEvent::KeyPress", "handleKey(")
 ordered(customize, "bool handleKey", "_preedit.contains(object)", "return false", "ShouldHandleEditorKey")
 ordered(customize, "new QPlainTextEdit", "setPlainText", "stageForm()", "PrepareWindowSettingsEditorEdit")
-assert "RequestSettingsEditorApply" not in customize
+ordered(customize, "void submitReview", "_applyInFlight = true", "QPointer(this)",
+        "RequestSettingsEditorApply", "weak->_applySerial == serial", "applyCompleted")
+assert customize.count("RequestSettingsEditorApply(") == 1
+ordered(customize, "void chooseAccount", "SessionAccountKey(session) != key", "ensureSeparateWindowFor",
+        "Review and apply", "Discard and switch")
+ordered(customize, "void showCollection", "LiveSessionFor(target.account)", "PeerCatalogue(session, *field)",
+        "CreateSettingsCollection", "stageIntent(std::move(intent), key)")
+collections = read("purple/purple_settings_collection_ui.cpp")
+ordered(collections, 'u"Add"_q, [this] { edit(Op::Insert)', 'u"Duplicate"_q, [this] { edit(Op::Duplicate)',
+        'u"Delete"_q, [this] { edit(Op::Erase)', 'u"Move up"_q, [this] { move(-1)',
+        "&QAbstractItemModel::rowsMoved", "moveTo(from, to)",
+        "code == Qt::Key_D", "edit(Op::Duplicate)", "edit(Op::Insert)", "edit(Op::Erase)")
 # Verify new native UI surfaces reuse stock Ui::KeysLegend & Ui::LayerWidget, not Toasts/ASCII TextBox.
 assert "Ui::Toast::Show" not in keys, "Modal UI must not fall back to plain Toast popups"
 for required_ui in (

@@ -293,9 +293,16 @@ use `SPC f e d` or the command palette’s `customize-settings` command.
 Filter by setting, source or scope. Select a row to see its effective value,
 default, write destination, and physical values from the captured files.
 
-Scalar forms stage changes in memory. Use `u` or **Undo** to reverse a staged
-change. This development slice stops at staging. Collection editing and
-reviewing and applying drafts are planned for the next slice.
+Scalar and collection forms stage changes in memory. Open an array or named
+collection to add, duplicate, remove, or reorder entries. Chat selectors use
+the settings source's account and accept typed records when that source is
+offline. Use `u` or **Undo** to reverse a staged change.
+
+Use `d` or **Review** to inspect effects and file lines before applying a
+draft. Each review has one destination. Peek changes continue through the
+existing countdown. If an outside edit changes the source, compare the draft
+with the current file. **Reload and review** replays compatible edits against
+the new bytes. A parse error offers a recovery view and a read-only retry.
 
 The `core/application.cpp` hook reserves keyboard events for the Customize
 layer so native edits and input-method composition stay in the active field.

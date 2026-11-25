@@ -1117,6 +1117,13 @@ bool WindowSettingsEditorOpeningMatches(const SettingsEditorOpening &opening) {
 	return opening.current && SettingsEditorOpeningMatches(AccountRouting(), opening);
 }
 
+SettingsEditorPreparation ReprepareWindowSettingsEditorEdit(
+		const SettingsEditorOpening &opening,
+		const SettingsEditorReview &review) {
+	return opening.current ? ReprepareSettingsEditorEdit(AccountRouting(), opening, review)
+		: SettingsEditorPreparation{ .status = SettingsEditorStatus::Unavailable };
+}
+
 void RequestSettingsEditorApply(
 		not_null<Window::Controller*> window,
 		std::shared_ptr<SettingsEditorReview> review,

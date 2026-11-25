@@ -210,7 +210,7 @@ CASES = {
     'settings-editor': {
         'program': 'settings_editor_cases.cpp',
         'units': ['purple/purple_account_config.cpp', 'purple/purple_config_file.cpp',
-            'purple/purple_settings_editor.cpp', CORE],
+            'purple/purple_settings_editor.cpp', 'purple/purple_settings_structures.cpp', CORE],
         'frameworks': ['QtCore'],
     },
     'settings-tree': {
@@ -224,6 +224,13 @@ CASES = {
     'settings-drafts': {
         'program': 'settings_draft_cases.cpp',
         'units': [],
+        'frameworks': ['QtCore'],
+    },
+    'settings-structures': {
+        'program': 'settings_structure_cases.cpp',
+        'units': ['purple/purple_settings_structures.cpp', 'core:purple/purple_settings.cpp',
+            'core:purple/purple_settings_edit.cpp', 'core:purple/purple_media_reply.cpp',
+            'core:purple/purple_peer_token.cpp', 'core:purple/purple_config_diff.cpp'],
         'frameworks': ['QtCore'],
     },
     'customize-keymap': {

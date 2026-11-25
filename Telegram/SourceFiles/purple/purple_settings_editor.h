@@ -77,6 +77,7 @@ struct SettingsEditorPreview {
 	ConfigChangeSummary summary;
 	ConfigChangeImpact impact;
 	QStringList introducedWarnings;
+	std::vector<SettingAddress> changedAddresses;
 };
 
 struct SettingsEditorApplyResult {
@@ -102,6 +103,10 @@ private:
 		DesktopAccountConfig&,
 		SettingsEditorReview&,
 		const std::function<bool()>&);
+	friend SettingsEditorPreparation ReprepareSettingsEditorEdit(
+		DesktopAccountConfig&,
+		const SettingsEditorOpening&,
+		const SettingsEditorReview&);
 	friend void RequestSettingsEditorApply(
 		not_null<Window::Controller*>,
 		std::shared_ptr<SettingsEditorReview>,
@@ -160,6 +165,14 @@ struct SettingsEditorPreparation {
 [[nodiscard]] SettingsEditorPreparation PrepareWindowSettingsEditorEdit(
 	const SettingsEditorOpening &opening,
 	SettingsEditorIntent intent);
+
+[[nodiscard]] SettingsEditorPreparation ReprepareSettingsEditorEdit(
+	DesktopAccountConfig &routing,
+	const SettingsEditorOpening &opening,
+	const SettingsEditorReview &review);
+[[nodiscard]] SettingsEditorPreparation ReprepareWindowSettingsEditorEdit(
+	const SettingsEditorOpening &opening,
+	const SettingsEditorReview &review);
 
 [[nodiscard]] SettingsEditorApplyResult ApplySettingsEditorEdit(
 	DesktopAccountConfig &routing,

@@ -3,22 +3,30 @@
 #include "base/weak_ptr.h"
 #include "core/application.h"
 #include "data/data_session.h"
+#include "data/data_channel.h"
 #include "data/data_user.h"
 #include "main/main_account.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "mainwindow.h"
 #include "purple/purple_config.h"
+#include "purple/purple_gate.h"
+#include "purple/purple_picker.h"
 #include "purple/purple_privacy_screen.h"
+#include "purple/purple_settings_collection_ui.h"
 #include "purple/purple_settings_editor.h"
 #include "purple/purple_settings_draft.h"
+#include "purple/purple_settings_structures.h"
 #include "purple/purple_settings_tree.h"
 #include "styles/style_keys_legend.h"
 #include "styles/style_layers.h"
 #include "styles/style_widgets.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/style/style_core.h"
+#include "ui/userpic_view.h"
 #include "window/window_controller.h"
+#include "window/window_lock_widgets.h"
+#include "window/window_separate_id.h"
 
 #include <QtCore/QPointer>
 #include <QtCore/QFileInfo>
@@ -28,6 +36,7 @@
 #include <QtGui/QClipboard>
 #include <QtGui/QInputMethodEvent>
 #include <QtGui/QKeyEvent>
+#include <QtGui/QPainter>
 #include <QtWidgets/QAbstractItemView>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QButtonGroup>
@@ -36,6 +45,7 @@
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
+#include <QtWidgets/QListWidget>
 #include <QtWidgets/QPlainTextEdit>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QRadioButton>
@@ -54,6 +64,7 @@ namespace {
 using SettingsTree::Row;
 using SettingsTree::EditorKey;
 using Status = SettingsEditorStatus;
+using PeerField = SettingsStructures::PeerField;
 
 #ifdef Q_OS_MAC
 constexpr auto kCtrlMod = Qt::MetaModifier;
@@ -80,11 +91,92 @@ bool Protected(Window::Controller *window) {
 		|| PrivacyScreenActiveAny() || PrivacyScreenActive(window->widget());
 }
 
+Main::Session *LiveSessionFor(const AccountKey &key) {
+	for (const auto &entry : Core::App().domain().accounts()) {
+		const auto session = entry.account->maybeSession();
+		if (session && !entry.account->loggingOut() && !session->termsLocked()
+			&& SessionAccountKey(session) == key) return session;
+	}
+	return nullptr;
+}
+
+std::optional<PeerField> PeerFieldFor(SettingId id) {
+	switch (id) {
+	case SettingId::Members: return PeerField::Members;
+	case SettingId::PresetPins:
+	case SettingId::ViewPins: return PeerField::Pins;
+	case SettingId::PreviewAlways: return PeerField::Notifications;
+	case SettingId::MediaPeers: return PeerField::Media;
+	case SettingId::BudgetTarget: return PeerField::Budget;
+	default: return std::nullopt;
+	}
+}
+
+QString PeerLiteral(not_null<PeerData*> peer, PeerField field) {
+	const auto id = IdOf(peer);
+	if (field == PeerField::Budget) return u"chat:%1"_q.arg(id);
+	if (field == PeerField::Members || field == PeerField::Pins) return QString::number(id);
+	const auto user = peer->asUser();
+	const auto prefix = field == PeerField::Media
+		? (user ? u"user:"_q : peer->isChat() ? u"chat:"_q : u"channel:"_q)
+		: (user ? (user->isBot() ? u"bot:"_q : u"private:"_q)
+			: peer->isBroadcast() ? u"channel:"_q : u"group:"_q);
+	return prefix + QString::number(id);
+}
+
+QIcon PeerAvatar(not_null<PeerData*> peer) {
+	const auto size = st::normalFont->height * 2;
+	auto view = Ui::PeerUserpicView();
+	auto pixmap = QPixmap(size, size);
+	pixmap.fill(Qt::transparent);
+	auto painter = QPainter(&pixmap);
+	peer->paintUserpic(painter, view, 0, 0, size, true);
+	painter.end();
+	return QIcon(pixmap);
+}
+
+std::vector<SettingsPeerChoice> PeerCatalogue(Main::Session *session, PeerField field) {
+	auto result = std::vector<SettingsPeerChoice>();
+	if (field == PeerField::Notifications) {
+		result.push_back({ u"MAGIC_BOTS"_q, u"All bots"_q });
+		result.push_back({ u"MAGIC_CHANNELS"_q, u"All channels"_q });
+	}
+	if (!session) return result;
+	auto counts = QHash<QString, int>();
+	auto seen = QSet<uint64>();
+	const auto append = [&](not_null<PeerData*> peer) {
+		if (seen.contains(peer->id.value)) return;
+		seen.insert(peer->id.value);
+		const auto literal = PeerLiteral(peer, field);
+		++counts[literal];
+		if (peer->migrateTo() || !PickerVisible(peer)) return;
+		const auto kind = peer->isBroadcast() ? u"Channel"_q : peer->isUser()
+			? (peer->asUser()->isBot() ? u"Bot"_q : u"Person"_q) : u"Group"_q;
+		result.push_back({ literal, peer->name() + u" · "_q + kind, PeerAvatar(peer),
+			[weak = base::make_weak(session), id = peer->id] {
+				const auto live = weak.get();
+				const auto current = live && !live->account().loggingOut() ? live->data().peerLoaded(id) : nullptr;
+				return current && !current->migrateTo() && PickerVisible(current);
+			} });
+	};
+	session->data().enumerateUsers([&](not_null<UserData*> peer) { append(peer.get()); });
+	session->data().enumerateGroups(append);
+	session->data().enumerateBroadcasts([&](not_null<ChannelData*> peer) { append(peer.get()); });
+	std::erase_if(result, [&](const auto &peer) { return counts.value(peer.literal) > 1; });
+	return result;
+}
+
 void AnnounceError(QLabel *label, const QString &message) {
 	if (label->text() == message) return;
 	label->setText(message);
 	auto event = QAccessibleEvent(label, QAccessible::Alert);
 	QAccessible::updateAccessibility(&event);
+}
+
+QString PreviewPeerLiteral(const PreviewPeer &peer) {
+	const auto prefix = peer.kind == ChatKind::Bot ? u"bot:"_q : peer.kind == ChatKind::Group
+		? u"group:"_q : peer.kind == ChatKind::Channel ? u"channel:"_q : u"private:"_q;
+	return prefix + QString::number(peer.id);
 }
 
 QLabel *Label(QWidget *parent, const QString &name = {}) {
@@ -102,6 +194,35 @@ QPushButton *Button(QWidget *parent, const QString &text) {
 
 bool IsHotkey(const SettingDescriptor &descriptor) {
 	return descriptor.id == SettingId::PeekHotkey || descriptor.id == SettingId::PresetHotkey;
+}
+
+bool Consequential(const SettingsEditorPreview &preview) {
+	if (preview.impact.dangerous || preview.incompleteTrace || !preview.introducedWarnings.empty()
+		|| preview.route == SettingsEditorRoute::MediaReply || preview.route == SettingsEditorRoute::Members) {
+		return true;
+	}
+	return std::any_of(preview.changedAddresses.begin(), preview.changedAddresses.end(), [](const auto &address) {
+		const auto descriptor = FindSettingDescriptor(address);
+		if (!descriptor) return false;
+		switch (descriptor->id) {
+		case SettingId::Version:
+		case SettingId::PreviewAlways:
+		case SettingId::SendAfterSave:
+		case SettingId::PrivateListening:
+		case SettingId::Trade:
+		case SettingId::TradeHold:
+		case SettingId::HideEverywhere:
+		case SettingId::KeepDiscarded:
+		case SettingId::BinKeep:
+		case SettingId::ScreenTimeEnabled:
+		case SettingId::RetentionDays:
+		case SettingId::Budgets:
+		case SettingId::BudgetMode:
+		case SettingId::BudgetTarget:
+		case SettingId::PerDay: return true;
+		default: return false;
+		}
+	});
 }
 
 QString FieldText(const Row &row) {
@@ -130,6 +251,37 @@ class CustomizeLayer;
 QHash<::MainWindow*, QPointer<CustomizeLayer>> OpenEditors;
 QHash<::MainWindow*, QHash<QString, QString>> LastSelection;
 
+class OpenCustomizeOnActivation final : public QObject {
+public:
+	OpenCustomizeOnActivation(not_null<Window::Controller*> window, AccountKey account)
+	: QObject(window->widget().get())
+	, _window(base::make_weak(window.get()))
+	, _account(account) {
+		window->widget()->installEventFilter(this);
+		QTimer::singleShot(0, this, [this] { check(); });
+		QTimer::singleShot(2000, this, &QObject::deleteLater);
+	}
+
+private:
+	bool eventFilter(QObject *, QEvent *event) override {
+		if (event->type() == QEvent::WindowActivate) QTimer::singleShot(0, this, [this] { check(); });
+		return false;
+	}
+
+	void check() {
+		const auto window = _window.get();
+		if (!window || _done || Core::App().activeWindow() != window) return;
+		_done = true;
+		const auto session = window->maybeSession();
+		if (session && SessionAccountKey(session) == _account) ShowCustomizeSettings(window);
+		deleteLater();
+	}
+
+	base::weak_ptr<Window::Controller> _window;
+	AccountKey _account;
+	bool _done = false;
+};
+
 class CustomizeLayer final : public Ui::LayerWidget {
 public:
 	explicit CustomizeLayer(not_null<Window::Controller*> host)
@@ -145,6 +297,7 @@ public:
 	, _coverClose(Button(_covered, u"Close"_q))
 	, _title(Label(_browser, u"Customize Purple settings"_q))
 	, _subject(Label(_browser))
+	, _accountsButton(Button(_browser, u"Account"_q))
 	, _filter(new QLineEdit(_browser))
 	, _clear(Button(_browser, u"Clear filter"_q))
 	, _tree(new QTreeWidget(_browser))
@@ -153,6 +306,7 @@ public:
 	, _edit(Button(_browser, u"Edit"_q))
 	, _reset(Button(_browser, u"Reset"_q))
 	, _undo(Button(_browser, u"Undo"_q))
+	, _reviewButton(Button(_browser, u"Review"_q))
 	, _help(Button(_browser, u"Help"_q))
 	, _sheetLayout(new QVBoxLayout(_sheet)) {
 		setAccessibleName(u"Customize Purple settings"_q);
@@ -210,6 +364,8 @@ public:
 		connect(_edit, &QPushButton::clicked, this, [this] { activateRow(); });
 		connect(_reset, &QPushButton::clicked, this, [this] { resetSelected(); });
 		connect(_undo, &QPushButton::clicked, this, [this] { undo(); });
+		connect(_accountsButton, &QPushButton::clicked, this, [this] { showAccounts(); });
+		connect(_reviewButton, &QPushButton::clicked, this, [this] { showReview(); });
 		connect(_help, &QPushButton::clicked, this, [this] { showHelp(); });
 
 		host->widget()->installEventFilter(this);
@@ -233,9 +389,10 @@ public:
 	}
 
 	void open() {
-		capture();
+		if (!capture()) return;
 		_selection = LastSelection.value(_window.data()).value(_accountId);
 		rebuild(true);
+		showRecoveryIfNeeded();
 	}
 
 	bool closeByOutsideClick() const override { return false; }
@@ -297,6 +454,8 @@ private:
 		auto header = new QHBoxLayout();
 		header->addWidget(_title, 1);
 		header->addWidget(_subject);
+		header->addWidget(_accountsButton);
+		_accountsButton->installEventFilter(this);
 		const auto close = Button(_browser, u"Close"_q);
 		header->addWidget(close);
 		connect(close, &QPushButton::clicked, this, [this] { back(); });
@@ -323,7 +482,7 @@ private:
 		layout->addWidget(_inspector);
 		layout->addWidget(_feedback);
 		auto footer = new QHBoxLayout();
-		for (const auto button : { _edit, _reset, _undo, _help }) {
+		for (const auto button : { _edit, _reset, _undo, _reviewButton, _help }) {
 			footer->addWidget(button);
 			button->installEventFilter(this);
 		}
@@ -392,7 +551,9 @@ private:
 			const auto wasCovered = _pages->currentWidget() == _covered;
 			QTimer::singleShot(0, this, [this, wasCovered] {
 				if (!visibleContent()) return;
+				const auto weak = QPointer(this);
 				refreshFromDisk();
+				if (!weak || !visibleContent()) return;
 				if (wasCovered && !_needsRefresh) {
 					_resumeRefused = _draftStale || !_opening.current;
 					if (_resumeRefused) {
@@ -400,6 +561,8 @@ private:
 						_coverClose->setText(u"Discard draft and close"_q);
 						_coverClose->show();
 						_coverClose->setFocus();
+					} else if (_applyInFlight) {
+						displayApplying(u"Waiting for the reviewed settings operation."_q);
 					} else if (_pausedForm && SettingsDraft::CanRestoreForm(sameSession(), !_draftStale)) {
 						_pausedForm = false;
 						_pages->setCurrentWidget(_sheetPage);
@@ -413,36 +576,44 @@ private:
 		}
 	}
 
-	void capture() {
+	bool capture() {
 		const auto weak = QPointer(this);
 		if (const auto host = _host.get()) {
-			_opening = CaptureWindowSettingsEditor(host, [weak] {
+			auto opening = CaptureWindowSettingsEditor(host, [weak] {
 				return weak && weak->visibleContent();
 			});
+			if (!weak) return false;
+			_opening = std::move(opening);
 		}
 		if (_opening.current) {
 			const auto key = _opening.requester;
 			_accountId = AccountKeyText(key.environment, key.userId).value_or(QString());
 		}
 		_draftStale = false;
+		return true;
 	}
 
 	void refreshFromDisk() {
-		if (!visibleContent()) return;
+		if (!visibleContent() || _applyInFlight) return;
 		if (Core::App().activeWindow() != _host.get()) {
 			_needsRefresh = true;
 			return;
 		}
 		_needsRefresh = false;
+		const auto weak = QPointer(this);
+		const auto opening = _opening;
+		const auto matches = WindowSettingsEditorOpeningMatches(opening);
+		if (!weak || opening.origin != _opening.origin || !visibleContent()) return;
 		if (_editingKey.isEmpty() && !_frames.current()) {
-			if (!WindowSettingsEditorOpeningMatches(_opening)) {
+			if (!matches) {
 				_frames.clear();
-				capture();
-				rebuild();
+				if (capture()) rebuild();
+			} else {
+				_draftStale = false;
 			}
 			return;
 		}
-		_draftStale = !WindowSettingsEditorOpeningMatches(_opening);
+		_draftStale = !matches;
 		if (_draftStale) {
 			AnnounceError(_formStatus ? _formStatus : _feedback,
 				u"The settings source changed. Your input is kept until you leave this form."_q);
@@ -555,15 +726,22 @@ private:
 
 	bool changed(const Row &row) const {
 		const auto frame = _frames.current();
-		return frame && std::any_of(frame->edits.begin(), frame->edits.end(),
-			[&](const SettingsEdit &edit) { return edit.address == row.address; });
+		if (!frame) return false;
+		const auto edits = std::get_if<std::vector<SettingsEdit>>(&frame->intent);
+		if (edits) {
+			return std::any_of(edits->begin(), edits->end(),
+				[&](const SettingsEdit &edit) { return edit.address == row.address; });
+		}
+		const auto &members = std::get<SettingsEditorMembers>(frame->intent);
+		return row.address == SettingAddress{ u"lists"_q, members.list, u"members"_q };
 	}
 
 	void refreshInspector() {
 		const auto row = selected();
-		_edit->setEnabled(row && row->editable);
+		_edit->setEnabled(row && (row->editable || isCollection(*row)));
 		_reset->setEnabled(row && row->editable && SettingsTree::CanReset(*row->descriptor));
 		_undo->setEnabled(_frames.canUndo());
+		_reviewButton->setEnabled(_frames.current() && !_applyInFlight);
 		_clear->setEnabled(filtering());
 		if (!row) {
 			_inspector->clear();
@@ -671,7 +849,8 @@ private:
 			}
 			return true;
 		}
-		if (_preedit.contains(object) || _preedit.contains(QApplication::focusWidget())) return false;
+		if (_preedit.contains(object) || _preedit.contains(QApplication::focusWidget())
+			|| (_collection && SettingsCollectionHasPreedit(_collection))) return false;
 		if (const auto button = qobject_cast<QPushButton*>(object); button && enter && !mods) {
 			if (!event->isAutoRepeat()) button->click();
 			return true;
@@ -693,6 +872,23 @@ private:
 			}
 		}
 		if (_pages->currentWidget() == _sheetPage) {
+			if (const auto list = qobject_cast<QListWidget*>(object); list && !mods
+				&& (key == Qt::Key_J || key == Qt::Key_K)) {
+				list->setCurrentRow(std::clamp(list->currentRow() + (key == Qt::Key_J ? 1 : -1),
+					0, std::max(0, list->count() - 1)));
+				return true;
+			}
+			if (_reviewBody && object == _reviewBody && !mods) {
+				if (key == Qt::Key_BracketLeft || key == Qt::Key_BracketRight) {
+					showReviewPage(key == Qt::Key_BracketLeft ? -1 : 1);
+					return true;
+				}
+				if (key == Qt::Key_J || key == Qt::Key_K) {
+					_reviewBody->verticalScrollBar()->triggerAction(key == Qt::Key_J
+						? QAbstractSlider::SliderSingleStepAdd : QAbstractSlider::SliderSingleStepSub);
+					return true;
+				}
+			}
 			if (_choice && _choice->view()->isVisible()) return false;
 			const auto submit = enter && (mods == kCtrlMod || (!mods && object == _line));
 			switch (SettingsTree::ShouldHandleEditorKey(
@@ -728,6 +924,8 @@ private:
 		else if (key == Qt::Key_Question) showHelp();
 		else if (key == Qt::Key_R && !mods && !event->isAutoRepeat()) resetSelected();
 		else if (key == Qt::Key_U && !mods && !event->isAutoRepeat()) undo();
+		else if (key == Qt::Key_D && !mods && !event->isAutoRepeat()) showReview();
+		else if (key == Qt::Key_A && mods == Qt::ShiftModifier && !event->isAutoRepeat()) showAccounts();
 		else if (key == Qt::Key_Q && !mods) back();
 		else if (((key == Qt::Key_Y || key == Qt::Key_T || key == Qt::Key_Minus) && !mods)
 			|| (key == Qt::Key_Plus && (!mods || mods == Qt::ShiftModifier))) {
@@ -739,8 +937,12 @@ private:
 	void activateRow() {
 		const auto row = selected();
 		if (!row || !visibleContent()) return;
-		if (row->editable) {
+		if (isCollection(*row)) {
+			showCollection(*row);
+		} else if (row->editable) {
 			showForm(*row);
+		} else if (row->invalid && row->address.empty()) {
+			showRecoveryIfNeeded();
 		} else if (const auto current = _tree->currentItem(); current && current->childCount()) {
 			current->setExpanded(!current->isExpanded());
 		} else {
@@ -754,6 +956,12 @@ private:
 	}
 
 	void clearSheet() {
+		_collection.clear();
+		_catalogueLifetime.destroy();
+		_sheetBack = {};
+		_reviewBody = nullptr;
+		_applyMessage.clear();
+		_reviewPages.clear();
 		_pausedForm = false;
 		_formFocus.clear();
 		_formExit.clear();
@@ -780,6 +988,7 @@ private:
 	}
 
 	void returnToTree() {
+		_afterApply = {};
 		clearSheet();
 		if (_resumeRefused) {
 			_pages->setCurrentWidget(_covered);
@@ -791,6 +1000,522 @@ private:
 		if (_needsRefresh || _draftStale) refreshFromDisk();
 	}
 
+	QLabel *sheetTitle(const QString &text) {
+		const auto label = Label(_sheet, text);
+		label->setFont(st::keysLegendTitleStyle.font);
+		addSheetWidget(label);
+		return label;
+	}
+
+	QPushButton *sheetButton(const QString &text, Fn<void()> action) {
+		const auto button = Button(_sheet, text);
+		addSheetWidget(button);
+		connect(button, &QPushButton::clicked, this, std::move(action));
+		return button;
+	}
+
+	void showSheet(QWidget *focus) {
+		if (!visibleContent()) return;
+		_pages->setCurrentWidget(_sheetPage);
+		if (focus) focus->setFocus();
+	}
+
+	QPlainTextEdit *sheetText(const QString &content, const QString &name) {
+		const auto text = new QPlainTextEdit(content, _sheet);
+		text->setReadOnly(true);
+		text->setAccessibleName(name);
+		text->setLayoutDirection(Qt::LeftToRight);
+		text->setLineWrapMode(QPlainTextEdit::NoWrap);
+		addSheetWidget(text);
+		return text;
+	}
+
+	QString reviewEffects(const SettingsEditorPreview &preview) const {
+		auto lines = QStringList();
+		for (const auto &entry : preview.summary.entries) {
+			for (const auto &key : entry.keys) {
+				const auto before = key.beforeValue.value_or(u"absent"_q);
+				const auto after = key.afterValue.value_or(u"absent"_q);
+				lines.push_back(u"%1 %2 · %3 → %4"_q.arg(key.table, key.key, before, after));
+			}
+		}
+		for (const auto &finding : preview.impact.findings) {
+			if (finding.dangerous || finding.kind != ConfigImpactKind::ValueChanged) {
+				lines.push_back(finding.label);
+			}
+		}
+		for (const auto &address : preview.changedAddresses) {
+			const auto descriptor = FindSettingDescriptor(address);
+			if (!descriptor || !SettingsTree::IsScalar(descriptor->codec)) continue;
+			auto value = Row{ .descriptor = descriptor };
+			value.effective = EffectiveSettingValue(preview.beforeLayers.effective.settings, address);
+			const auto before = SettingsTree::ValueText(value);
+			value.effective = EffectiveSettingValue(preview.afterLayers.effective.settings, address);
+			const auto after = SettingsTree::ValueText(value);
+			if (!before.isEmpty() || !after.isEmpty()) {
+				lines.push_back(u"Effective %1 · %2 → %3"_q.arg(SettingsTree::Address(address), before, after));
+			}
+		}
+		for (const auto &warning : preview.physicalBefore.warnings) {
+			lines.push_back(u"Existing source warning · %1"_q.arg(warning));
+		}
+		for (const auto &entry : preview.afterLayers.inactive) {
+			if (entry.reason == SettingsInactiveReason::UndefinedGlobalList) {
+				lines.push_back(u"This account has an inactive list value at %1, line %2."_q
+					.arg(entry.source.path).arg(entry.source.line));
+			}
+		}
+		for (const auto &warning : preview.introducedWarnings) lines.push_back(warning);
+		if (preview.incompleteTrace) lines.push_back(u"Some effective reads could not be verified."_q);
+		if (preview.offlineGlobalSource) lines.push_back(u"The app-wide source account is signed out."_q);
+		if (preview.usesGlobalRecovery) lines.push_back(u"Effective settings use an app-wide recovery copy."_q);
+		if (lines.empty()) lines.push_back(u"The change affects the stored representation. See Lines."_q);
+		return lines.join(u'\n');
+	}
+
+	void showReviewPage(int delta) {
+		if (!_reviewBody || _reviewPages.empty() || !visibleContent()) return;
+		_reviewPage = std::clamp(_reviewPage + delta, 0, int(_reviewPages.size()) - 1);
+		_reviewBody->setPlainText(u"Page %1 of %2\n\n"_q.arg(_reviewPage + 1).arg(_reviewPages.size())
+			+ _reviewPages[_reviewPage]);
+	}
+
+	void showReview() {
+		const auto frame = _frames.current();
+		if (!frame || _applyInFlight || !visibleContent()) return;
+		const auto review = frame->review;
+		const auto weak = QPointer(this);
+		const auto opening = _opening;
+		const auto current = WindowSettingsEditorOpeningMatches(opening);
+		if (!weak || !visibleContent() || opening.origin != _opening.origin) return;
+		if (!current || _draftStale) {
+			showConflict(review);
+			return;
+		}
+		clearSheet();
+		const auto &preview = review->preview();
+		sheetTitle(u"Review settings changes"_q);
+		addSheetWidget(Label(_sheet, Isolate(preview.path)));
+		if (preview.diff.truncated) {
+			addSheetWidget(Label(_sheet, u"The compact diff reached its limit. Lines includes both complete files in pages."_q));
+		}
+		_reviewPages = SettingsStructures::ReviewLines(preview.diff, preview.before, preview.after);
+		_reviewPage = 0;
+		const auto effects = reviewEffects(preview);
+		_reviewBody = sheetText(effects, u"Reviewed settings effects and lines"_q);
+		const auto back = sheetButton(u"Back"_q, [this] { returnToTree(); });
+		sheetButton(u"Effects"_q, [this, effects] { _reviewBody->setPlainText(effects); });
+		sheetButton(u"Lines"_q, [this] { showReviewPage(0); });
+		sheetButton(u"Previous page"_q, [this] { showReviewPage(-1); });
+		sheetButton(u"Next page"_q, [this] { showReviewPage(1); });
+		const auto apply = sheetButton(u"Apply changes"_q, [this, review] { approve(review); });
+		apply->setEnabled(!preview.diff.truncated || !_reviewPages.empty());
+		showSheet(back);
+	}
+
+	void approve(const std::shared_ptr<SettingsEditorReview> &review) {
+		if (!visibleContent() || _applyInFlight) return;
+		const auto &preview = review->preview();
+		if (preview.route == SettingsEditorRoute::Peek) {
+			submitReview(review);
+			return;
+		}
+		if (!Consequential(preview)) {
+			submitReview(review);
+			return;
+		}
+		clearSheet();
+		sheetTitle(u"Confirm settings change"_q);
+		addSheetWidget(Label(_sheet, Isolate(preview.path)));
+		sheetText(reviewEffects(preview), u"Consequences"_q);
+		_sheetBack = [this] { showReview(); };
+		const auto cancel = sheetButton(u"Cancel"_q, _sheetBack);
+		const auto apply = sheetButton(u"Confirm and apply"_q, [this, review] { submitReview(review); });
+		apply->setEnabled(false);
+		QTimer::singleShot(0, apply, [apply] { apply->setEnabled(true); });
+		showSheet(cancel);
+	}
+
+	void submitReview(std::shared_ptr<SettingsEditorReview> review) {
+		const auto host = _host.get();
+		if (!host || !visibleContent() || _applyInFlight) return;
+		const auto active = _frames.current();
+		if (!active || active->review != review) return;
+		const auto key = _selection;
+		const auto serial = ++_applySerial;
+		_applyInFlight = true;
+		const auto weak = QPointer(this);
+		displayApplying(u"Checking the reviewed settings source…"_q);
+		if (!weak || _applySerial != serial) return;
+		if (!visibleContent()) {
+			_applyInFlight = false;
+			return;
+		}
+		RequestSettingsEditorApply(host, std::move(review), [weak, serial, key](SettingsEditorApplyResult result) {
+			if (weak && weak->_applySerial == serial && weak->sameSession()) {
+				weak->applyCompleted(std::move(result), key);
+			}
+		});
+	}
+
+	void displayApplying(const QString &message) {
+		clearSheet();
+		sheetTitle(u"Applying reviewed settings"_q);
+		_applyMessage = Label(_sheet, message);
+		addSheetWidget(_applyMessage);
+		showSheet(_applyMessage);
+	}
+
+	void applyCompleted(SettingsEditorApplyResult result, const QString &key) {
+		if (result.status == Status::Waiting) {
+			if (_applyMessage && visibleContent()) _applyMessage->setText(u"Waiting for the Peek gate. Confirm or abort in the countdown."_q);
+			return;
+		}
+		_applyInFlight = false;
+		const auto after = std::exchange(_afterApply, {});
+		const auto saved = result.status == Status::Saved || result.status == Status::SavedWithFollowUpError;
+		if (saved) {
+			_frames.clear();
+			_selection = key;
+			_needsRefresh = true;
+			_draftStale = false;
+		} else if (result.status == Status::StaleRevision) {
+			_draftStale = true;
+		}
+		const auto message = saved ? (result.status == Status::Saved
+			? u"Settings saved."_q : u"Settings saved. Follow-up failed. %1"_q.arg(result.error))
+			: result.error.isEmpty() ? u"Settings were not applied."_q : result.error;
+		const auto weak = QPointer(this);
+		AnnounceError(_feedback, message);
+		if (!weak || !visibleContent()) return;
+		returnToTree();
+		if (!weak || !visibleContent()) return;
+		if (result.status == Status::Saved && after) after();
+	}
+
+	void showConflict(std::shared_ptr<SettingsEditorReview> review) {
+		if (!visibleContent()) return;
+		const auto host = _host.get();
+		if (!host) return;
+		const auto weak = QPointer(this);
+		const auto fresh = CaptureWindowSettingsEditor(host, [weak] { return weak && weak->visibleContent(); });
+		if (!weak || !visibleContent()) return;
+		const auto &preview = review->preview();
+		const auto matches = [&](const std::optional<AccountSettingsOpenTarget> &source) {
+			return source && source->file.account == preview.fileAccount && source->file.path == preview.path;
+		};
+		const auto disk = matches(fresh.ownSource) ? &fresh.ownSource->file.input
+			: matches(fresh.globalSource) ? &fresh.globalSource->file.input : nullptr;
+		clearSheet();
+		sheetTitle(u"Settings changed since this draft"_q);
+		if (disk) {
+			sheetText(u"Opened\n%1\n\nOn disk\n%2\n\nDraft\n%3"_q.arg(
+				QString::fromUtf8(preview.before), QString::fromUtf8(disk->bytes), QString::fromUtf8(preview.after)),
+				u"Opened, current and draft settings"_q);
+		}
+		const auto keep = sheetButton(u"Keep draft for comparison"_q, [this] { returnToTree(); });
+		sheetButton(u"Reload and review"_q, [this, review, fresh] {
+			const auto guard = QPointer(this);
+			const auto frame = _frames.current();
+			if (!frame || frame->review != review || !visibleContent()) return;
+			const auto intent = frame->intent;
+			const auto result = ReprepareWindowSettingsEditorEdit(fresh, *review);
+			if (!guard || !visibleContent()) return;
+			if (!result.review) {
+				addSheetWidget(Label(_sheet, StatusText(result)));
+				return;
+			}
+			_opening = fresh;
+			_frames.clear();
+			_frames.push(Draft{ intent, result.review });
+			_draftStale = false;
+			rebuild();
+			showReview();
+		});
+		sheetButton(u"Discard draft"_q, [this] { discardDraft(); });
+		showSheet(keep);
+	}
+
+	void discardDraft() {
+		_frames.clear();
+		_afterApply = {};
+		if (!capture()) return;
+		const auto weak = QPointer(this);
+		returnToTree();
+		if (!weak) return;
+		rebuild();
+		describeDraft();
+	}
+
+	void showRecoveryIfNeeded() {
+		if (!visibleContent() || !_opening.current || _applyInFlight) return;
+		const auto inspection = InspectSettingsEditor(_opening);
+		const auto invalid = [](const SettingsLayerFileReport &report) {
+			return report.current.present && !report.current.path.isEmpty() && !report.current.parsed.ok();
+		};
+		const auto global = invalid(inspection.global);
+		if (!global && !invalid(inspection.account)) return;
+		const auto report = global ? inspection.global : inspection.account;
+		const auto &openingSource = global ? _opening.globalSource : _opening.ownSource;
+		const auto source = openingSource ? openingSource->file.input.bytes : QByteArray();
+		const auto mapped = MapSettingsSource(source);
+		const auto location = report.current.path + (mapped.line > 0
+			? u" · line %1, column %2"_q.arg(mapped.line).arg(mapped.column) : QString());
+		clearSheet();
+		sheetTitle(u"Settings file needs repair"_q);
+		addSheetWidget(Label(_sheet, Isolate(location)));
+		addSheetWidget(Label(_sheet, report.current.parsed.error));
+		const auto excerpt = SettingsStructures::SourceExcerpt(source, mapped.line, mapped.column);
+		if (!excerpt.isEmpty()) sheetText(excerpt, u"Source excerpt"_q);
+		addSheetWidget(Label(_sheet, report.usedGood ? u"Effective values use the last-good copy."_q
+			: u"This file has no usable settings. Other eligible sources can still be inspected."_q));
+		const auto retry = sheetButton(u"Retry after repair"_q, [this] {
+			refreshFromDisk();
+			returnToTree();
+			showRecoveryIfNeeded();
+		});
+		sheetButton(u"Copy location"_q, [this, location] {
+			if (visibleContent()) QApplication::clipboard()->setText(location);
+		});
+		sheetButton(u"Browse effective values"_q, [this] { returnToTree(); });
+		sheetButton(u"Close"_q, [this] { closeLayer(); });
+		showSheet(retry);
+	}
+
+	void showAccounts() {
+		if (!visibleContent() || _applyInFlight) return;
+		clearSheet();
+		sheetTitle(u"Account to inspect"_q);
+		const auto list = new QListWidget(_sheet);
+		list->setAccessibleName(u"Signed-in accounts"_q);
+		auto accounts = std::vector<base::weak_ptr<Main::Account>>();
+		for (const auto &entry : Core::App().domain().accounts()) {
+			const auto session = entry.account->maybeSession();
+			if (!session || entry.account->loggingOut() || session->termsLocked()) continue;
+			const auto key = SessionAccountKey(session);
+			const auto source = _opening.globalSource && _opening.globalSource->file.account == key;
+			list->addItem(session->user()->name() + (source ? u" · Supplies app-wide settings"_q
+				: u" · "_q + AccountWorkModeTitle(session)));
+			accounts.push_back(base::make_weak(entry.account.get()));
+			if (key == _opening.requester) list->setCurrentRow(list->count() - 1);
+		}
+		addSheetWidget(list);
+		const auto choose = [this, list, accounts] {
+			const auto index = list->currentRow();
+			if (index >= 0 && index < int(accounts.size())) chooseAccount(accounts[index]);
+		};
+		connect(list, &QListWidget::itemActivated, this, choose);
+		sheetButton(u"Switch buffer"_q, choose);
+		sheetButton(u"Back"_q, [this] { returnToTree(); });
+		showSheet(list);
+	}
+
+	bool isCollection(const Row &row) const {
+		const auto descriptor = row.descriptor;
+		return descriptor && (descriptor->codec == SettingCodec::Array
+			|| SettingsStructures::IsNamedContainer(descriptor->id)
+			|| SettingsStructures::IsNamedObject(descriptor->id));
+	}
+
+	void showCollection(Row row) {
+		if (!visibleContent() || !row.descriptor) return;
+		const auto id = row.descriptor->id;
+		const auto field = PeerFieldFor(id);
+		const auto isMember = field == PeerField::Members;
+		const auto scope = SettingsScope(row.address);
+		const auto appWide = isMember ? _opening.workMode == AccountWorkMode::Follow
+			: scope == SettingScope::AppWide;
+		const auto &openingTarget = appWide ? _opening.appWide : _opening.own;
+		if (!openingTarget) {
+			const auto error = appWide ? _opening.appWideError : _opening.ownError;
+			AnnounceError(_feedback, error.isEmpty() ? u"This collection is read-only in the current context."_q : error);
+			return;
+		}
+		const auto target = openingTarget->destination.file;
+		const auto frame = _frames.current();
+		const auto previous = frame ? frame->review : nullptr;
+		if (previous && (previous->preview().path != target.path
+			|| (previous->preview().route == SettingsEditorRoute::Members) != isMember)) {
+			showIncompatibleDraft();
+			return;
+		}
+		auto bytes = previous ? previous->preview().after : target.input.bytes;
+		if (!MapSettingsSource(bytes).ok()) {
+			showRecoveryIfNeeded();
+			return;
+		}
+		auto address = row.address;
+		const auto named = SettingsStructures::IsNamedContainer(id) || SettingsStructures::IsNamedObject(id);
+		if (SettingsStructures::IsNamedObject(id)) address.pop_back();
+		auto members = std::optional<SettingsEditorMembers>();
+		if (isMember) {
+			const auto &listName = std::get<QString>(address[1]);
+			const auto layers = previous ? previous->preview().afterLayers : InspectSettingsEditor(_opening);
+			const auto list = layers.effective.settings.list(listName);
+			members = SettingsEditorMembers{ listName, list ? list->members : std::vector<PeerIdValue>() };
+			if (frame) {
+				const auto existing = std::get_if<SettingsEditorMembers>(&frame->intent);
+				if (!existing || existing->list != listName) {
+					showIncompatibleDraft();
+					return;
+				}
+			}
+		}
+		const auto session = field ? LiveSessionFor(target.account) : nullptr;
+		auto peers = field ? PeerCatalogue(session, *field) : std::vector<SettingsPeerChoice>();
+		auto seed = std::vector<SettingsEdit>();
+		if (field == PeerField::Notifications) {
+			const auto map = MapSettingsSource(bytes);
+			const auto explicitValues = std::any_of(map.nodes.begin(), map.nodes.end(), [&](const auto &node) {
+				return node.address == address;
+			});
+			if (!explicitValues) {
+				const auto layers = previous ? previous->preview().afterLayers : InspectSettingsEditor(_opening);
+				const auto &notifications = layers.effective.settings.notifications;
+				const auto add = [&](QString text) {
+					seed.push_back(SettingsStructures::ArrayEdit(address, SettingsCollectionOp::Insert,
+						seed.size(), 0, std::move(text)));
+				};
+				if (notifications.magicBots) add(u"MAGIC_BOTS"_q);
+				if (notifications.magicChannels) add(u"MAGIC_CHANNELS"_q);
+				for (const auto &peer : notifications.previewAlways) add(PreviewPeerLiteral(peer));
+			}
+		}
+		const auto opening = _opening.origin;
+		const auto weak = QPointer(this);
+		clearSheet();
+		_editingKey = row.key;
+		sheetTitle(row.label);
+		addSheetWidget(Label(_sheet, Isolate(target.path)));
+		if (field && !session) {
+			addSheetWidget(Label(_sheet, u"The source account is signed out. Recorded IDs and typed IDs are available."_q));
+		}
+		_collection = CreateSettingsCollection(_sheet, {
+			.title = row.label,
+			.address = std::move(address),
+			.bytes = std::move(bytes),
+			.peerField = field,
+			.peers = std::move(peers),
+			.seed = std::move(seed),
+			.members = std::move(members),
+			.named = named,
+			.current = [weak, opening] {
+				return weak && weak->visibleContent() && !weak->_applyInFlight
+					&& weak->_opening.origin == opening;
+			},
+			.stage = [weak, key = row.key, previous](SettingsEditorIntent intent) {
+				if (!weak || !weak->visibleContent()) return;
+				const auto active = weak->_frames.current();
+				if ((active ? active->review : nullptr) != previous) return;
+				if (auto edits = std::get_if<std::vector<SettingsEdit>>(&intent); edits && active) {
+					const auto current = std::get_if<std::vector<SettingsEdit>>(&active->intent);
+					if (!current) { weak->showIncompatibleDraft(); return; }
+					edits->insert(edits->begin(), current->begin(), current->end());
+				}
+				weak->stageIntent(std::move(intent), key);
+			},
+			.inspect = [weak](SettingAddress selection) {
+				if (!weak || !weak->visibleContent()) return;
+				weak->_selection = SettingsTree::Address(selection);
+				weak->returnToTree();
+				if (weak) weak->rebuild(true);
+			},
+			.close = [weak] { if (weak) weak->returnToTree(); },
+		});
+		if (session) {
+			const auto collection = _collection;
+			session->data().sessionDataAboutToBeCleared() | rpl::on_next([collection] {
+				if (collection) RefreshSettingsCollectionPeers(collection, true);
+			}, _catalogueLifetime);
+			rpl::merge(SettingsChanges(), StateChanges()) | rpl::on_next([collection] {
+				if (collection) RefreshSettingsCollectionPeers(collection);
+			}, _catalogueLifetime);
+		}
+		addSheetWidget(_collection);
+		_formStatus = Label(_sheet);
+		addSheetWidget(_formStatus);
+		_sheetBack = [weak] { if (weak && weak->_collection) BackFromSettingsCollection(weak->_collection); };
+		showSheet(_collection);
+	}
+
+	void pickBudgetChat(Row row) {
+		if (!visibleContent() || !_line || !_opening.globalSource) return;
+		const auto session = LiveSessionFor(_opening.globalSource->file.account);
+		const auto choices = PeerCatalogue(session, PeerField::Budget);
+		if (choices.empty()) {
+			AnnounceError(_formStatus, u"No visible chats for this source. Enter a chat:ID value directly."_q);
+			return;
+		}
+		const auto list = new QListWidget(_sheet);
+		list->setAccessibleName(u"Budget chat"_q);
+		for (const auto &choice : choices) {
+			const auto item = new QListWidgetItem(choice.avatar, choice.label, list);
+			item->setData(Qt::UserRole, choice.literal);
+		}
+		addSheetWidget(list);
+		connect(list, &QListWidget::itemActivated, this, [this, list, choices, key = row.key](QListWidgetItem *item) {
+			if (!visibleContent() || _editingKey != key || !_line) return;
+			const auto id = item->data(Qt::UserRole).toString();
+			const auto choice = std::find_if(choices.begin(), choices.end(), [&](const auto &entry) {
+				return entry.literal == id;
+			});
+			if (choice == choices.end() || (choice->current && !choice->current())) {
+				list->clear();
+				AnnounceError(_formStatus, u"That chat is no longer visible in the source account."_q);
+				return;
+			}
+			_line->setText(id);
+			list->hide();
+			list->deleteLater();
+			_line->setFocus();
+		});
+		const auto weakList = QPointer(list);
+		session->data().sessionDataAboutToBeCleared() | rpl::on_next([weakList] {
+			if (weakList) weakList->clear();
+		}, _catalogueLifetime);
+		StateChanges() | rpl::on_next([weakList, choices] {
+			if (weakList && std::any_of(choices.begin(), choices.end(), [](const auto &choice) {
+				return choice.current && !choice.current();
+			})) weakList->clear();
+		}, _catalogueLifetime);
+		list->setCurrentRow(0);
+		list->setFocus();
+		_sheetPage->ensureWidgetVisible(list);
+	}
+
+	void chooseAccount(base::weak_ptr<Main::Account> account) {
+		const auto live = account.get();
+		if (!live || !visibleContent() || !live->maybeSession() || live->loggingOut()) return;
+		if (live->maybeSession() == _session.get()) {
+			returnToTree();
+			return;
+		}
+		const auto key = SessionAccountKey(live->maybeSession());
+		const auto switchBuffer = [weak = QPointer(this), account, key] {
+			const auto target = account.get();
+			const auto session = target ? target->maybeSession() : nullptr;
+			if (!weak || !weak->visibleContent() || !session || target->loggingOut()
+				|| SessionAccountKey(session) != key || session->termsLocked()) return;
+			const auto id = Window::SeparateId(not_null{ target });
+			const auto window = Core::App().ensureSeparateWindowFor(id);
+			new OpenCustomizeOnActivation(window, key);
+			if (weak) weak->closeLayer();
+		};
+		if (!_frames.current()) {
+			switchBuffer();
+			return;
+		}
+		clearSheet();
+		sheetTitle(u"Switch account with staged changes?"_q);
+		const auto keep = sheetButton(u"Keep editing"_q, [this] { returnToTree(); });
+		sheetButton(u"Review and apply"_q, [this, switchBuffer] {
+			_afterApply = switchBuffer;
+			showReview();
+		});
+		sheetButton(u"Discard and switch"_q, switchBuffer);
+		showSheet(keep);
+	}
+
 	void showHelp() {
 		clearSheet();
 		const auto title = Label(_sheet, u"Customize settings help"_q);
@@ -799,7 +1524,7 @@ private:
 		const auto row = selected();
 		if (row && !row->help.isEmpty()) addSheetWidget(Label(_sheet, row->help));
 		addSheetWidget(Label(_sheet, u"j / k Move · h / l Fold or enter · / Filter · Return Edit\n"
-			"t Toggle · + / − Step · r Reset · u Undo · y Copy TOML path\n"
+			"t Toggle · + / − Step · r Reset · u Undo · d Review · y Copy TOML path\n"
 			"F6 Change panel · Esc Back\nEdits are staged in memory."_q));
 		const auto close = Button(_sheet, u"Back"_q);
 		addSheetWidget(close);
@@ -809,7 +1534,7 @@ private:
 		close->setFocus();
 	}
 
-	void showForm(const Row &row) {
+	void showForm(Row row) {
 		clearSheet();
 		_editingKey = row.key;
 		const auto title = Label(_sheet, row.label);
@@ -864,6 +1589,9 @@ private:
 			addSheetWidget(_line);
 			focus = _line;
 			if (IsHotkey(descriptor)) addCaptureControls();
+			if (descriptor.id == SettingId::BudgetTarget) {
+				sheetButton(u"Choose budget chat"_q, [this, row] { pickBudgetChat(row); });
+			}
 			if (descriptor.codec == SettingCodec::Duration) {
 				_line->setPlaceholderText(u"Duration, e.g. 5m or off"_q);
 				addDurationControls(descriptor);
@@ -1070,10 +1798,18 @@ private:
 	void stage(Row row, std::optional<SettingScalar> value) {
 		if (!visibleContent()) return;
 		const auto frame = _frames.current();
-		auto edits = frame ? frame->edits : std::vector<SettingsEdit>();
-		const auto existing = std::find_if(edits.begin(), edits.end(), [&](const SettingsEdit &edit) {
-			return edit.address == row.address;
+		const auto previous = frame ? std::get_if<std::vector<SettingsEdit>>(&frame->intent) : nullptr;
+		if (frame && !previous) {
+			showIncompatibleDraft();
+			return;
+		}
+		auto edits = previous ? *previous : std::vector<SettingsEdit>();
+		const auto scalarOnly = std::all_of(edits.begin(), edits.end(), [](const SettingsEdit &edit) {
+			return std::holds_alternative<std::optional<SettingScalar>>(edit.operation);
 		});
+		const auto existing = scalarOnly ? std::find_if(edits.begin(), edits.end(), [&](const SettingsEdit &edit) {
+			return edit.address == row.address;
+		}) : edits.end();
 		if (existing == edits.end() && frame && frame->review->preview().route == SettingsEditorRoute::Peek) {
 			AnnounceError(_formStatus ? _formStatus : _feedback, u"Stage each Peek timing change separately."_q);
 			return;
@@ -1081,14 +1817,24 @@ private:
 		auto change = SettingsEdit{ row.address, std::move(value) };
 		if (existing == edits.end()) edits.push_back(std::move(change));
 		else *existing = std::move(change);
+		stageIntent(std::move(edits), row.key);
+	}
+
+	void stageIntent(SettingsEditorIntent intent, QString key) {
+		if (!visibleContent() || _applyInFlight) return;
 		const auto guard = QPointer(this);
 		const auto opening = _opening;
+		const auto frame = _frames.current();
 		const auto previous = frame ? frame->review : nullptr;
-		auto prepared = PrepareWindowSettingsEditorEdit(opening, edits);
+		auto prepared = PrepareWindowSettingsEditorEdit(opening, intent);
 		if (!guard || !visibleContent() || opening.origin != _opening.origin) return;
 		if (prepared.status == Status::Unchanged) {
 			_frames.push(std::nullopt);
 		} else if (!prepared.review) {
+			if (previous && prepared.status == Status::Unsupported) {
+				showIncompatibleDraft();
+				return;
+			}
 			AnnounceError(_formStatus ? _formStatus : _feedback, StatusText(prepared));
 			return;
 		} else {
@@ -1096,42 +1842,62 @@ private:
 				returnToTree();
 				return;
 			}
-			_frames.push(Draft{ std::move(edits), std::move(prepared.review) });
+			_frames.push(Draft{ std::move(intent), std::move(prepared.review) });
 		}
-		_anchor = filtering() ? row.key : QString();
-		_selection = row.key;
+		_anchor = filtering() ? key : QString();
+		_selection = std::move(key);
 		returnToTree();
-		if (!guard) return;
-		recaptureCleanDraft();
+		if (!guard || !recaptureCleanDraft()) return;
 		rebuild();
 		describeDraft(prepared.status);
 	}
 
-	void describeDraft(Status status = Status::Ready) {
+	void showIncompatibleDraft() {
 		const auto frame = _frames.current();
-		_feedback->setText(!frame ? u"No staged edits."_q
-			: status == Status::IncompleteTrace ? u"Staged. Some effective reads could not be verified."_q
-			: u"%1 staged · %2"_q.arg(frame->edits.size()).arg(frame->review->preview().path));
+		if (!frame) return;
+		const auto path = frame->review->preview().path;
+		if (_formBaseline) {
+			AnnounceError(_formStatus, u"Review or undo the current draft for %1 before staging a different purpose."_q.arg(path));
+			return;
+		}
+		clearSheet();
+		sheetTitle(u"Review the current destination first"_q);
+		addSheetWidget(Label(_sheet, Isolate(path)));
+		const auto keep = sheetButton(u"Keep editing"_q, [this] { returnToTree(); });
+		sheetButton(u"Review existing draft"_q, [this] { showReview(); });
+		sheetButton(u"Discard existing draft"_q, [this] { discardDraft(); });
+		showSheet(keep);
 	}
 
-	void recaptureCleanDraft() {
-		if (!SettingsDraft::ShouldRecapture(_draftStale, _frames.current())) return;
+	void describeDraft(Status status = Status::Ready) {
+		const auto frame = _frames.current();
+		const auto edits = frame ? std::get_if<std::vector<SettingsEdit>>(&frame->intent) : nullptr;
+		_feedback->setText(!frame ? u"No staged edits."_q
+			: status == Status::IncompleteTrace ? u"Staged. Some effective reads could not be verified."_q
+			: u"%1 staged · %2"_q.arg(edits ? edits->size() : 1).arg(frame->review->preview().path));
+	}
+
+	bool recaptureCleanDraft() {
+		if (!SettingsDraft::ShouldRecapture(_draftStale, _frames.current())) return true;
 		_frames.clear();
-		capture();
+		return capture();
 	}
 
 	void undo() {
 		if (_frames.canUndo()) {
 			_frames.undo();
-			recaptureCleanDraft();
+			if (!recaptureCleanDraft()) return;
 			rebuild();
 		}
 		describeDraft();
 	}
 
 	void back() {
+		if (_applyInFlight && visibleContent()) return;
 		if (_pages->currentWidget() == _sheetPage) {
-			closeForm();
+			const auto action = _sheetBack;
+			if (action) action();
+			else closeForm();
 		} else if (!visibleContent() || _resumeRefused || !_frames.current()) {
 			closeLayer();
 		} else {
@@ -1140,6 +1906,10 @@ private:
 			const auto keep = Button(_sheet, u"Keep editing"_q);
 			const auto discard = Button(_sheet, u"Discard and close"_q);
 			addSheetWidget(keep);
+			sheetButton(u"Review and apply"_q, [this] {
+				_afterApply = [weak = QPointer(this)] { if (weak) weak->closeLayer(); };
+				showReview();
+			});
 			addSheetWidget(discard);
 			connect(keep, &QPushButton::clicked, this, [this] { returnToTree(); });
 			connect(discard, &QPushButton::clicked, this, [this] { closeLayer(); });
@@ -1150,7 +1920,7 @@ private:
 	}
 
 	struct Draft {
-		std::vector<SettingsEdit> edits;
+		SettingsEditorIntent intent;
 		std::shared_ptr<SettingsEditorReview> review;
 	};
 
@@ -1166,6 +1936,7 @@ private:
 	QPushButton *_coverClose;
 	QLabel *_title;
 	QLabel *_subject;
+	QPushButton *_accountsButton;
 	QLineEdit *_filter;
 	QPushButton *_clear;
 	QTreeWidget *_tree;
@@ -1174,6 +1945,7 @@ private:
 	QPushButton *_edit;
 	QPushButton *_reset;
 	QPushButton *_undo;
+	QPushButton *_reviewButton;
 	QPushButton *_help;
 	QVBoxLayout *_sheetLayout;
 	SettingsEditorOpening _opening;
@@ -1195,7 +1967,17 @@ private:
 	QPushButton *_cancelCapture = nullptr;
 	QPointer<QWidget> _formFocus;
 	QPointer<QWidget> _formExit;
+	QPointer<QWidget> _collection;
+	rpl::lifetime _catalogueLifetime;
 	std::optional<SettingsDraft::FormValue> _formBaseline;
+	QPlainTextEdit *_reviewBody = nullptr;
+	QPointer<QLabel> _applyMessage;
+	QStringList _reviewPages;
+	Fn<void()> _sheetBack;
+	Fn<void()> _afterApply;
+	int _reviewPage = 0;
+	uint64_t _applySerial = 0;
+	bool _applyInFlight = false;
 	bool _pausedForm = false;
 	bool _capture = false;
 	bool _needsRefresh = false;
