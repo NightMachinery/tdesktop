@@ -121,7 +121,8 @@ void PeerListBox::createMultiSelect() {
 			: st::defaultMultiSelect),
 		placeholder ? std::move(placeholder) : tr::lng_participant_filter());
 	_select.create(this, std::move(entity));
-	Purple::InstallPickerFilter(this, _select->entity(), content());
+	Purple::InstallPickerFilter(this, _select->entity(), content(),
+		Purple::IsChatPaletteController(_controller.get()));
 	_select->heightValue(
 	) | rpl::on_next(
 		[this] { updateScrollSkips(); },
@@ -234,7 +235,8 @@ void PeerListBox::prepare() {
 }
 
 void PeerListBox::keyPressEvent(QKeyEvent *e) {
-	if (Purple::HandlePickerFilter(this, _select ? _select->entity() : nullptr, content(), e)) {
+	if (Purple::HandlePickerFilter(this, _select ? _select->entity() : nullptr, content(), e,
+		Purple::IsChatPaletteController(_controller.get()))) {
 		return;
 	} else if (e->key() == Qt::Key_Down) {
 		content()->selectSkip(1);

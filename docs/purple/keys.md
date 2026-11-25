@@ -185,17 +185,18 @@ native message menu includes live reaction and read-receipt details.
   the search field and results. With modal input enabled, hold `j` or `k` to
   move through the focused results.
 
-With modal keys on, a list's filter opens with `i`, `a`, `/`, or a click. A
-keyboard layout that types `/` with a modifier works too. Press `Esc`, `C-[`,
-or `C-g` in the filter to keep the query and return to the list. `Esc` in the
-list clears a non-empty query first and closes once the query is empty. `q`
-closes directly from the list. Command and chat palettes still open with the
-filter focused. In the Customize collection picker, use `i` or `/` to filter
-and `a` to add the selected chat.
+With modal keys on, enter a list's filter with `i`, `a`, `/`, or a click.
+A keyboard layout that types `/` with a modifier works too. In Unread, Help
+and All Bindings, Notice History, and the topic picker, `Esc`, `C-[`, or
+`C-g` returns from the filter to the list and keeps the query. From the
+list, `Esc` clears the query and keeps the highlighted item if it is still
+listed. `Esc` in an unfiltered list closes it and returns focus to its
+origin. `q` closes directly. In the Customize collection picker, use `i`
+or `/` to filter and `a` to add the selected chat.
 
-In All Bindings, M-x and Describe Command, `Esc` in the search field clears
-the query and moves focus to the results. Press `Esc` again to close.
-`F6` switches between M-x search and results while keeping the query.
+M-x, Describe Command, and chat palettes open with the search field
+focused. `Esc` closes these palettes in one press. `F6` switches between
+M-x search and results while keeping the query.
 Keypad Enter runs or describes the highlighted command, just like Return.
 
 With modal keyboard shortcuts off, **Option+X** on macOS (**Alt+X** elsewhere)
@@ -280,7 +281,8 @@ on the modal status line and cheatsheet footer.
   `INSERT` while typing and `UNREAD` in the list. `RET` opens the selected chat
   from either focus. The selection follows the chat as results narrow or move.
   If it is filtered out, the highlighted row moves to a nearby result.
-  Clearing the query returns to the original chat if it is still listed.
+  Clearing with `Esc` keeps the highlighted chat, or returns to the original
+  chat if the filter had no results.
   In the list, navigate with `j`/`k`, `C-n`/`C-p`, `g g`, or `G`, refresh with
   `g r`, mark with `m` / `u` / `U` / `t` / `* d` / `* g` / `* c`, open with `o`,
   and mark read with `r` or `x`. Marking more than one
@@ -356,8 +358,9 @@ on the modal status line and cheatsheet footer.
   still use the status line or a toast. `SPC h e` reopens recent
   per-account notices in a memory-only `*Messages*` list that clears on logout
   and is unavailable while passcode-locked or under the privacy screen.
-  Filtering keeps the selected notice in view when possible. Clearing the
-  query returns to the original notice.
+  Filtering keeps the selected notice in view when possible. Clearing with
+  `Esc` keeps the highlighted notice, or returns to the original notice
+  if the filter had no results.
   Archive removal warnings contain no account details and are shared across
   accounts, including after logout. Clearing the displayed history also
   clears its pending notices. Passcode lock, screen lock, and the privacy

@@ -1995,6 +1995,7 @@ public:
 	void setStatusMessage(QString text, bool isError, int durationMs, bool persistent);
 	void refreshNoticeIndicator();
 	void showNoticeLayer(std::unique_ptr<Ui::LayerWidget> layer, bool isHistory);
+	void closeFilterLayer(not_null<Ui::LayerWidget*> layer);
 
 protected:
 	bool eventFilter(QObject *watched, QEvent *event) override;
@@ -2042,7 +2043,8 @@ private:
 	void showDescribeKeyResult(const Chord &chord, const Target &target);
 	void showDescribeCommandResult(Action action, const Target &target);
 	void showPalette(bool describe, const Target &target, bool fromInsert);
-	void showKeyLayer(std::unique_ptr<Ui::LayerWidget> layer);
+	void showKeyLayer(std::unique_ptr<Ui::LayerWidget> layer, bool rememberFocus = false);
+	void rememberFilterFocus(not_null<Ui::LayerWidget*> layer);
 	void closeKeyLayers();
 	void watchUserKeymap();
 
@@ -2051,6 +2053,8 @@ private:
 	ModalStatusLayout _statusLayout;
 	QPointer<ModalUi::WhichKeyOverlay> _whichKey;
 	QPointer<Ui::LayerWidget> _hintHydra;
+	QPointer<Ui::LayerWidget> _filterFocusLayer;
+	Fn<void()> _restoreFilterFocus;
 	QPointer<QTextEdit> _normalComposer;
 	QPointer<QWidget> _preeditInput;
 	struct ChatCursor {
@@ -2976,6 +2980,9 @@ void Keys::showNoticeLayer(std::unique_ptr<Ui::LayerWidget> layer, bool isHistor
 	++_noticePresentation;
 	_pendingFlushLayer = nullptr;
 	_noticeLayers.emplace_back(raw, kind);
+	if (isHistory) {
+		rememberFilterFocus(raw);
+	}
 	layer->lifetime().add([guard, raw] {
 		if (!guard) {
 			return;
@@ -3130,7 +3137,7 @@ void Keys::showUnreadBuffer(const Target &target) {
 			guard->refreshStatusBar();
 		}
 	});
-	showKeyLayer(std::move(layer));
+	showKeyLayer(std::move(layer), true);
 	refreshStatusBar();
 }
 
@@ -3267,7 +3274,7 @@ void Keys::showTopicPicker(bool unreadOnly, const Target &target) {
 			guard->refreshStatusBar();
 		}
 	});
-	showKeyLayer(std::move(layer));
+	showKeyLayer(std::move(layer), true);
 	refreshStatusBar();
 }
 
@@ -3468,7 +3475,7 @@ void Keys::refreshStatusBar() {
 				{ u"j/k"_q, u"move"_q },
 				{ u"RET"_q, u"run"_q },
 				{ u"i or /"_q, u"filter"_q },
-				{ u"q"_q, u"close"_q },
+				{ u"ESC"_q, u"close"_q },
 			};
 			break;
 		case ActiveLayer::DescribeCommandPicker:
@@ -3479,7 +3486,7 @@ void Keys::refreshStatusBar() {
 				{ u"j/k"_q, u"move"_q },
 				{ u"RET"_q, u"inspect"_q },
 				{ u"i or /"_q, u"filter"_q },
-				{ u"q"_q, u"close"_q },
+				{ u"ESC"_q, u"close"_q },
 			};
 			break;
 		case ActiveLayer::DescribeKey:
@@ -3564,7 +3571,7 @@ void Keys::refreshStatusBar() {
 				state.hints = {
 					{ u"TAB"_q, u"cheatsheet"_q },
 					{ u"C-n/C-p"_q, u"scroll"_q },
-					{ u"ESC"_q, u"clear/list"_q },
+					{ u"ESC"_q, u"list"_q },
 				};
 			} else {
 				state.hints = {
@@ -3572,7 +3579,7 @@ void Keys::refreshStatusBar() {
 						: (layer == ActiveLayer::DescribeCommandPicker) ? u"inspect"_q : u"open"_q },
 					{ u"C-n/C-p"_q, u"move"_q },
 					{ u"ESC"_q, (layer == ActiveLayer::Palette || layer == ActiveLayer::DescribeCommandPicker)
-						? u"clear/list"_q : u"list"_q },
+						? u"close"_q : u"list"_q },
 				};
 				if (layer == ActiveLayer::Palette) {
 					state.hints.insert(state.hints.begin() + 2, { u"M-p/M-n"_q, u"history"_q });
@@ -5140,7 +5147,7 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 			guard->refreshStatusBar();
 		}
 	});
-	showKeyLayer(std::move(layer));
+	showKeyLayer(std::move(layer), true);
 	refreshStatusBar();
 }
 
@@ -5453,9 +5460,46 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 	showKeyLayer(std::move(layer));
 }
 
-void Keys::showKeyLayer(std::unique_ptr<Ui::LayerWidget> layer) {
+void Keys::rememberFilterFocus(not_null<Ui::LayerWidget*> layer) {
+	_filterFocusLayer = layer.get();
+	const auto origin = QPointer(windowFocusWidget());
+	const auto original = base::make_weak(owner());
+	const auto guard = QPointer(this);
+	const auto revision = _revision;
+	_restoreFilterFocus = [=] {
+		if (guard && original && guard->owner() == original.get()
+			&& revision == guard->_revision && origin && origin->isVisible()
+			&& origin->isEnabled() && !guard->_window->controller().isLayerShown()) {
+			origin->setFocus(Qt::OtherFocusReason);
+		}
+	};
+}
+
+void Keys::closeFilterLayer(not_null<Ui::LayerWidget*> layer) {
+	if (_filterFocusLayer == layer.get()) {
+		const auto stack = dynamic_cast<Ui::LayerStackWidget*>(layer->parentWidget());
+		if (stack && stack->topShownLayer() == layer.get()) {
+			auto restore = std::move(_restoreFilterFocus);
+			if (restore) {
+				QObject::connect(stack, &QObject::destroyed, this, [this, restore] {
+					QTimer::singleShot(0, this, restore);
+				});
+			}
+		}
+		_filterFocusLayer = nullptr;
+		_restoreFilterFocus = nullptr;
+	}
+	layer->closeLayer();
+}
+
+void Keys::showKeyLayer(
+		std::unique_ptr<Ui::LayerWidget> layer,
+		bool rememberFocus) {
 	std::erase_if(_keyLayers, [](const auto &entry) { return !entry; });
 	_keyLayers.emplace_back(layer.get());
+	if (rememberFocus) {
+		rememberFilterFocus(layer.get());
+	}
 	_window->showOrHideBoxOrLayer(
 		std::move(layer),
 		Ui::LayerOption::KeepOther,
@@ -5512,6 +5556,15 @@ bool AllowModalLayerKey(const QKeyEvent &event, not_null<QWidget*> layer, bool m
 	const auto window = dynamic_cast<MainWindow*>(layer->window());
 	const auto keys = window ? FindKeys(window) : nullptr;
 	return keys ? keys->layerKey(event, layer, motion) : !event.isAutoRepeat();
+}
+
+void CloseModalFilterLayer(not_null<Ui::LayerWidget*> layer) {
+	const auto window = dynamic_cast<MainWindow*>(layer->window());
+	if (const auto keys = window ? FindKeys(window) : nullptr) {
+		keys->closeFilterLayer(layer);
+	} else {
+		layer->closeLayer();
+	}
 }
 
 void ScrollModalLayer(

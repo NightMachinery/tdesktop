@@ -237,7 +237,7 @@ void ClearListFilterOrClose(
 		not_null<Ui::LayerWidget*> layer,
 		not_null<Ui::InputField*> field) {
 	if (field->getLastText().isEmpty()) {
-		layer->closeLayer();
+		CloseModalFilterLayer(layer);
 	} else {
 		field->setText(QString());
 	}
@@ -907,7 +907,6 @@ public:
 			if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
 				if (AllowModalLayerKey(*k, this)) {
 					if (ModalKeysEnabled()) {
-						_filter->setText(QString());
 						setFocus();
 					} else {
 						closeLayer();
@@ -980,7 +979,7 @@ protected:
 			ClearListFilterOrClose(this, _filter);
 			return;
 		} else if (ListFilter::Exit(key, mods, modal) || (modal && key == Qt::Key_Q && !mods)) {
-			closeLayer();
+			CloseModalFilterLayer(this);
 			return;
 		} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
 			toggleTab();
@@ -1083,7 +1082,7 @@ protected:
 		const auto leftHint = !ModalKeysEnabled()
 			? u"TAB switch view · ↑/↓ scroll · Esc close"_q
 			: (_showAll && _filter->hasFocus())
-			? u"TAB cheatsheet · C-n/C-p scroll · Esc clear and return"_q
+			? u"TAB cheatsheet · C-n/C-p scroll · Esc list"_q
 			: u"TAB switch view · j/k scroll · i or / filter · q close"_q;
 		const auto hintWidth = width() / 2 - 20;
 		p.drawText(
@@ -1678,14 +1677,7 @@ public:
 					? base::EventFilterResult::Continue
 					: base::EventFilterResult::Cancel;
 			} else if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
-				if (AllowModalLayerKey(*k, this)) {
-					if (ModalKeysEnabled()) {
-						_input->setText(QString());
-						setFocus();
-					} else {
-						cancel();
-					}
-				}
+				if (AllowModalLayerKey(*k, this)) cancel();
 				return base::EventFilterResult::Cancel;
 			} else if (key == Qt::Key_F6 && !mods) {
 				if (AllowModalLayerKey(*k, this)) setFocus();
@@ -1719,13 +1711,7 @@ protected:
 		} else if (ListFilter::Submit(key)) {
 			if (AllowModalLayerKey(*event, this)) activateRow(_selected);
 		} else if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
-			if (AllowModalLayerKey(*event, this)) {
-				if (ModalKeysEnabled() && !_input->getLastText().isEmpty()) {
-					_input->setText(QString());
-				} else {
-					cancel();
-				}
-			}
+			if (AllowModalLayerKey(*event, this)) cancel();
 		} else if (ModalKeysEnabled() && key == Qt::Key_Q && !mods) {
 			if (AllowModalLayerKey(*event, this)) cancel();
 		} else if ((key == Qt::Key_F6 && !mods)
@@ -1832,8 +1818,8 @@ protected:
 		const auto footer = !ModalKeysEnabled()
 			? u"C-n/C-p move · %1 · F6 search/list · Esc close"_q.arg(activate)
 			: _input->hasFocus()
-			? u"C-n/C-p move · %1 · Esc clear and return"_q.arg(activate)
-			: u"j/k move · %1 · i or / filter · q close"_q.arg(activate);
+			? u"C-n/C-p move · %1 · Esc close"_q.arg(activate)
+			: u"j/k move · %1 · i or / filter · Esc close"_q.arg(activate);
 		p.drawText(
 			footerRect.adjusted(14, 0, -14, 0),
 			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
@@ -2387,6 +2373,7 @@ protected:
 		}
 
 		if (ListFilter::Exit(key, mods)) {
+			if (_selected >= 0) _selection.keepCurrentOnClear();
 			ClearListFilterOrClose(this, _filter);
 			return;
 		} else if (ListFilter::Enter(*e, key)) {
@@ -3132,6 +3119,7 @@ protected:
 			}
 		}
 		if (ListFilter::Exit(key, mods)) {
+			if (_selected >= 0) _selection.keepCurrentOnClear();
 			ClearListFilterOrClose(this, _filter);
 			return;
 		} else if (ListFilter::Enter(*e, key)) {
@@ -3316,9 +3304,9 @@ private:
 	}
 
 	void refilter(bool preserveScroll, MsgId keepRootId) {
-		const auto tokens = ModalMx::ParseTokens(_filter->getLastText());
+		const auto query = _filter->getLastText();
+		const auto tokens = ModalMx::ParseTokens(query);
 		_visible.clear();
-		auto restoredSelected = -1;
 		for (auto i = 0; i < int(_config.items.size()); ++i) {
 			const auto &it = _config.items[i];
 			if (_unreadOnly && it.unreadCount <= 0 && it.mentions <= 0) {
@@ -3334,21 +3322,22 @@ private:
 					continue;
 				}
 			}
-			if (keepRootId != 0 && it.rootId == keepRootId) {
-				restoredSelected = int(_visible.size());
-			}
 			_visible.push_back(i);
 		}
-		if (restoredSelected >= 0) {
-			_selected = restoredSelected;
-		} else {
-			_selected = std::clamp(_selected, 0, std::max(0, int(_visible.size()) - 1));
-		}
+		_selected = _selection.refilter(
+			_visible,
+			(keepRootId != 0) ? std::make_optional(keepRootId) : std::nullopt,
+			_selected,
+			!query.isEmpty(),
+			[&](int index) { return _config.items[index].rootId; });
 		if (_rows) {
 			_rows->setData(_config.items, _visible, _selected);
 			_rows->setStatus(_hasMore, _loadTimeout.isActive());
 		}
-		if (!preserveScroll) {
+		if (!preserveScroll && !_visible.empty()) {
+			const auto top = 4 + _selected * TopicRowsWidget::kRowHeight;
+			_scroll->scrollToY(top, top + TopicRowsWidget::kRowHeight);
+		} else if (!preserveScroll) {
 			_scroll->scrollToY(0);
 		}
 		update();
@@ -3387,6 +3376,7 @@ private:
 	}
 
 	TopicPickerConfig _config;
+	ListSelection<MsgId> _selection;
 	bool _unreadOnly = false;
 	bool _hasMore = false;
 	QTimer _loadTimeout;
@@ -4291,6 +4281,7 @@ protected:
 			}
 		}
 		if (ListFilter::Exit(key, mods)) {
+			if (_selected >= 0) _selection.keepCurrentOnClear();
 			ClearListFilterOrClose(this, _filter);
 			return;
 		} else if (ListFilter::Enter(*e, key)) {

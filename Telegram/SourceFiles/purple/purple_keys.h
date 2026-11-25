@@ -35,6 +35,7 @@ namespace Purple {
 	const QKeyEvent &event,
 	not_null<QWidget*> layer,
 	bool motion = false);
+void CloseModalFilterLayer(not_null<Ui::LayerWidget*> layer);
 void ScrollModalLayer(
 	const QKeyEvent &event,
 	not_null<QWidget*> layer,

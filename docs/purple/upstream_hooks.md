@@ -177,7 +177,8 @@ the numbers.
 ## Recipient picker visibility
 
 - `boxes/peer_list_box.cpp` shares the modal filter entry and exit keys with
-  the chat palette and searchable peer pickers.
+  the chat palette and searchable peer pickers. The handler receives the
+  chat-palette classification so pressing Escape closes it directly.
 
 - `boxes/share_box.cpp`: candidate guards for default, folder-filtered and server
   search sources, plus two calls and a friend declaration for the owned share
