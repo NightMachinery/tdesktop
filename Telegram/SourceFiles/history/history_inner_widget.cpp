@@ -2935,7 +2935,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		return item;
 	};
 	const auto leaderOrSelf = groupLeaderOrSelf(_dragStateItem);
-	const auto hasWhoReactedItem = leaderOrSelf
+	const auto hasWhoReactedItem = !Purple::CapturingHintMenu(e) && leaderOrSelf
 		&& Api::WhoReactedExists(leaderOrSelf, Api::WhoReactedList::All);
 	using namespace HistoryView::Reactions;
 	const auto clickedReaction = ReactionIdOfLink(link);
@@ -3921,7 +3921,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			this,
 			leaderOrSelf,
 			_controller);
-	} else if (leaderOrSelf) {
+	} else if (leaderOrSelf && !Purple::CapturingHintMenu(e)) {
 		HistoryView::MaybeAddWhenEditedForwardedAction(
 			_menu,
 			leaderOrSelf,
@@ -3968,6 +3968,9 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	}
 
 	Purple::AddSelfDestructSaveAction(_menu.get(), leaderOrSelf);
+	if (Purple::CaptureHintMenu(e, _menu)) {
+		return;
+	}
 	if (_menu->empty()) {
 		_menu = nullptr;
 		return;

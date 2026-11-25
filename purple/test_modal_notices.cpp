@@ -1,5 +1,6 @@
 #include "purple/purple_notice_state.h"
 #include "purple/purple_diagnostics.h"
+#include "purple/purple_list_selection.h"
 
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -26,6 +27,41 @@ void Check(bool ok, const std::string &name) {
 } // namespace
 
 int main() {
+	{
+		auto keys = NoticeKeys();
+		keys.pendingG = true;
+		Check(keys.escape() == NoticeEscape::CancelPrefix && !keys.pendingG,
+			"g Escape clears the prefix and keeps the notice and its buttons open");
+		keys.showHelp = true;
+		keys.pendingG = true;
+		Check(keys.escape() == NoticeEscape::CancelPrefix && keys.showHelp,
+			"Escape leaves help visible when a prefix owns the gesture");
+		Check(keys.escape() == NoticeEscape::HideHelp && !keys.showHelp,
+			"Escape dismisses expanded help and keeps the notice open");
+		Check(keys.escape() == NoticeEscape::Close,
+			"Escape only closes after the prefix and help are gone");
+	}
+	{
+		using Identity = std::pair<QString, uint64_t>;
+		const auto account = QStringLiteral("account");
+		const auto app = QStringLiteral("app");
+		const auto identities = std::vector<Identity>{
+			{ app, 3 }, { account, 1 }, { app, 1 }, { account, 3 },
+		};
+		const auto all = std::vector<int>{ 0, 1, 2, 3 };
+		const auto two = std::vector<int>{ 0, 3 };
+		const auto at = [&](int index) { return identities[index]; };
+		auto selection = Purple::ListSelection<Identity>();
+		const auto narrowed = selection.refilter(two, at(3), 3, true, at);
+		Check(narrowed == 1 && at(two[narrowed]) == Identity(account, 3),
+			"history retains the account-qualified identity when two scopes share the ID");
+		const auto widened = selection.refilter(all, at(3), narrowed, false, at);
+		Check(widened == 3 && at(all[widened]) == Identity(account, 3),
+			"clearing the filter restores the original history row and its action target");
+		const auto filteredOut = std::vector<int>{ 0, 2 };
+		Check(selection.refilter(filteredOut, at(3), 3, true, at) == 1,
+			"an app notice with the same ID cannot take the account notice's selection");
+	}
 	{
 		namespace Diagnostic = Purple::Diagnostics;
 		auto scratch = QTemporaryDir();

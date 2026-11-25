@@ -37,6 +37,7 @@ namespace Purple {
 void ToggleZenChatList(not_null<Window::SessionController*> controller);
 
 [[nodiscard]] bool HandleModalKeys(QObject *receiver, QEvent *event);
+[[nodiscard]] bool HandleModalWindowHints(QWidget *receiver, QEvent *event);
 [[nodiscard]] int ModalPhysicalKey(const QKeyEvent &event);
 [[nodiscard]] bool AllowModalLayerKey(
 	const QKeyEvent &event,
@@ -58,6 +59,7 @@ void ModalFullscreenChanged(not_null<MainWindow*> window, bool fullscreen);
 void EnsureModalKeysAttached(not_null<MainWindow*> window);
 [[nodiscard]] int ModalKeysStatusHeight(not_null<MainWindow*> window);
 void UpdateModalKeysLayout(not_null<MainWindow*> window, QRect body);
+void RefreshModalKeysColumns(not_null<MainWindow*> window);
 void RaiseModalKeysChrome(not_null<MainWindow*> window);
 
 void InstallMainMenuKeys(

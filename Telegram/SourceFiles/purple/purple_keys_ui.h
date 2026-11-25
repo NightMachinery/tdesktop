@@ -6,6 +6,7 @@
 #include "purple/purple_keys_mx.h"
 #include "purple/purple_keys_unread.h"
 #include "purple/purple_notice_state.h"
+#include "purple/purple_status_bar.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/rp_widget.h"
 
@@ -22,42 +23,14 @@ class Session;
 
 namespace Purple::ModalUi {
 
-enum class BadgeKind {
-	Normal,
-	Insert,
-	Leader,
-	Local,
-	Hints,
-	Palette,
-	DescribeKey,
-	Help,
-};
-
-struct StatusState {
-	BadgeKind badge = BadgeKind::Normal;
-	QString badgeText;
-	QString paneLabel;
-	QString contextChip;
-	QString pendingText;
-	QString pendingGroup;
-	QString message;
-	bool messageIsError = false;
-	QString localleaderHint;
-	QString rightCue;
-	int unreadDm = 0;
-	int unreadGp = 0;
-	int unreadCh = 0;
-	bool unreadKnown = false;
-	bool zenMode = false;
-};
-
 class ModalStatusBar final : public Ui::RpWidget {
 public:
 	explicit ModalStatusBar(not_null<QWidget*> parent);
 
-	static constexpr int kHeight = 28;
+	[[nodiscard]] static int PreferredHeight();
 
 	void setState(StatusState state);
+	void setColumns(StatusColumns columns);
 	[[nodiscard]] const StatusState &state() const { return _state; }
 
 protected:
@@ -65,6 +38,7 @@ protected:
 
 private:
 	StatusState _state;
+	StatusColumns _columns;
 };
 
 struct WhichKeyEntry {

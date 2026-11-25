@@ -1,4 +1,5 @@
 #include "purple/purple_keys_unread.h"
+#include "purple/purple_list_selection.h"
 
 #include <iostream>
 #include <string>
@@ -88,9 +89,39 @@ int main() {
 
 		const auto byHandle = FilterBufferItems(items, QStringLiteral("@alice"));
 		Check(byHandle.size() == 1 && items[byHandle[0]].peerId == 10, "username handle filter");
+		const auto selected = SelectedPeer(items, all, 1);
+		auto selection = Purple::ListSelection<uint64_t>();
+		const auto peerAt = [&](int index) { return items[index].peerId; };
+		Check(selected == 40 && selection.refilter(bots, selected, 1, true, peerAt) == 0,
+			"narrowing retains the selected chat by peer ID");
+		Check(selection.refilter(all, selected, 0, false, peerAt) == 1,
+			"clearing a filter follows the chat to its broader-list row");
+		const auto fourthPeer = SelectedPeer(items, all, 3);
+		auto marks = QSet<uint64_t>();
+		ApplyMarkOp(marks, items, all, 3, MarkOp::MarkOne);
+		const auto dms = FilterBufferItems(items, QStringLiteral("dm"));
+		const auto dmsRow = selection.refilter(dms, fourthPeer, 3, true, peerAt);
+		Check(dms.size() == 2 && SelectedPeer(items, dms, dmsRow) == fourthPeer,
+			"narrowing from row four to two results follows the chat");
+		const auto narrow = selection.refilter(forum, fourthPeer, 3, true, peerAt);
+		Check(SelectedPeer(items, forum, narrow) == 20,
+			"a filtered-out selection falls back to a visible row");
+		const auto clear = selection.refilter(all, uint64_t(20), narrow, false, peerAt);
+		Check(clear == 3 && SelectedPeer(items, all, clear) == fourthPeer,
+			"clearing restores row four and Return opens that peer");
+		Check(marks.contains(fourthPeer) && !marks.contains(20),
+			"filtering keeps the mark on the original peer");
+		Check(selection.refilter({}, fourthPeer, 3, true, peerAt) == -1,
+			"zero matches have no actionable row");
+		Check(selection.refilter(all, {}, -1, false, peerAt) == 3,
+			"clearing zero matches restores the same anchor");
+		std::swap(items[1].lastTimestamp, items[3].lastTimestamp);
+		const auto refreshed = FilterBufferItems(items, QString());
+		Check(selection.refilter(refreshed, selected, 1, false, peerAt) == 0,
+			"refresh follows the chat after ordering changes");
 
 		// 4. Mark operations.
-		QSet<uint64_t> marks;
+		marks.clear();
 		ApplyMarkOp(marks, items, all, 0, MarkOp::MarkOne);
 		Check(marks.contains(20) && marks.size() == 1, "mark one");
 		ApplyMarkOp(marks, items, all, 0, MarkOp::ToggleOne);
@@ -109,6 +140,30 @@ int main() {
 		Check(!NeedsMarkReadConfirmation(1), "1 chat does not require confirmation");
 		Check(NeedsMarkReadConfirmation(2), "2 chats requires confirmation");
 		Check(NeedsMarkReadConfirmation(5), "5 chats requires confirmation");
+	}
+
+	{
+		auto unread = std::vector<bool>{ false, false };
+		const auto search = [&](TopicPages pages, int current) {
+			return FindNextUnreadTopic(int(unread.size()), current, pages, [&](int index) {
+				return unread[index];
+			});
+		};
+		Check(search(TopicPages::Partial, 0) == TopicSearch(TopicPages::Partial),
+			"a loaded page of read topics does not rule out unread topics on the next page");
+		unread.push_back(true);
+		Check(search(TopicPages::Complete, 0) == TopicSearch(2),
+			"the next search finds the unread topic after another page loads");
+		Check(search(TopicPages::Partial, 2) == TopicSearch(2),
+			"search still wraps when a partially loaded forum has an unread topic");
+		unread.pop_back();
+		Check(search(TopicPages::Complete, -1) == TopicSearch(TopicPages::Complete),
+			"a completed list with no unread topics is conclusive");
+		Check(search(TopicPages::Failed, -1) == TopicSearch(TopicPages::Failed),
+			"a failed request does not report that every topic is read");
+		unread.clear();
+		Check(search(TopicPages::Partial, -1) == TopicSearch(TopicPages::Partial),
+			"search before the first page arrives is incomplete");
 	}
 
 	std::cout << gChecks << " checks, " << gFailures << " failures\n";

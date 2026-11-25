@@ -625,6 +625,18 @@
       ]
     },
     {
+      "name": "test_status_bar",
+      "driver": "purple/test_status_bar.sh",
+      "compiles": true,
+      "coverage": "Offscreen status bar contrast, column and composer alignment, and mode geometry",
+      "args": [
+        "{out}"
+      ],
+      "fixtures": [
+        "purple/test_status_bar.cpp"
+      ]
+    },
+    {
       "name": "test_sync_history_page",
       "driver": "purple/test_sync_history_page.sh",
       "compiles": true,

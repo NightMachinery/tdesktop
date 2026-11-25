@@ -42,7 +42,8 @@ the numbers.
   `window/window_session_controller.*`: keeps the chat list and folder strip
   available in Zen fullscreen and hides the third column. The Zen chat-list
   toggle also hides the folder strip and its side shadow. Its resized width
-  is temporary.
+  is temporary. Each layout pass refreshes the modal status segments from
+  the live widget bounds and divider positions.
 - `history/view/history_view_top_bar_widget.cpp`: adds the Zen chat list action
   to the chat header menu.
 - `window/window_adaptive.*`: uses normal bubble and date alignment in
@@ -83,7 +84,8 @@ the numbers.
 - `history/history_widget.h`, `history/view/history_view_chat_section.h`,
   `history/view/history_view_scheduled_section.h`, and
   `history/view/controls/history_view_compose_controls.h` grant the attachment
-  shortcut access to the native pickers and their attachment controls.
+  shortcut access to the native pickers and their attachment controls. That
+  access also locates the composer anchors for the status text.
 - `history/view/history_view_list_widget.*`: visible enumeration, layout
   cancellation and focus preservation for hint selection.
 - `history/view/history_view_message.*` and `iv/markdown/iv_markdown_article*`:
@@ -91,6 +93,11 @@ the numbers.
   including clipping by collapsed details and scrollable article blocks.
 - `history/history_inner_widget.cpp` and `history/view/history_view_list_widget.cpp`:
   accept an explicit hinted item in the native keyboard context menu path.
+- `history/history_inner_widget.cpp` and `history/view/history_view_context_menu.*`:
+  give the hint actions access to the native message menu before popup and
+  defer read receipt and reaction metadata lookups to the full native menu.
+- `dialogs/dialogs_inner_widget.*` and `window/window_filters_menu.*`: give the
+  hint actions access to the native chat, Archive, and folder menu builders.
 - `window/section_widget.cpp`: repaint subscription and an early solid-color
   paint for live history when wallpaper artwork is hidden.
 - `window/window_session_controller.cpp`: applies the live chat style through
@@ -180,6 +187,9 @@ the numbers.
   for the birthday-triggered gift button in both composers.
 
 ## Recipient picker visibility
+
+- `boxes/peer_list_box.cpp` shares the modal filter entry and exit keys with
+  the chat palette and searchable peer pickers.
 
 - `boxes/share_box.cpp`: candidate guards for default, folder-filtered and server
   search sources, plus two calls and a friend declaration for the owned share
@@ -2069,6 +2079,12 @@ worker's pending database transactions. The existing playlist menu hook in
 - `boxes/peers/edit_forum_topic_box.cpp`: refreshes the edited bot thread by
   ID after a successful or already-applied edit. The normal topic update
   notifies the stock header and Purple topic picker.
+
+### Forum topic paging
+
+- `data/data_forum.{h,cpp}` exposes whether the last page request failed.
+  The next-unread command uses it because the stock list is marked loaded
+  on both completion and failure. Reload clears the failure flag.
 
 ### Per-chat translation exclusion
 

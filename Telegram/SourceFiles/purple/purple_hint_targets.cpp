@@ -1,4 +1,5 @@
 #include "purple/purple_hint_targets.h"
+#include "purple/purple_hint_item_identity.h"
 
 #include "data/data_forum_topic.h"
 #include "data/data_peer.h"
@@ -11,9 +12,15 @@
 #include "overview/overview_layout.h"
 #include "ui/abstract_button.h"
 #include "ui/controls/send_button.h"
+#include "ui/widgets/menu/menu_add_action_callback_factory.h"
+#include "ui/widgets/popup_menu.h"
+#include "window/window_peer_menu.h"
+
+#include "styles/style_chat.h"
 
 #include <QtGui/QMouseEvent>
 #include <QtWidgets/QAbstractButton>
+#include <QtWidgets/QAbstractItemView>
 #include <QtWidgets/QApplication>
 
 #include <optional>
@@ -48,12 +55,26 @@ public:
 				.bounds = bounds,
 				.name = list->accessibilityChildName(index),
 				.mainList = true,
+				.kind = WindowHintTarget::Kind::Chat,
 				.current = current,
 				.activate = [=] {
 					if (guard->selectChildByIndex(index) && guard && filter == guard->_filterId
 						&& At(guard, index) == identity) {
 						guard->chooseRow();
 					}
+				},
+				.nativeMenu = [=] {
+					const auto key = Key(guard, index);
+					if (!key) {
+						return WindowHintTarget::Menu();
+					}
+					auto menu = base::make_unique_q<Ui::PopupMenu>(guard, st::popupMenuExpandedSeparator);
+					Window::FillDialogsEntryMenu(guard->_controller, {
+						.key = key,
+					.section = Dialogs::EntryState::Section::ContextMenu,
+						.filterId = filter,
+					}, Ui::Menu::CreateAddActionCallback(menu));
+					return menu;
 				},
 			});
 		}
@@ -70,16 +91,13 @@ private:
 
 	static Identity At(Dialogs::InnerWidget *list, int index) {
 		auto result = Identity{ .token = list->accessibilityChildIdentity(index) };
-		auto key = Dialogs::Key();
-		if (const auto ref = list->defaultChildAt(index);
-			list->_state == Dialogs::WidgetState::Default && ref && ref->row) {
-			key = ref->row->key();
-		} else if (const auto ref = list->filteredChildAt(index);
+		auto key = Key(list, index);
+		if (const auto ref = list->filteredChildAt(index);
 			list->_state == Dialogs::WidgetState::Filtered && ref) {
 			using Cohort = Dialogs::InnerWidget::AccessibilityCohort;
 			switch (ref->cohort) {
 			case Cohort::Hashtag: break;
-			case Cohort::Filtered: key = list->_filterResults[ref->local].key(); break;
+			case Cohort::Filtered: break;
 			case Cohort::PeerSearch: return {};
 			case Cohort::Preview:
 			case Cohort::Searched: {
@@ -101,6 +119,21 @@ private:
 			result.topic = topic->rootId();
 		}
 		return result;
+	}
+
+	static Dialogs::Key Key(Dialogs::InnerWidget *list, int index) {
+		if (list->_state == Dialogs::WidgetState::Default) {
+			const auto ref = list->defaultChildAt(index);
+			if (ref) {
+				return ref->row ? ref->row->key() : list->purpleHintCollapsedRow(ref->collapsed);
+			}
+		} else if (list->_state == Dialogs::WidgetState::Filtered) {
+			const auto ref = list->filteredChildAt(index);
+			if (ref && ref->cohort == Dialogs::InnerWidget::AccessibilityCohort::Filtered) {
+				return list->_filterResults[ref->local].key();
+			}
+		}
+		return {};
 	}
 };
 
@@ -150,6 +183,46 @@ public:
 
 namespace {
 
+void AddItemView(QAbstractItemView *view, std::vector<WindowHintTarget> &out) {
+	const auto viewport = view->viewport();
+	const auto origin = viewport->mapToGlobal(QPoint());
+	const auto visible = WindowHintClip(viewport).translated(-origin);
+	auto seen = QSet<QPersistentModelIndex>();
+	const auto step = std::max(1, st::lineWidth * 8);
+	for (auto y = visible.top(); y <= visible.bottom(); y += step) {
+		for (auto x = visible.left(); x <= visible.right(); x += step) {
+			const auto index = QPersistentModelIndex(view->indexAt(QPoint(x, y)));
+			if (!index.isValid() || seen.contains(index) || !index.flags().testFlag(Qt::ItemIsEnabled)) {
+				continue;
+			}
+			seen.insert(index);
+			const auto row = view->visualRect(index).intersected(visible);
+			if (row.isEmpty()) {
+				continue;
+			}
+			const auto local = row.center();
+			const auto identity = HintItemIdentity{ view, viewport, index, origin, local };
+			out.push_back({
+				.widget = viewport,
+				.bounds = row.translated(origin),
+				.name = index.data().toString(),
+				.current = [=] { return identity.current(); },
+				.activate = [=] { ClickWindowHint(viewport, local); },
+			});
+		}
+	}
+}
+
+class FolderHintMenu final : public QObject {
+public:
+	FolderHintMenu(QWidget *button, WindowHintTarget::MenuBuilder builder)
+	: QObject(button)
+	, build(std::move(builder)) {
+	}
+
+	WindowHintTarget::MenuBuilder build;
+};
+
 void AddButton(QWidget *widget, QRect clip, std::vector<WindowHintTarget> &out) {
 	const auto button = dynamic_cast<Ui::AbstractButton*>(widget);
 	const auto qt = qobject_cast<QAbstractButton*>(widget);
@@ -166,10 +239,16 @@ void AddButton(QWidget *widget, QRect clip, std::vector<WindowHintTarget> &out) 
 	const auto name = widget->accessibleName().isEmpty()
 		? (button ? button->accessibilityName() : qt->text())
 		: widget->accessibleName();
+	const auto folder = ranges::find_if(widget->children(), [](QObject *child) {
+		return dynamic_cast<FolderHintMenu*>(child) != nullptr;
+	});
+	const auto folderMenu = (folder == widget->children().end())
+		? nullptr : static_cast<FolderHintMenu*>(*folder);
 	out.push_back({
 		.widget = widget,
 		.bounds = clip,
 		.name = name,
+		.kind = folderMenu ? WindowHintTarget::Kind::Folder : WindowHintTarget::Kind::Control,
 		.current = [=] {
 			return guard && (!button || !button->isDisabled())
 				&& (!send || send->state() == *sendState);
@@ -181,10 +260,15 @@ void AddButton(QWidget *widget, QRect clip, std::vector<WindowHintTarget> &out) 
 				qt->click();
 			}
 		},
+		.nativeMenu = folderMenu ? folderMenu->build : WindowHintTarget::MenuBuilder(),
 	});
 }
 
 } // namespace
+
+void RegisterFolderHintMenu(QWidget *button, WindowHintTarget::MenuBuilder builder) {
+	new FolderHintMenu(button, std::move(builder));
+}
 
 QRect WindowHintClip(QWidget *widget) {
 	if (!widget || !widget->isVisible() || !widget->isEnabled()) {
@@ -237,6 +321,8 @@ std::vector<WindowHintTarget> CollectWindowHintTargets(QWidget *root) {
 			HintDialogRows::Append(dialogs, clip, result);
 		} else if (const auto media = dynamic_cast<Info::Media::ListWidget*>(widget)) {
 			HintMediaRows::Append(media, clip, result);
+		} else if (const auto view = qobject_cast<QAbstractItemView*>(widget)) {
+			AddItemView(view, result);
 		} else {
 			AddButton(widget, clip, result);
 		}

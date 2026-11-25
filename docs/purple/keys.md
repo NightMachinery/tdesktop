@@ -2,12 +2,17 @@
 
 Enable **Modal keyboard shortcuts** under **Settings -> Purple**. When enabled,
 each main window opens in **Normal** mode with a persistent **modal status line**
-docked along the bottom edge (28 px, reserved beneath the main layout so it
-never covers messages or the composer).
+docked along the bottom edge, beneath the main layout.
 
 ## Modes and status line
 
-- **Normal** (green badge, default when enabled): keys dispatch commands.
+The status line follows the folder rail, chat list, conversation, and any info
+column. It uses their colors and continues their dividers. Text follows the
+composer and avatar insets, with shortcuts aligned to the composer icons.
+The mode sits under the rail in the folder-label font, or at the leading edge
+in windows without a rail.
+
+- **Normal** (green label, default when enabled): keys dispatch commands.
   Switching chats, folders, or panes stays in Normal mode while clearing any
   in-flight prefix or count.
 - Hold a single-key motion such as `j`, `k`, `J`, `K`, `C-d`, or `C-u`
@@ -19,26 +24,27 @@ never covers messages or the composer).
   Repeated half-page and page motions retarget the current scroll animation.
   Lists and pickers still move one row at a time. Turning off Animations
   restores discrete scroll steps.
-- **Insert** (blue badge): press `i` or `a`, start a reply or edit hint, open
+- **Insert** (blue label): press `i` or `a`, start a reply or edit hint, open
   search, or click directly inside the message composer to type. Ordinary
   typing, IME composition, and Telegram shortcuts work normally. Press `Esc`,
   `C-[`, or `C-g` to return to Normal mode.
-- **Transient capture and layer badges:** the status line updates at 0 ms to
-  `LEADER` (indigo) after `SPC`, `LOCAL` with the active context name (teal,
-  for example `LOCAL · CHAT`) after `,` or `SPC m`, `HINTS` (purple) during
+- **Transient capture and layer labels:** the status line shows
+  `LEADER` (indigo) after `SPC`, `LOCAL` (teal) after `,` or `SPC m`, and
+  `HINTS` (purple) during
   message/URL hints, `M-x` (violet) in the command palette, `KEY?` (amber)
   during `SPC h k`, and `HELP` / `FILTER` while the cheatsheet, bindings list,
   describe card, or stock shortcuts layer is open. While a prefix, which-key
   drawer, hint capture, or layer is open, the status bar replaces the
   Normal-mode hint on its right side with that surface's active keys.
 - **Pending counts and prefixes:** numeric counts (`5j`, `2C-d`) and pending
-  chords (`SPC b -`, `, -`, `y -`) echo immediately on the status line beside
-  their prefix group label (`+buffer / chat`). Pressing `DEL` inside a prefix
+  chords (`SPC b -`, `, -`, `y -`) echo immediately on the status line.
+  An idle pane shows its configured localleader as a dim cue such as
+  `, local`. Pressing `DEL` inside a prefix
   backs up one stroke; `Esc` or `C-g` cancels. Unknown endings report
   `<chord> is undefined` on the status line and never fall through to Normal
   mode. Unavailable commands report what they need.
-- **Unread unmuted chat counter:** the status line shows a live `DM N · GP M · CH K`
-  pill counting unread unmuted chats (not messages), broken down into direct
+- **Unread unmuted chat counts:** the chat list segment shows positive counts
+  of unread unmuted chats, broken down into direct
   messages and bots (`DM`), groups and forum groups (`GP`), and channels (`CH`).
   Muted chats without mentions, archived chats, Saved Messages, and chats hidden
   by the active Work Mode preset are excluded.
@@ -124,10 +130,23 @@ with at most four strokes per chord:
     `, f` / `, F` next/previous folder.
   - In Music (`:music`): `, p` play/pause, `, s` stop, `, n` / `, N` next/prev
     track, `, f` / `, b` seek forward/back, `, l` playlists.
-- **Yank (`y`) and message hints (`g`, `f`):**
+- **Window hints (`f` / `F`):** `f` labels visible chats, topics, folders,
+  supported links, media, and controls. A message label starts a reply when
+  replies are allowed. The topmost Purple or Telegram layer owns the hints
+  when a box is open. Type the label, use `DEL` to undo a letter, or press
+  `Esc` / `C-g` to cancel. The composer and search fields retain normal typing
+  in Insert mode. Window hints are unavailable while locked or covered.
+- **Hint actions (`F`):** choose a label to see the target's actions. Press
+  the displayed key or use `j` / `k` and `RET`. `RET` runs the default action
+  where one is available. `DEL` goes back from a submenu, `?` explains the
+  keys, and `Esc` / `C-g` closes the panel. Message menus use `y` for copy,
+  `r` for reply, `d` for delete, and `m` for the full native menu when those
+  actions are available. `R` opens Telegram's reaction picker from that menu.
+  Telegram still shows its usual confirmations.
+- **Yank (`y`) and message hints (`g`):**
   - `y y` / `y m` copy visible message text, `y l` copy message link, `y u`
     copy URL in message text.
-  - `f` / `g o` open a visible URL in plain or rich message text. In a rich
+  - `g o` opens a visible URL in plain or rich message text. In a rich
     message, expand a Details block before hinting links inside it.
   - `g s` select message, `g m` open message context menu, `g r` reply to
     message, `g e` edit message, `g u` jump to unread.
@@ -136,6 +155,13 @@ with at most four strokes per chord:
 - **Insert mode (`:insert`):** `C-[` enters Normal mode, `M-x` opens the
   command palette and restores focus to the composer on cancel.
 
+Window hints cover Qt buttons, dialog and topic rows, shared media and Music
+rows, and message elements with a click handler. Native OS dialogs, embedded
+webviews, hold-to-record controls, and painted targets without a supported hit
+test are outside their scope. A narrow or crowded viewport may omit a label
+when there is nowhere to place it without covering another label. The full
+native message menu includes live reaction and read-receipt details.
+
 ## Help views and `M-x` command palette
 
 - **`?` (Cheatsheet) and `SPC h b` / `SPC ?` (All Active Bindings):** built on
@@ -143,7 +169,7 @@ with at most four strokes per chord:
   curated task cards with live-resolved bindings and a footer showing the
   `keys.edn` path and status. Press `TAB` (or click the header tabs) to switch
   to the exhaustive active binding list grouped by scope, with orderless
-  filtering (`/`), `j`/`k` scrolling, and `q` / `Esc` to close.
+  filtering (`i`, `a`, or `/`), `j`/`k` scrolling, and `q` to close from the list.
 - **`SPC h k` (Describe Key) and `SPC h f` (Describe Command):** inspect any
   chord without executing it, or pick any command to see its availability, why
   it is unavailable if so, and every map where it is bound.
@@ -162,6 +188,19 @@ with at most four strokes per chord:
   Hold the arrow, Control, or Alt motions to repeat them. `F6` switches between
   the search field and results. With modal input enabled, hold `j` or `k` to
   move through the focused results.
+
+With modal keys on, a list's filter opens with `i`, `a`, `/`, or a click. A
+keyboard layout that types `/` with a modifier works too. Press `Esc`, `C-[`,
+or `C-g` in the filter to keep the query and return to the list. `Esc` in the
+list clears a non-empty query first and closes once the query is empty. `q`
+closes directly from the list. Command and chat palettes still open with the
+filter focused. In the Customize collection picker, use `i` or `/` to filter
+and `a` to add the selected chat.
+
+In All Bindings, M-x and Describe Command, `Esc` in the search field clears
+the query and moves focus to the results. Press `Esc` again to close.
+`F6` switches between M-x search and results while keeping the query.
+Keypad Enter runs or describes the highlighted command, just like Return.
 
 With modal keyboard shortcuts off, **Option+X** on macOS (**Alt+X** elsewhere)
 still opens M-x in an active, unlocked account window. The palette includes
@@ -245,9 +284,14 @@ on the modal status line and cheatsheet footer.
 - **Unread unmuted chats buffer (`SPC u`, `SPC b I`):** an iBuffer-style list of
   chats that currently have unread unmuted notifications, showing profile
   pictures, `DM` / `GP` / `CH` tags, unread counts, and message previews.
-  Navigate with `j`/`k`, `C-n`/`C-p`, `g g`, `G`, filter orderless with `/`,
-  refresh with `g r`, mark with `m` / `u` / `U` / `t` / `* d` / `* g` / `* c`,
-  open with `RET` or `o`, and mark read with `r` or `x`. Marking more than one
+  Enter the orderless filter with `i`, `a`, or `/`. The status line shows
+  `INSERT` while typing and `UNREAD` in the list. `RET` opens the selected chat
+  from either focus. The selection follows the chat as results narrow or move.
+  If it is filtered out, the highlighted row moves to a nearby result.
+  Clearing the query returns to the original chat if it is still listed.
+  In the list, navigate with `j`/`k`, `C-n`/`C-p`, `g g`, or `G`, refresh with
+  `g r`, mark with `m` / `u` / `U` / `t` / `* d` / `* g` / `* c`, open with `o`,
+  and mark read with `r` or `x`. Marking more than one
   chat as read asks for an explicit `y` / `RET` confirmation first because
   marking read sends read receipts.
 - **Profile pictures in modal menus:** circular peer avatars appear beside
@@ -302,7 +346,9 @@ on the modal status line and cheatsheet footer.
   clears after ten seconds if no page arrives. An empty or duplicate page
   pauses automatic loading. `SPC b T` / `, T` opens it filtered to unread
   topics, `SPC b n`/`N` (`, n`/`N`,
-  `] T`/`[ T`) cycle topics, `] U` jumps to the next unread topic, `SPC b l` /
+  `] T`/`[ T`) cycle topics. `] U` jumps to the next unread topic. If more
+  topics may be available, it points to the unread picker. After a paging
+  error, open the picker and press `g r` to retry. `SPC b l` /
   `, b` toggles the last viewed topic, and `SPC b h` / `, h` / `g ^` opens or
   closes the parent topic list. `SPC b c`, `, c`, and the picker's `c` action
   open the new topic or thread composer when Telegram grants permission. For
@@ -312,7 +358,8 @@ on the modal status line and cheatsheet footer.
   warnings, errors, and notices with actions open a dialog in either keyboard
   mode. Use the mouse or `Tab`, `Enter`, and `Esc`. With modal keys enabled,
   `j`/`k`/`gg`/`G` scroll, `h`/`l` select buttons, `o` selects the
-  primary action, `y` copies logs, `?` opens help, and `q` closes. Close is
+  primary action, `y` copies logs, `?` opens help, and `q` closes. `Esc`
+  cancels a pending `g` or hides help before it closes the notice. Close is
   selected on arrival. **Copy logs** copies the visible notice and up to 60
   recent lines for that subsystem. Before/after values in the dialog
   resolve bare chat IDs in the current account. Hidden, unknown, ambiguous,
@@ -322,6 +369,8 @@ on the modal status line and cheatsheet footer.
   still use the status line or a toast. `SPC h e` reopens recent
   per-account notices in a memory-only `*Messages*` list that clears on logout
   and is unavailable while passcode-locked or under the privacy screen.
+  Filtering keeps the selected notice in view when possible. Clearing the
+  query returns to the original notice.
   Archive removal warnings contain no account details and are shared across
   accounts, including after logout. Clearing the displayed history also
   clears its pending notices. Passcode lock, screen lock, and the privacy

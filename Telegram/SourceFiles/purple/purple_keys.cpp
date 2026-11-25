@@ -49,12 +49,14 @@
 #include "purple/purple_diagnostics_ui.h"
 #include "purple/purple_exact_search.h"
 #include "purple/purple_folder_strip.h"
+#include "purple/purple_hint_hydra.h"
 #include "purple/purple_key_repeat.h"
 #include "purple/purple_key_scroll.h"
 #include "purple/purple_keys_mx.h"
 #include "purple/purple_keys_ui.h"
 #include "purple/purple_keys_unread.h"
 #include "purple/purple_keys_zen.h"
+#include "purple/purple_list_filter_keys.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_music_section.h"
 #include "purple/purple_notices.h"
@@ -68,19 +70,25 @@
 #include "test/test_purple_notices.h"
 #include "ui/abstract_button.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/controls/send_button.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/screen_reader_mode.h"
 #include "ui/toast/toast.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/elastic_scroll.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/scroll_area.h"
+#include "ui/widgets/shadow.h"
 #include "ui/wrap/slide_wrap.h"
+#include "window/section_widget.h"
 #include "window/themes/window_theme.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
+#include "styles/style_chat_helpers.h"
+#include "styles/style_dialogs.h"
 #include "styles/style_settings.h"
 
 #include <edn.h>
@@ -123,6 +131,29 @@ namespace Purple {
 
 class KeyboardAttachment final {
 public:
+	struct ComposerGeometry {
+		Ui::InputField *field = nullptr;
+		Ui::SendButton *send = nullptr;
+		int placeholderInset = 0;
+		int iconWidth = 0;
+	};
+
+	static ComposerGeometry Geometry(QWidget *section) {
+		if (const auto history = dynamic_cast<HistoryWidget*>(section)) {
+			return {
+				.field = history->_field.get(),
+				.send = history->_send.get(),
+				.placeholderInset = st::historyComposeField.placeholderMargins.left(),
+				.iconWidth = st::historySend.recordSize.width(),
+			};
+		} else if (const auto chat = dynamic_cast<HistoryView::ChatWidget*>(section)) {
+			return Geometry(chat->_composeControls.get());
+		} else if (const auto scheduled = dynamic_cast<HistoryView::ScheduledWidget*>(section)) {
+			return Geometry(scheduled->_composeControls.get());
+		}
+		return {};
+	}
+
 	static bool ScrollAnimating(const HistoryWidget *history) {
 		return history && (history->_scrollToAnimation.animating() || history->_itemsRevealHeight);
 	}
@@ -159,6 +190,18 @@ public:
 	}
 
 private:
+	static ComposerGeometry Geometry(HistoryView::ComposeControls *controls) {
+		if (!controls) {
+			return {};
+		}
+		return {
+			.field = controls->_field.get(),
+			.send = controls->_send.get(),
+			.placeholderInset = controls->_st.field.placeholderMargins.left(),
+			.iconWidth = controls->_st.send.recordSize.width(),
+		};
+	}
+
 	static bool ButtonAvailable(Ui::IconButton *button) {
 		return button
 			&& button->isVisible()
@@ -183,6 +226,75 @@ private:
 		return !widget->_choosingAttach && widget->_composeControls
 			&& ButtonAvailable(widget->_composeControls->_attachToggle);
 	}
+};
+
+class ModalStatusLayout {
+public:
+	[[nodiscard]] ModalUi::StatusColumns measure(
+			not_null<MainWindow*> window) {
+		const auto main = window->sessionContent();
+		const auto body = window->bodyWidget();
+		if (!main || !main->width()) {
+			_field = nullptr;
+			_send = nullptr;
+			return {};
+		}
+		const auto mapped = [&](QWidget *widget) {
+			return QRect(widget->mapTo(body, QPoint(0, 0)).x(), 0, widget->width(), 1);
+		};
+		const auto visible = [&](QWidget *widget) {
+			return (widget && !widget->isHidden()) ? mapped(widget) : QRect();
+		};
+		const auto content = mapped(main);
+		const auto rail = (content.left() > 0)
+			? QRect(0, 0, content.left(), 1)
+			: QRect(content.right() + 1, 0, body->width() - content.width(), 1);
+		const auto section = main->_mainSection
+			? static_cast<QWidget*>(main->_mainSection.data())
+			: static_cast<QWidget*>(main->_history.get());
+		const auto chat = visible(section);
+		const auto dialogs = visible(main->_dialogs.get());
+		const auto info = visible(main->_thirdSection.data());
+		const auto rtl = style::RightToLeft();
+		const auto composer = KeyboardAttachment::Geometry(section);
+		_field = composer.field;
+		_send = composer.send;
+		auto leading = std::optional<int>();
+		auto trailing = std::optional<int>();
+		if (!chat.isEmpty() && _field && _field->isVisibleTo(main)) {
+			const auto field = mapped(_field);
+			leading = (rtl ? chat.right() - field.right() : field.left() - chat.left())
+				+ composer.field->fullTextMargins().left() + composer.placeholderInset;
+		}
+		if (!chat.isEmpty() && _send && _send->isVisibleTo(main)) {
+			const auto send = mapped(_send);
+			trailing = (rtl ? send.left() - chat.left() : chat.right() - send.right())
+				+ std::max(0, (send.width() - composer.iconWidth) / 2);
+		}
+		const auto controller = main->_controller;
+		const auto &dialogStyle = controller->shownForum().current()
+			? st::forumTopicRow : st::defaultDialogRow;
+		return {
+			.rail = rail,
+			.dialogs = dialogs,
+			.chat = chat,
+			.info = info,
+			.dialogsDivider = dialogs.isEmpty() ? QRect() : visible(main->_sideShadow.get()),
+			.infoDivider = info.isEmpty() ? QRect() : visible(main->_thirdShadow.data()),
+			.dialogsLeadingInset = dialogStyle.padding.left(),
+			.chatLeadingInset = leading,
+			.chatTrailingInset = trailing,
+		};
+	}
+
+	[[nodiscard]] bool tracks(const QWidget *widget) const {
+		return widget == _field || widget == _send;
+	}
+
+private:
+	QPointer<QWidget> _field;
+	QPointer<QWidget> _send;
+
 };
 
 namespace {
@@ -337,6 +449,7 @@ enum class Action {
 	CopyMessageUrl,
 	OpenMessageUrl,
 	WindowHint,
+	WindowHintMenu,
 	ReplyToMessage,
 	EditMessage,
 	Search,
@@ -680,6 +793,9 @@ const Command kCommands[] = {
 	{ Action::WindowHint, "window-hint", "window", "Needs an active window",
 		"follow link button mouse keyboard activate",
 		[] { return u"Click a visible target"_q; } },
+	{ Action::WindowHintMenu, "window-hint-menu", "window", "Needs an active window",
+		"target actions menu context options",
+		[] { return u"Actions for a visible target"_q; } },
 	{ Action::ReplyToMessage, "message-hint-reply", "messages", "Needs a chat you can reply in",
 		"respond answer quote",
 		[] { return tr::lng_context_reply_msg(tr::now); } },
@@ -1701,7 +1817,8 @@ std::vector<Data::ForumTopic*> OrderedForumTopics(not_null<Data::Forum*> forum) 
 
 bool Available(Action action, const Target &target) {
 	switch (action) {
-	case Action::WindowHint: return target.controller != nullptr;
+	case Action::WindowHint:
+	case Action::WindowHintMenu: return target.controller != nullptr;
 	case Action::MoveUp:
 	case Action::MoveDown:
 		return target.list != nullptr || HistoryScroll(target) != nullptr;
@@ -1807,6 +1924,7 @@ bool Available(Action action, const Target &target) {
 bool RequiresModalInput(Action action) {
 	switch (action) {
 	case Action::WindowHint:
+	case Action::WindowHintMenu:
 	case Action::EnterNormalMode:
 	case Action::EnterInsertMode:
 	case Action::SelectMessage:
@@ -1962,6 +2080,7 @@ public:
 	~Keys() override;
 
 	bool handle(QObject *receiver, QEvent *event);
+	bool handleWindowHints(QWidget *receiver, QKeyEvent *event, int key);
 	bool layerKey(const QKeyEvent &event, not_null<QWidget*> layer, bool motion);
 	void scrollKey(
 		not_null<QWidget*> view,
@@ -1977,6 +2096,7 @@ public:
 	[[nodiscard]] bool isNormal() const { return _normal; }
 	[[nodiscard]] int statusBarHeight() const;
 	void updateLayout(QRect body);
+	void refreshColumns();
 	void raiseChrome();
 	[[nodiscard]] ModalNotices::DeliveryContext deliveryContext() const;
 	void setStatusMessage(QString text, bool isError, int durationMs, bool persistent);
@@ -1994,8 +2114,8 @@ private:
 		bool allowUnmapped = false) const;
 	[[nodiscard]] Target activeTarget() const;
 	[[nodiscard]] Ui::RpWidget *hintRoot() const;
-	[[nodiscard]] bool handleWindowHints(QWidget *receiver, QKeyEvent *event, int key);
-	void startWindowHints();
+	void startWindowHints(bool menus);
+	void showHintHydra(WindowHintTarget target);
 	[[nodiscard]] Dialogs::InnerWidget *liveChatCursor(
 		Window::SessionController *controller) const;
 	[[nodiscard]] bool chromeVisible() const;
@@ -2034,7 +2154,9 @@ private:
 
 	const not_null<MainWindow*> _window;
 	QPointer<ModalUi::ModalStatusBar> _statusBar;
+	ModalStatusLayout _statusLayout;
 	QPointer<ModalUi::WhichKeyOverlay> _whichKey;
+	QPointer<Ui::LayerWidget> _hintHydra;
 	QPointer<QTextEdit> _normalComposer;
 	QPointer<QWidget> _preeditInput;
 	struct ChatCursor {
@@ -2155,6 +2277,11 @@ Keys::Keys(not_null<MainWindow*> window)
 		if (!inThisWindow) {
 			return;
 		}
+		if (const auto hydra = _hintHydra.data(); hydra && now && now != hydra
+			&& !hydra->isAncestorOf(now)) {
+			hydra->closeLayer();
+			return;
+		}
 		if (Enabled() && _normal && now && now->window() == _window
 			&& !_window->controller().isLayerShown()) {
 			if (const auto current = owner(); current && MusicSearchContains(current, now)) {
@@ -2249,6 +2376,9 @@ Keys::Keys(not_null<MainWindow*> window)
 	Core::App().screenIsLockedValue() | rpl::filter([](bool locked) {
 		return locked;
 	}) | rpl::on_next([=] {
+		if (_hintHydra) {
+			_hintHydra->closeLayer();
+		}
 		_held.clear();
 		clearPrefix();
 	}, _lifetime);
@@ -2451,6 +2581,15 @@ bool Keys::eventFilter(QObject *watched, QEvent *event) {
 	}
 #endif // Q_OS_MAC
 	if (watched->isWidgetType() && static_cast<QWidget*>(watched)->window() == _window) {
+		if ((type == QEvent::Move || type == QEvent::Resize
+			|| type == QEvent::Show || type == QEvent::Hide)
+			&& _statusLayout.tracks(static_cast<QWidget*>(watched))) {
+			refreshColumns();
+		}
+		if (const auto hydra = _hintHydra.data(); hydra && type == QEvent::MouseButtonPress
+			&& watched != hydra && !hydra->isAncestorOf(static_cast<QWidget*>(watched))) {
+			hydra->closeLayer();
+		}
 		if (_hints.windowActive() && (type == QEvent::Wheel || type == QEvent::TouchBegin
 			|| type == QEvent::MouseButtonPress || ((type == QEvent::Show || type == QEvent::Hide
 				|| type == QEvent::Move || type == QEvent::Resize || type == QEvent::LayoutRequest)
@@ -2538,7 +2677,13 @@ bool Keys::chromeVisible() const {
 }
 
 int Keys::statusBarHeight() const {
-	return chromeVisible() ? ModalUi::ModalStatusBar::kHeight : 0;
+	return chromeVisible() ? ModalUi::ModalStatusBar::PreferredHeight() : 0;
+}
+
+void Keys::refreshColumns() {
+	if (_statusBar && chromeVisible()) {
+		_statusBar->setColumns(_statusLayout.measure(_window));
+	}
 }
 
 void Keys::updateLayout(QRect body) {
@@ -2551,8 +2696,9 @@ void Keys::updateLayout(QRect body) {
 		_whichKey->hide();
 		return;
 	}
-	const auto h = ModalUi::ModalStatusBar::kHeight;
+	const auto h = ModalUi::ModalStatusBar::PreferredHeight();
 	_statusBar->setGeometry(body.x(), body.y() + body.height() - h, body.width(), h);
+	refreshColumns();
 	_statusBar->show();
 	if (_whichKey->isVisible()) {
 		const auto above = QRect(body.x(), body.y(), body.width(), std::max(0, body.height() - h));
@@ -2648,7 +2794,7 @@ Ui::RpWidget *Keys::hintRoot() const {
 	return _window->controller().isLayerShown() ? nullptr : body;
 }
 
-void Keys::startWindowHints() {
+void Keys::startWindowHints(bool menus) {
 	const auto current = owner();
 	if (!current || !_normal) {
 		return;
@@ -2659,7 +2805,7 @@ void Keys::startWindowHints() {
 	if (!guard || !original || owner() != original.get()) {
 		return;
 	}
-	if (_hints.startWindow(hintRoot(), &current->session(), windowFocusWidget())) {
+	if (_hints.startWindow(hintRoot(), &current->session(), windowFocusWidget(), menus)) {
 		refreshStatusBar();
 	} else {
 		showFeedback(u"No clickable targets"_q);
@@ -2668,13 +2814,14 @@ void Keys::startWindowHints() {
 
 bool Keys::handleWindowHints(QWidget *receiver, QKeyEvent *event, int key) {
 	const auto current = owner();
-	if (!current || !_normal || receiver == _preeditInput) {
+	if (!current || !_normal || _hintHydra || receiver == _preeditInput) {
 		return false;
 	}
 	const auto combo = KeyStroke(*event, key);
 	const auto mods = event->modifiers() & ~Qt::KeypadModifier;
 	const auto active = _hints.windowActive();
 	const auto cancel = (key == Qt::Key_Escape && !mods) || combo == kCtrlG;
+	auto menus = false;
 	if (active) {
 		if (!cancel && mods != Qt::NoModifier && mods != Qt::ShiftModifier) {
 			return false;
@@ -2691,12 +2838,15 @@ bool Keys::handleWindowHints(QWidget *receiver, QKeyEvent *event, int key) {
 		}
 		const auto target = focus ? FindTarget(current, focus) : Target();
 		const auto bindings = EffectiveBindings(true, target.contextMap);
-		if (!ranges::any_of(bindings, [=](const EffectiveBinding &binding) {
-			return binding.action == Action::WindowHint && binding.keys.size() == 1
+		const auto found = ranges::find_if(bindings, [=](const EffectiveBinding &binding) {
+			return (binding.action == Action::WindowHint || binding.action == Action::WindowHintMenu)
+				&& binding.keys.size() == 1
 				&& binding.keys.front() == combo;
-		})) {
+		});
+		if (found == end(bindings)) {
 			return false;
 		}
+		menus = (found->action == Action::WindowHintMenu);
 	}
 	event->accept();
 	if (event->type() != QEvent::KeyPress || event->isAutoRepeat()) {
@@ -2706,12 +2856,16 @@ bool Keys::handleWindowHints(QWidget *receiver, QKeyEvent *event, int key) {
 	_held.insert(physical);
 	ClaimedKeys.emplace(physical, nullptr);
 	if (!active) {
-		startWindowHints();
+		startWindowHints(menus);
 	} else if (cancel) {
 		clearPrefix();
 	} else {
 		const auto guard = QPointer(this);
-		const auto result = _hints.typeWindow(key, hintRoot(), &current->session());
+		const auto result = _hints.typeWindow(key, hintRoot(), &current->session(), [=](WindowHintTarget target) {
+			if (guard) {
+				guard->showHintHydra(std::move(target));
+			}
+		});
 		if (guard) {
 			if (result == MessageHints::Input::LeaveNormal) {
 				enterInsert(true);
@@ -2722,6 +2876,77 @@ bool Keys::handleWindowHints(QWidget *receiver, QKeyEvent *event, int key) {
 		}
 	}
 	return true;
+}
+
+void Keys::showHintHydra(WindowHintTarget target) {
+	const auto current = owner();
+	const auto root = QPointer(hintRoot());
+	if (!current || !root) {
+		return;
+	}
+	const auto original = base::make_weak(current);
+	const auto guard = QPointer(this);
+	const auto allowed = [=] {
+		return guard && original && root && guard->owner() == original.get()
+			&& guard->hintRoot() == root && guard->_normal && Enabled();
+	};
+	auto menu = target.nativeMenu ? target.nativeMenu() : WindowHintTarget::Menu();
+	if (!allowed() || !target.current()) {
+		return;
+	}
+	if ((!menu || menu->empty()) && !target.activate && !target.fullMenu) {
+		showFeedback(u"No actions for this target"_q);
+		return;
+	}
+	const auto watched = target.messages;
+	const auto widget = target.widget;
+	const auto oldFocus = QPointer(windowFocusWidget());
+	const auto stale = [=] {
+		if (allowed()) {
+			guard->showFeedback(u"Hint target changed"_q);
+		}
+	};
+	auto layer = CreateHintHydra(std::move(target), std::move(menu), allowed, stale);
+	const auto ref = QPointer(layer.get());
+	_keyLayers.push_back(ref);
+	_hintHydra = ref;
+	ref->setParent(root);
+	ref->setClosedCallback([=] {
+		if (guard && guard->_hintHydra == ref) {
+			guard->_hintHydra = nullptr;
+		}
+		if (ref) {
+			ref->hide();
+			ref->deleteLater();
+		}
+		if (allowed() && oldFocus && oldFocus->isVisible()) {
+			oldFocus->setFocus(Qt::OtherFocusReason);
+		}
+	});
+	const auto expired = [=] {
+		if (ref) {
+			ref->closeLayer();
+			stale();
+		}
+	};
+	if (widget) {
+		QObject::connect(widget, &QObject::destroyed, ref.data(), expired);
+	}
+	auto &data = current->session().data();
+	const auto id = [](auto item) { return item->fullId(); };
+	rpl::merge(
+		data.itemRemoved() | rpl::map(id),
+		data.itemDataChanges() | rpl::map(id)
+	) | rpl::on_next([=](FullMsgId id) {
+		if (ranges::contains(watched, id)) {
+			expired();
+		}
+	}, ref->lifetime());
+	const auto raw = layer.release();
+	raw->parentResized();
+	raw->show();
+	raw->raise();
+	raw->setInnerFocus();
 }
 
 bool Keys::ownsChatListFocus() const {
@@ -2960,25 +3185,33 @@ void Keys::showUnreadBuffer(const Target &target) {
 			return std::vector<ModalUnread::BufferItem>();
 		},
 		.onOpenChat = [guard, weakCtrl](PeerId peerId) {
+			if (!guard) {
+				return;
+			}
 			QTimer::singleShot(0, guard.data(), [guard, weakCtrl, peerId] {
 				const auto ctrl = weakCtrl.get();
-				if (!guard || !ctrl || !Enabled()
+				if (!guard || !ctrl || !Enabled() || guard->owner() != ctrl
+					|| Core::App().passcodeLocked()
 					|| Purple::PrivacyScreenActive(guard->_window)) {
 					return;
 				}
-				if (const auto peer = ctrl->session().data().peerLoaded(peerId)) {
+				if (const auto peer = ctrl->session().data().peerLoaded(peerId)
+					; peer && PickerVisible(peer)) {
 					ctrl->showPeerHistory(peer);
 				}
 			});
 		},
-		.onMarkRead = [guard, sessionWeak](std::vector<PeerId> peerIds) {
-			const auto s = sessionWeak.get();
-			if (!s) {
+		.onMarkRead = [guard, weakCtrl](std::vector<PeerId> peerIds) {
+			const auto ctrl = weakCtrl.get();
+			if (!guard || !ctrl || !Enabled() || guard->owner() != ctrl
+				|| Core::App().passcodeLocked()
+				|| Purple::PrivacyScreenActive(guard->_window)) {
 				return;
 			}
+			auto &data = ctrl->session().data();
 			for (const auto peerId : peerIds) {
-				if (const auto peer = s->data().peerLoaded(peerId)) {
-					if (const auto history = s->data().historyLoaded(peer)) {
+				if (const auto peer = data.peerLoaded(peerId); peer && PickerVisible(peer)) {
+					if (const auto history = data.historyLoaded(peer)) {
 						MarkAsReadMenu::MarkAsReadThread(history);
 					}
 				}
@@ -3144,10 +3377,6 @@ void Keys::stepTopic(const Target &target, int delta, bool unreadOnly) {
 	}
 	forum->preloadTopics();
 	const auto topics = OrderedForumTopics(forum);
-	if (topics.empty()) {
-		showFeedback(u"No topics loaded yet"_q);
-		return;
-	}
 	const auto activeTopic = target.chat.topic()
 		? target.chat.topic()
 		: current->activeChatCurrent().topic();
@@ -3160,15 +3389,40 @@ void Keys::stepTopic(const Target &target, int delta, bool unreadOnly) {
 	}
 	const auto n = int(topics.size());
 	if (unreadOnly) {
-		for (auto step = 1; step <= n; ++step) {
-			const auto cand = topics[((idx < 0 ? -1 : idx) + step) % n];
-			const auto u = cand->chatListUnreadState();
-			if (u.messages > u.messagesMuted || u.mentions > 0 || u.marks > u.marksMuted) {
-				current->showThread(cand);
-				return;
-			}
+		using Pages = ModalUnread::TopicPages;
+		const auto pages = forum->topicsLoadFailed()
+			? Pages::Failed
+			: forum->topicsList()->loaded() ? Pages::Complete : Pages::Partial;
+		const auto found = ModalUnread::FindNextUnreadTopic(
+			n, idx, pages, [&](int index) {
+				const auto unread = topics[index]->chatListUnreadState();
+				return unread.messages > unread.messagesMuted
+					|| unread.mentions > 0 || unread.marks > unread.marksMuted;
+			});
+		if (const auto index = std::get_if<int>(&found)) {
+			current->showThread(topics[*index]);
+			return;
 		}
-		showFeedback(u"No unread topics"_q);
+		const auto remaining = std::get<Pages>(found);
+		if (remaining == Pages::Complete) {
+			showFeedback(u"No unread topics"_q);
+			return;
+		}
+		const auto bindings = ChordsForAction(
+			Action::TopicUnreadPalette,
+			EffectiveBindings(_normal, target.contextMap));
+		const auto picker = bindings.empty()
+			? u"M-x topic-unread-palette"_q
+			: bindings.front().join(u' ');
+		const auto failed = (remaining == Pages::Failed);
+		showFeedback(failed
+			? u"Could not load more topics · %1, then g r to retry"_q.arg(picker)
+			: u"No unread topic among loaded topics · %1 for unread picker"_q.arg(picker),
+			failed);
+		return;
+	}
+	if (topics.empty()) {
+		showFeedback(u"No topics loaded yet"_q);
 		return;
 	}
 	const auto base = (idx < 0) ? (delta > 0 ? -1 : 0) : idx;
@@ -3256,13 +3510,14 @@ void Keys::refreshStatusBar() {
 		return;
 	}
 	if (!_lastBody.isEmpty()) {
-		const auto h = ModalUi::ModalStatusBar::kHeight;
+		const auto h = ModalUi::ModalStatusBar::PreferredHeight();
 		_statusBar->setGeometry(
 			_lastBody.x(),
 			_lastBody.y() + _lastBody.height() - h,
 			_lastBody.width(),
 			h);
 	}
+	refreshColumns();
 	_statusBar->show();
 	raiseChrome();
 	auto state = ModalUi::StatusState();
@@ -3271,100 +3526,183 @@ void Keys::refreshStatusBar() {
 	state.unreadCh = _unreadSummary.ch;
 	state.unreadKnown = _unreadKnown;
 	state.zenMode = _zenMode;
+	const auto focus = QApplication::focusWidget();
+	const auto filterFocused = focus && focus->window() == _window && ListFilter::IsMarked(focus);
 	if (const auto layer = visibleLayer(); layer != ActiveLayer::None) {
 		switch (layer) {
 		case ActiveLayer::Cheatsheet:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"HELP"_q;
 			state.paneLabel = u"Keyboard Cheatsheet"_q;
-			state.rightCue = u"TAB all bindings  ·  j/k scroll  ·  / filter  ·  q/ESC close"_q;
+			state.hints = {
+				{ u"TAB"_q, u"all bindings"_q },
+				{ u"j/k"_q, u"scroll"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::AllBindings:
-			state.badge = ModalUi::BadgeKind::Insert;
-			state.badgeText = u"FILTER"_q;
+			state.badge = ModalUi::BadgeKind::Help;
+			state.badgeText = u"BINDINGS"_q;
 			state.paneLabel = u"All Active Bindings"_q;
-			state.rightCue = u"TAB cheatsheet  ·  type to filter  ·  ESC close"_q;
+			state.hints = {
+				{ u"TAB"_q, u"cheatsheet"_q },
+				{ u"j/k"_q, u"scroll"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::Palette:
 			state.badge = ModalUi::BadgeKind::Palette;
 			state.badgeText = u"M-x"_q;
 			state.paneLabel = u"Command Palette"_q;
-			state.rightCue = u"C-n/p move  ·  RET run  ·  M-p/n history  ·  ESC close"_q;
+			state.hints = {
+				{ u"j/k"_q, u"move"_q },
+				{ u"RET"_q, u"run"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::DescribeCommandPicker:
 			state.badge = ModalUi::BadgeKind::Palette;
-			state.badgeText = u"SPC h f"_q;
+			state.badgeText = u"DESCRIBE"_q;
 			state.paneLabel = u"Describe Command"_q;
-			state.rightCue = u"C-n/p move  ·  RET inspect  ·  ESC close"_q;
+			state.hints = {
+				{ u"j/k"_q, u"move"_q },
+				{ u"RET"_q, u"inspect"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::DescribeKey:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"HELP"_q;
 			state.paneLabel = u"Describe Key"_q;
-			state.rightCue = _describeKeyHasDetails
-				? u"RET command details  ·  q/ESC close"_q
-				: u"q/ESC close"_q;
+			if (_describeKeyHasDetails) {
+				state.hints.push_back({ u"RET"_q, u"command details"_q });
+			}
+			state.hints.push_back({ u"q/ESC"_q, u"close"_q });
 			break;
 		case ActiveLayer::DescribeCommand:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"HELP"_q;
 			state.paneLabel = u"Describe Command"_q;
-			state.rightCue = u"q/ESC close"_q;
+			state.hints = { { u"q/ESC"_q, u"close"_q } };
 			break;
 		case ActiveLayer::StockShortcuts:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"HELP"_q;
 			state.paneLabel = u"Shortcuts & Gestures"_q;
-			state.rightCue = u"ESC close"_q;
+			state.hints = { { u"ESC"_q, u"close"_q } };
 			break;
 		case ActiveLayer::UnreadBuffer:
 			state.badge = ModalUi::BadgeKind::Palette;
 			state.badgeText = u"UNREAD"_q;
 			state.paneLabel = u"Unread Unmuted Chats"_q;
-			state.rightCue = u"j/k move  ·  RET open  ·  m/u/* mark  ·  x read  ·  q close"_q;
+			state.hints = {
+				{ u"j/k"_q, u"move"_q },
+				{ u"RET"_q, u"open"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"m/u/*"_q, u"mark"_q },
+				{ u"x"_q, u"read"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::TopicPicker:
 			state.badge = ModalUi::BadgeKind::Local;
 			state.badgeText = u"TOPICS"_q;
 			state.paneLabel = u"Forum / Bot Topics"_q;
-			state.rightCue = u"j/k move  ·  RET open  ·  / filter  ·  u unread  ·  q close"_q;
+			state.hints = {
+				{ u"j/k"_q, u"move"_q },
+				{ u"RET"_q, u"open"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"u"_q, u"unread"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::Notice:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"NOTICE"_q;
 			state.paneLabel = u"Purple Notice"_q;
-			state.rightCue = u"j/k scroll  ·  TAB/h/l buttons  ·  o select action  ·  RET activate  ·  y copy  ·  q close"_q;
+			state.hints = {
+				{ u"j/k"_q, u"scroll"_q },
+				{ u"TAB/h/l"_q, u"buttons"_q },
+				{ u"o"_q, u"select action"_q },
+				{ u"RET"_q, u"activate"_q },
+				{ u"y"_q, u"copy"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::NoticeHistory:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"MESSAGES"_q;
 			state.paneLabel = u"Notice History (SPC h e)"_q;
-			state.rightCue = u"j/k move  ·  RET/o open  ·  / filter  ·  y copy  ·  c clear  ·  q close"_q;
+			state.hints = {
+				{ u"j/k"_q, u"move"_q },
+				{ u"RET"_q, u"open"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"y"_q, u"copy"_q },
+				{ u"c"_q, u"clear"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::None:
 			break;
 		}
+		if (filterFocused) {
+			state.badge = ModalUi::BadgeKind::Insert;
+			state.badgeText = u"INSERT"_q;
+			if (layer == ActiveLayer::AllBindings) {
+				state.hints = {
+					{ u"TAB"_q, u"cheatsheet"_q },
+					{ u"C-n/C-p"_q, u"scroll"_q },
+					{ u"ESC"_q, u"clear/list"_q },
+				};
+			} else {
+				state.hints = {
+					{ u"RET"_q, (layer == ActiveLayer::Palette) ? u"run"_q
+						: (layer == ActiveLayer::DescribeCommandPicker) ? u"inspect"_q : u"open"_q },
+					{ u"C-n/C-p"_q, u"move"_q },
+					{ u"ESC"_q, (layer == ActiveLayer::Palette || layer == ActiveLayer::DescribeCommandPicker)
+						? u"clear/list"_q : u"list"_q },
+				};
+				if (layer == ActiveLayer::Palette) {
+					state.hints.insert(state.hints.begin() + 2, { u"M-p/M-n"_q, u"history"_q });
+				}
+			}
+		}
 		_statusBar->setState(std::move(state));
 		return;
 	}
-	if (_inspect) {
+	if (filterFocused) {
+		state.badge = ModalUi::BadgeKind::Insert;
+		state.badgeText = u"INSERT"_q;
+		state.hints = { { u"ESC"_q, u"list"_q } };
+	} else if (_inspect) {
 		state.badge = ModalUi::BadgeKind::DescribeKey;
 		state.badgeText = u"KEY?"_q;
-		state.rightCue = u"ESC cancel"_q;
+		state.hints = { { u"ESC"_q, u"cancel"_q } };
 	} else if (_hints.active()) {
 		state.badge = ModalUi::BadgeKind::Hints;
 		state.badgeText = u"HINTS"_q;
-		state.rightCue = u"DEL back  ·  ESC cancel"_q;
+		state.hints = {
+			{ u"DEL"_q, u"back"_q },
+			{ u"ESC"_q, u"cancel"_q },
+		};
 	} else if (!_prefix.empty() && IsLocalleaderPrefix(_prefix)) {
 		state.badge = ModalUi::BadgeKind::Local;
-		state.badgeText = target.contextName.isEmpty()
-			? u"LOCAL"_q
-			: (u"LOCAL · "_q + target.contextName.toUpper());
-		state.rightCue = u"DEL back  ·  ESC cancel"_q;
+		state.badgeText = u"LOCAL"_q;
+		state.hints = {
+			{ u"DEL"_q, u"back"_q },
+			{ u"ESC"_q, u"cancel"_q },
+		};
 	} else if (!_prefix.empty() && _prefix.front() == Qt::Key_Space) {
 		state.badge = ModalUi::BadgeKind::Leader;
 		state.badgeText = u"LEADER"_q;
-		state.rightCue = u"DEL back  ·  ESC cancel"_q;
+		state.hints = {
+			{ u"DEL"_q, u"back"_q },
+			{ u"ESC"_q, u"cancel"_q },
+		};
 	} else {
 		const auto focus = windowFocusWidget();
 		const auto inForeignInput = focus
@@ -3378,13 +3716,17 @@ void Keys::refreshStatusBar() {
 			state.badgeText = u"INSERT"_q;
 		}
 		if (!_prefix.empty()) {
-			state.rightCue = u"DEL back  ·  ESC cancel"_q;
+			state.hints = {
+				{ u"DEL"_q, u"back"_q },
+				{ u"ESC"_q, u"cancel"_q },
+			};
 		}
 	}
 
 	state.paneLabel = target.paneLabel;
-	if (!target.contextName.isEmpty()) {
-		state.contextChip = FirstLocalleaderLabel() + u" "_q + target.contextName;
+	state.paneInDialogs = (target.list != nullptr);
+	if (!target.contextName.isEmpty() && state.badge != ModalUi::BadgeKind::Local) {
+		state.localleaderKey = FirstLocalleaderLabel();
 	}
 
 	auto pending = QString();
@@ -3396,9 +3738,9 @@ void Keys::refreshStatusBar() {
 			pending += u' ';
 		}
 		pending += ChordLabel(_prefix) + u" -"_q;
-		state.pendingGroup = IsLocalleaderPrefix(_prefix)
-			? (target.contextName.isEmpty() ? u"localleader"_q : target.contextName)
-			: PrefixLabel(MapKind::Normal, _prefix);
+		if (!IsLocalleaderPrefix(_prefix)) {
+			state.pendingGroup = PrefixLabel(MapKind::Normal, _prefix);
+		}
 	}
 	state.pendingText = pending;
 
@@ -3420,13 +3762,19 @@ void Keys::refreshStatusBar() {
 		state.message = _persistentCue;
 	}
 
-	if (state.rightCue.isEmpty() && target.focus && liveChatCursor(target.controller)) {
-		state.rightCue = u"RET open"_q;
-	} else if (state.rightCue.isEmpty() && _normal && target.folders
-		&& StepModalChatsFilter(target.controller, 1, false) && HasFolderKeys()) {
-		state.rightCue = u"J/K folders"_q;
+	if (state.hints.empty()) {
+		state.hints = {
+			{ u"SPC"_q, u"leader"_q },
+			{ u"M-x"_q, u"run"_q },
+			{ u"?"_q, u"help"_q },
+		};
+		if (target.focus && liveChatCursor(target.controller)) {
+			state.hints.push_back({ u"RET"_q, u"open"_q });
+		} else if (_normal && target.folders
+			&& StepModalChatsFilter(target.controller, 1, false) && HasFolderKeys()) {
+			state.hints.push_back({ u"J/K"_q, u"folders"_q });
+		}
 	}
-	state.localleaderHint = u"SPC leader  ·  "_q + FirstLocalleaderLabel() + u" local"_q;
 	_statusBar->setState(std::move(state));
 }
 
@@ -3541,6 +3889,9 @@ KeyUse Keys::classify(
 bool Keys::handle(QObject *receiver, QEvent *event) {
 	if (event->type() == QEvent::WindowDeactivate) {
 		if (receiver == _window) {
+			if (_hintHydra) {
+				_hintHydra->closeLayer();
+			}
 			_held.clear();
 			clearPrefix();
 		}
@@ -4004,7 +4355,7 @@ void Keys::showWhichKey() {
 	};
 	_whichKey->setState(std::move(wk));
 	const auto barH = (_statusBar && _statusBar->isVisible())
-		? ModalUi::ModalStatusBar::kHeight
+		? ModalUi::ModalStatusBar::PreferredHeight()
 		: statusBarHeight();
 	const auto above = QRect(
 		_lastBody.x(),
@@ -4510,7 +4861,8 @@ void Keys::dispatch(Action action, const Target &target, int count, ScrollPress 
 		startHint(Hint::OpenUrl, tr::lng_purple_keys_message_link_empty(tr::now));
 		break;
 	case Action::WindowHint:
-		startWindowHints();
+	case Action::WindowHintMenu:
+		startWindowHints(action == Action::WindowHintMenu);
 		break;
 	case Action::ReplyToMessage:
 		startHint(Hint::Reply, tr::lng_purple_keys_message_menu_empty(tr::now));
@@ -4739,7 +5091,9 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		cards.push_back(std::move(local));
 	}
 	{
-		auto hints = ModalUi::HelpSection{ .title = u"COPY & MESSAGE HINTS"_q };
+		auto hints = ModalUi::HelpSection{ .title = u"CLICK, ACTIONS & COPY"_q };
+		pushRow(hints.rows, rowFor(Action::WindowHint, u"Click or reply to a visible target"_q, 1));
+		pushRow(hints.rows, rowFor(Action::WindowHintMenu, u"Show actions for a visible target"_q, 1));
 		pushRow(hints.rows, rowFor(Action::CopyMessage, u"Copy message text"_q, 1));
 		pushRow(hints.rows, rowFor(Action::CopyMessageLink, u"Copy message link"_q, 1));
 		pushRow(hints.rows, rowFor(Action::CopyMessageUrl, u"Copy URL in message"_q, 1));
@@ -5126,7 +5480,7 @@ void Keys::showPalette(bool describe, const Target &target, bool fromInsert) {
 		}
 	};
 	auto layer = ModalUi::CreateCommandPaletteLayer({
-		.promptBadge = (describe && Enabled()) ? u"SPC h f"_q : u"M-x"_q,
+		.promptBadge = describe ? u"Describe"_q : u"M-x"_q,
 		.placeholder = describe
 			? u"Describe any command (orderless, e.g. \"pin\")..."_q
 			: u"Execute command (orderless, e.g. \"opm\", M-p/n history)..."_q,
@@ -5249,6 +5603,17 @@ bool HandleModalKeys(QObject *receiver, QEvent *event) {
 	return EnsureKeys(window)->handle(receiver, event);
 }
 
+bool HandleModalWindowHints(QWidget *receiver, QEvent *event) {
+	if (!receiver || !Enabled() || (event->type() != QEvent::KeyPress
+		&& event->type() != QEvent::ShortcutOverride)) {
+		return false;
+	}
+	const auto window = dynamic_cast<MainWindow*>(receiver->window());
+	const auto keys = window ? FindKeys(window) : nullptr;
+	const auto press = static_cast<QKeyEvent*>(event);
+	return keys && keys->handleWindowHints(receiver, press, ModalKey(*press));
+}
+
 int ModalPhysicalKey(const QKeyEvent &event) {
 	return ModalKey(event);
 }
@@ -5357,6 +5722,12 @@ int ModalKeysStatusHeight(not_null<MainWindow*> window) {
 void UpdateModalKeysLayout(not_null<MainWindow*> window, QRect body) {
 	if (const auto keys = FindKeys(window.get())) {
 		keys->updateLayout(body);
+	}
+}
+
+void RefreshModalKeysColumns(not_null<MainWindow*> window) {
+	if (const auto keys = FindKeys(window.get())) {
+		keys->refreshColumns();
 	}
 }
 

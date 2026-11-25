@@ -2,6 +2,7 @@
 
 #include "purple/purple_keys.h"
 #include "purple/purple_keys_mx.h"
+#include "purple/purple_list_filter_keys.h"
 #include "purple/purple_settings_tree.h"
 #include "purple/purple_settings_focus.h"
 #include "purple/purple_settings_customize_look.h"
@@ -71,7 +72,9 @@ public:
 		}
 		_list->setAccessibleName(u"Selected ordered entries"_q);
 		_peerList->setAccessibleName(u"Available chats for this settings source"_q);
-		_search->setPlaceholderText(u"Filter available chats"_q);
+		_search->setPlaceholderText(ModalKeysEnabled()
+			? u"i or / to filter chats"_q : u"Filter available chats"_q);
+		ListFilter::Mark(_search);
 		_search->setAccessibleName(u"Filter available chats"_q);
 		if (_config.peerField) main->addWidget(_search);
 		else {
@@ -229,8 +232,17 @@ protected:
 		const auto code = ModalPhysicalKey(*key);
 		const auto enter = code == Qt::Key_Return || code == Qt::Key_Enter;
 		if (!_config.current()) return true;
-		if (code == Qt::Key_Escape || (code == Qt::Key_G && mods == kCtrlMod)) {
-			if (AllowModalLayerKey(*key, this)) back();
+		const auto modal = ModalKeysEnabled();
+		if (object == _search && ListFilter::Exit(code, mods, modal)) {
+			if (AllowModalLayerKey(*key, this)) _peerList->setFocus();
+			return true;
+		}
+		if (code == Qt::Key_Escape || (code == Qt::Key_G && mods == kCtrlMod)
+			|| (modal && object == _peerList && ListFilter::Exit(code, mods))) {
+			if (AllowModalLayerKey(*key, this)) {
+				if (modal && object == _peerList && !_search->text().isEmpty()) _search->clear();
+				else back();
+			}
 			return true;
 		}
 		if (enter && mods == kCtrlMod) {
@@ -249,18 +261,19 @@ protected:
 			if (const auto button = qobject_cast<QPushButton*>(object)) button->click();
 			else if (object == _list) activate();
 			else if (object == _peerList) addPeer();
+			else if (modal) addPeer();
 			else _peerList->setFocus();
 			return true;
 		}
-		const auto list = qobject_cast<QListWidget*>(object);
+		const auto list = object == _search ? _peerList : qobject_cast<QListWidget*>(object);
 		if (!list && (!qobject_cast<QPushButton*>(object)
 			|| _parts->currentWidget() != _main)) {
 			return false;
 		}
-		const auto modal = ModalKeysEnabled();
-		const auto down = (!mods && (code == Qt::Key_Down || (modal && code == Qt::Key_J)))
+		const auto plainMotion = modal && object != _search;
+		const auto down = (!mods && (code == Qt::Key_Down || (plainMotion && code == Qt::Key_J)))
 			|| (mods == kCtrlMod && code == Qt::Key_N);
-		const auto up = (!mods && (code == Qt::Key_Up || (modal && code == Qt::Key_K)))
+		const auto up = (!mods && (code == Qt::Key_Up || (plainMotion && code == Qt::Key_K)))
 			|| (mods == kCtrlMod && code == Qt::Key_P);
 		if (list && (down || up)) {
 			if (AllowModalLayerKey(*key, this, true)) {
@@ -269,7 +282,7 @@ protected:
 			}
 			return true;
 		}
-		if (!modal) return false;
+		if (!modal || object == _search) return false;
 		if ((code == Qt::Key_J || code == Qt::Key_K)
 			&& mods == Qt::ShiftModifier && list != _peerList) {
 			if (AllowModalLayerKey(*key, this)) move(code == Qt::Key_J ? 1 : -1);
@@ -283,7 +296,8 @@ protected:
 		else if (code == Qt::Key_A && !mods) { if (once()) add(); }
 		else if (code == Qt::Key_X && !mods) { if (once()) edit(Op::Erase); }
 		else if (code == Qt::Key_U && !mods) { if (once()) undo(); }
-		else if (code == Qt::Key_Slash && !mods && _config.peerField) { if (once()) _search->setFocus(); }
+		else if (_config.peerField && ListFilter::Enter(*key, code, false)) { if (once()) _search->setFocus(); }
+		else if (code == Qt::Key_Q && !mods) { if (once()) back(); }
 		else if (code == Qt::Key_Space && !mods && list == _peerList) { if (once()) addPeer(); }
 		else return false;
 		return true;
