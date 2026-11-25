@@ -88,7 +88,10 @@ public:
 		main->addWidget(operations);
 		main->addWidget(ordering);
 		main->addWidget(footer);
-		button(operations, u"Add"_q, [this] { edit(Op::Insert); });
+		button(operations, u"Add"_q, [this] { add(); });
+		if (_config.peerField) {
+			button(operations, u"Enter ID"_q, [this] { edit(Op::Insert); });
+		}
 		button(operations, u"Edit"_q, [this] { activate(); });
 		if (!_config.members) {
 			button(operations, u"Duplicate"_q, [this] { edit(Op::Duplicate); });
@@ -236,7 +239,7 @@ protected:
 		}
 		if (key->isAutoRepeat()) return false;
 		if (code == Qt::Key_D && mods == Qt::ShiftModifier) edit(Op::Duplicate);
-		else if (code == Qt::Key_A && !mods) edit(Op::Insert);
+		else if (code == Qt::Key_A && !mods) add();
 		else if (code == Qt::Key_X && !mods) edit(Op::Erase);
 		else if (code == Qt::Key_U && !mods) undo();
 		else if (code == Qt::Key_Slash && !mods && _config.peerField) _search->setFocus();
@@ -401,7 +404,14 @@ private:
 			const auto id = item->data(Qt::UserRole).toString();
 			if (peer(id)) appendPeer(id);
 			else refreshPeers(false);
+		} else {
+			_status->setText(u"Select an available chat or choose Enter ID."_q);
 		}
+	}
+
+	void add() {
+		if (_config.peerField) addPeer();
+		else edit(Op::Insert);
 	}
 
 	void appendPeer(const QString &text) {
@@ -571,7 +581,7 @@ private:
 		if (needsName || (op == Op::Erase && !uses.uses.empty()) || (insert && _config.peerField)) {
 			name = new QLineEdit(_form);
 			name->setAccessibleName(insert && _config.peerField ? u"Recorded peer ID"_q : u"Name"_q);
-			name->setPlaceholderText(insert && _config.peerField ? u"Type an ID or choose a chat above"_q : u"Name"_q);
+			name->setPlaceholderText(insert && _config.peerField ? u"Enter an ID"_q : u"Name"_q);
 			field(name);
 		}
 		auto readers = std::vector<Fn<QString()>>();
