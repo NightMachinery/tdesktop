@@ -27,6 +27,7 @@ struct SettingsCollectionConfig {
 	bool named = false;
 	std::function<bool()> current;
 	std::function<void(SettingsEditorIntent)> stage;
+	std::function<std::vector<SettingsReferenceReport>(const SettingAddress&)> otherReferences;
 	std::function<void(SettingAddress)> inspect;
 	std::function<void()> close;
 };

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "purple/purple_settings_editor.h"
+#include "purple/purple_settings_structures.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
@@ -294,6 +295,66 @@ void CollectionAndConflictCases() {
 		== SettingsEditorStatus::StaleRevision);
 }
 
+void CounterpartReferences() {
+	auto f = Fixture();
+	const auto list = SettingAddress{ u"lists"_q, u"work"_q };
+	const auto members = SettingAddress{ u"lists"_q, u"work"_q, u"members"_q };
+	const auto ownBytes = QByteArray("version=2\n[lists.work]\nmembers=[77]\n"
+		"[list_sets.review]\nlist_order=[{list='work'}]\n"
+		"[presets.fixture]\nlist_order=['*review']\nfolders=['*saved']\n"
+		"[focus_sync]\nenter_preset='work'\n");
+	Put(f.other, ownBytes);
+	const auto ownMode = f.routing.workModeTarget(B);
+	CHECK(ownMode && f.routing.writeWorkMode(*ownMode, AccountWorkMode::Own, Current).ok);
+	const auto opening = CaptureSettingsEditorOpening(f.routing, B);
+	const auto ownRefs = SettingsEditorOtherReferences(opening, f.root, list);
+	CHECK(ownRefs.size() == 1);
+	if (ownRefs.size() != 1) return;
+	CHECK(ownRefs.front().path == f.other && ownRefs.front().role == SettingsOpenRole::Own);
+	CHECK(ownRefs.front().references.size() == 1 && ownRefs.front().memberTable == members);
+	CHECK(!ownRefs.front().ignoredInFollow);
+	for (const auto &object : { SettingAddress{ u"list_sets"_q, u"review"_q },
+			SettingAddress{ u"folder_sets"_q, u"saved"_q }, SettingAddress{ u"presets"_q, u"work"_q } }) {
+		const auto result = SettingsEditorOtherReferences(opening, f.root, object);
+		CHECK(result.size() == 1 && result.front().references.size() == 1 && !result.front().memberTable);
+	}
+	const auto globalRefs = SettingsEditorOtherReferences(opening, f.other, list);
+	CHECK(globalRefs.size() == 1 && globalRefs.front().path == f.root
+		&& globalRefs.front().references.size() == 1 && globalRefs.front().memberTable == members);
+	CHECK(SettingsEditorOtherReferences(CaptureSettingsEditorOpening(f.routing, A), f.root, list).empty());
+	auto follow = opening;
+	follow.workMode = AccountWorkMode::Follow;
+	CHECK(SettingsEditorOtherReferences(follow, f.root, list).front().ignoredInFollow);
+	auto unavailable = opening;
+	unavailable.ownSource.reset();
+	CHECK(SettingsEditorOtherReferences(unavailable, f.root, list).front().status == SettingsReferenceStatus::Unavailable);
+	for (const auto &[input, status] : {
+			std::pair{ SettingsFileState::Missing, SettingsReferenceStatus::Missing },
+			std::pair{ SettingsFileState::ReadError, SettingsReferenceStatus::Unreadable } }) {
+		auto captured = opening;
+		captured.ownSource->file.input = { input };
+		captured.ownGood = {};
+		CHECK(SettingsEditorOtherReferences(captured, f.root, list).front().status == status);
+	}
+	auto invalid = opening;
+	invalid.ownSource->file.input = { SettingsFileState::Readable, "broken=[" };
+	invalid.ownGood = {};
+	CHECK(SettingsEditorOtherReferences(invalid, f.root, list).front().status == SettingsReferenceStatus::Invalid);
+	invalid.ownGood = { SettingsFileState::Readable, ownBytes };
+	const auto recovered = SettingsEditorOtherReferences(invalid, f.root, list).front();
+	CHECK(recovered.usesRecovery && recovered.references.size() == 1 && recovered.memberTable == members);
+	CHECK(Get(f.other) == ownBytes && !QFileInfo::exists(f.third));
+
+	auto rename = SettingsStructures::RewriteReferences(Get(f.root), list, u"named"_q).edits;
+	rename.push_back({ list, SettingsObjectEdit{ SettingsCollectionOp::Rename, u"named"_q } });
+	const auto reviewed = PrepareSettingsEditorEdit(f.routing, opening, rename);
+	CHECK(reviewed.review);
+	if (!reviewed.review) return;
+	Put(f.other, ownBytes + "\n[list_sets.extra]\nlist_order=[{list='work'}]\n");
+	const auto fresh = CaptureSettingsEditorOpening(f.routing, B);
+	CHECK(ReprepareSettingsEditorEdit(f.routing, fresh, *reviewed.review).status == SettingsEditorStatus::StaleRevision);
+}
+
 void SaveCases() {
 	{
 		auto f = Fixture();
@@ -437,6 +498,7 @@ int main(int argc, char **argv) {
 	MembershipCases();
 	Refusals();
 	CollectionAndConflictCases();
+	CounterpartReferences();
 	SaveCases();
 	std::printf("%d checks, %d failures\n", Checks, Failures);
 	return Failures ? 1 : 0;

@@ -270,6 +270,55 @@ LayerSettingsResult InspectSettingsEditor(const SettingsEditorOpening &opening) 
 		opening.workMode);
 }
 
+std::vector<SettingsReferenceReport> SettingsEditorOtherReferences(
+		const SettingsEditorOpening &opening,
+		const QString &destination,
+		const SettingAddress &object) {
+	const auto descriptor = FindSettingDescriptor(object);
+	if (!descriptor || !SettingsStructures::IsNamedObject(descriptor->id)) return {};
+	auto result = std::vector<SettingsReferenceReport>();
+	const auto add = [&](SettingsOpenRole role,
+			const std::optional<AccountSettingsOpenTarget> &source,
+			const SettingsFileInput &good) {
+		if (source && source->file.path == destination) return;
+		auto &report = result.emplace_back();
+		report.role = role;
+		if (!source) return;
+		const auto &input = source->file.input;
+		const auto selected = SelectPreviewLayerSource(input, good, source->file.path);
+		report.path = selected.path;
+		report.usesRecovery = selected.report.usedGood;
+		if (!selected.report.usable) {
+			report.status = (input.state == SettingsFileState::Missing) ? SettingsReferenceStatus::Missing
+				: (input.state == SettingsFileState::ReadError) ? SettingsReferenceStatus::Unreadable
+				: SettingsReferenceStatus::Invalid;
+			return;
+		}
+		const auto &bytes = report.usesRecovery ? good.bytes : input.bytes;
+		const auto mapped = MapSettingsSource(bytes);
+		if (!mapped.ok()) {
+			report.status = SettingsReferenceStatus::Invalid;
+			return;
+		}
+		report.status = SettingsReferenceStatus::Checked;
+		report.references = SettingsStructures::RewriteReferences(bytes, object, {}).uses;
+		if (descriptor->id == SettingId::ListObject) {
+			auto members = object;
+			members.emplace_back(u"members"_q);
+			if (std::any_of(mapped.nodes.begin(), mapped.nodes.end(), [&](const auto &node) {
+				return node.address == members;
+			})) {
+				report.memberTable = std::move(members);
+				report.ignoredInFollow = role == SettingsOpenRole::Own
+					&& opening.workMode == AccountWorkMode::Follow;
+			}
+		}
+	};
+	add(SettingsOpenRole::AppWide, opening.globalSource, opening.globalGood);
+	add(SettingsOpenRole::Own, opening.ownSource, opening.ownGood);
+	return result;
+}
+
 bool SettingsEditorOpeningMatches(
 		DesktopAccountConfig &routing,
 		const SettingsEditorOpening &opening) {
@@ -306,6 +355,15 @@ SettingsEditorPreparation ReprepareSettingsEditorEdit(
 	}
 	const auto group = std::get_if<std::vector<SettingsEdit>>(&review._intent);
 	if (group) {
+		for (const auto &edit : *group) {
+			const auto named = std::get_if<SettingsObjectEdit>(&edit.operation);
+			if (named && (named->operation == SettingsCollectionOp::Rename || named->operation == SettingsCollectionOp::Erase)
+				&& SettingsEditorOtherReferences(review._opening, old.file.path, edit.address)
+					!= SettingsEditorOtherReferences(opening, current.file.path, edit.address)) {
+				return { .status = Status::StaleRevision,
+					.error = u"References in the other routed settings file changed. Open the collection and review them again."_q };
+			}
+		}
 		if (!SettingsStructures::CanReplay(old.file.input.bytes, current.file.input.bytes, *group)) return conflict;
 	} else {
 		const auto &membership = std::get<SettingsEditorMembers>(review._intent);

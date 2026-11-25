@@ -92,6 +92,8 @@ collection_edit = collections[collections.index("void edit(Op op)"):collections.
 ordered(collection_edit, "FindSettingDescriptor(_config.address)", "if (!descriptor)", "return;", "descriptor->id")
 ordered(collection_edit, "FindSettingDescriptor(item.address)", "if (_config.named && !insert && !objectDescriptor)", "return;")
 assert not re.search(r"FindSettingDescriptor\([^\n]+\)->", collections)
+ordered(collections, "void showOtherReferences", "_config.otherReferences(object)", "Other accounts’ files are not checked")
+ordered(collection_edit, "showOtherReferences(item.address)", "_accept = button")
 ordered(collections, 'u"Add"_q, [this] { edit(Op::Insert)', 'u"Duplicate"_q, [this] { edit(Op::Duplicate)',
         'u"Delete"_q, [this] { edit(Op::Erase)', 'u"Move up"_q, [this] { move(-1)',
         "&QAbstractItemModel::rowsMoved", "moveTo(from, to)",

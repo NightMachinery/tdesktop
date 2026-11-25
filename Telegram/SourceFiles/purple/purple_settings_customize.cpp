@@ -1382,6 +1382,7 @@ private:
 			}
 		}
 		const auto opening = _opening.origin;
+		const auto referenceOpening = named ? _opening : SettingsEditorOpening();
 		const auto weak = QPointer(this);
 		clearSheet();
 		_editingKey = row.key;
@@ -1413,6 +1414,9 @@ private:
 					edits->insert(edits->begin(), current->begin(), current->end());
 				}
 				weak->stageIntent(std::move(intent), key);
+			},
+			.otherReferences = [referenceOpening, path = target.path](const SettingAddress &object) {
+				return SettingsEditorOtherReferences(referenceOpening, path, object);
 			},
 			.inspect = [weak](SettingAddress selection) {
 				if (!weak || !weak->visibleContent()) return;

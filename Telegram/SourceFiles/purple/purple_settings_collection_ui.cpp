@@ -463,6 +463,42 @@ private:
 		return [input] { return input->text(); };
 	}
 
+	void showOtherReferences(const SettingAddress &object) {
+		const auto reports = _config.otherReferences
+			? _config.otherReferences(object) : std::vector<SettingsReferenceReport>();
+		for (const auto &report : reports) {
+			const auto role = report.role == SettingsOpenRole::Own
+				? u"This account’s settings"_q : u"App-wide settings"_q;
+			label(report.path.isEmpty() ? role : u"%1 · %2"_q.arg(role, report.path));
+			switch (report.status) {
+			case SettingsReferenceStatus::Unavailable:
+				label(u"This opening has no read access to that file."_q);
+				break;
+			case SettingsReferenceStatus::Missing:
+				label(u"The file was absent at opening."_q);
+				break;
+			case SettingsReferenceStatus::Unreadable:
+				label(u"The file could not be read. Its references were not checked."_q);
+				break;
+			case SettingsReferenceStatus::Invalid:
+				label(u"The file could not be parsed. Its references were not checked."_q);
+				break;
+			case SettingsReferenceStatus::Checked:
+				if (report.usesRecovery) label(u"The check used the captured last-good copy."_q);
+				for (const auto &address : report.references) label(SettingsTree::Address(address));
+				if (report.memberTable) {
+					label(u"Stored member table · %1"_q.arg(SettingsTree::Address(*report.memberTable))
+						+ (report.ignoredInFollow ? u" · Inactive in Follow mode"_q : QString()));
+				}
+				if (report.references.empty() && !report.memberTable) {
+					label(u"No recognized references were found in this file."_q);
+				}
+				break;
+			}
+		}
+		label(u"This draft can change its destination file only. Other accounts’ files are not checked."_q);
+	}
+
 	void edit(Op op) {
 		if (!_config.current()) return;
 		const auto at = _list->currentRow();
@@ -498,6 +534,9 @@ private:
 			label(u"Same-file references"_q);
 			for (const auto &address : uses.uses) label(SettingsTree::Address(address));
 			if (op == Op::Erase) label(u"Choose the name that replaces these references before removal."_q);
+		}
+		if (_config.named && (op == Op::Rename || op == Op::Erase)) {
+			showOtherReferences(item.address);
 		}
 		if (needsName || (op == Op::Erase && !uses.uses.empty()) || (insert && _config.peerField)) {
 			name = new QLineEdit(_form);

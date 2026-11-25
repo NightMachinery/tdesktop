@@ -58,6 +58,25 @@ struct SettingsEditorOpening {
 	std::function<bool(Window::Controller*)> windowCurrent;
 };
 
+enum class SettingsReferenceStatus { Checked, Missing, Unavailable, Unreadable, Invalid };
+
+struct SettingsReferenceReport {
+	SettingsOpenRole role = SettingsOpenRole::Own;
+	SettingsReferenceStatus status = SettingsReferenceStatus::Unavailable;
+	QString path;
+	std::vector<SettingAddress> references;
+	std::optional<SettingAddress> memberTable;
+	bool usesRecovery = false;
+	bool ignoredInFollow = false;
+
+	friend bool operator==(const SettingsReferenceReport &, const SettingsReferenceReport &) = default;
+};
+
+[[nodiscard]] std::vector<SettingsReferenceReport> SettingsEditorOtherReferences(
+	const SettingsEditorOpening &opening,
+	const QString &destination,
+	const SettingAddress &object);
+
 struct SettingsEditorPreview {
 	SettingsEditorRoute route = SettingsEditorRoute::Own;
 	AccountKey requester;
