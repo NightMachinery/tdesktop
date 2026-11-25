@@ -12,6 +12,7 @@
 #include "purple/purple_config.h"
 #include "purple/purple_gate.h"
 #include "purple/purple_keys.h"
+#include "purple/purple_list_filter_keys.h"
 #include "purple/purple_picker.h"
 #include "purple/purple_privacy_screen.h"
 #include "purple/purple_settings_collection_ui.h"
@@ -367,7 +368,6 @@ public:
 		});
 		connect(_clear, &QPushButton::clicked, this, [this] {
 			_filter->clear();
-			_filterBeforeEdit.clear();
 			_tree->setFocus();
 		});
 		connect(_tree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
@@ -477,8 +477,6 @@ protected:
 			const auto input = static_cast<QInputMethodEvent*>(event);
 			if (input->preeditString().isEmpty()) _preedit.remove(object);
 			else _preedit.insert(object);
-		} else if (event->type() == QEvent::FocusIn && object == _filter) {
-			_filterBeforeEdit = _filter->text();
 		} else if (event->type() == QEvent::FocusOut) {
 			_preedit.remove(object);
 		} else if (event->type() == QEvent::MouseButtonRelease && _confirm && object == _confirm) {
@@ -523,7 +521,12 @@ private:
 		layout->addLayout(scope);
 
 		auto filterRow = new QHBoxLayout();
-		_filter->setPlaceholderText(u"Filter settings…"_q);
+		const auto updateFilterHint = [this](bool modal) {
+			_filter->setPlaceholderText(modal ? u"i or / to filter settings"_q : u"Filter settings…"_q);
+		};
+		updateFilterHint(ModalKeysEnabled());
+		ModalKeysEnabledChanges() | rpl::on_next(updateFilterHint, lifetime());
+		ListFilter::Mark(_filter);
 		_filter->setAccessibleName(u"Filter settings"_q);
 		filterRow->addWidget(_filter, 1);
 		filterRow->addWidget(_clear);
@@ -855,11 +858,6 @@ private:
 		_inspector->setText(lines.join(u'\n'));
 	}
 
-	void startFilter() {
-		_filterBeforeEdit = _filter->text();
-		_filter->setFocus();
-	}
-
 	void selectSibling(int delta) {
 		if (!_anchor.isEmpty()) {
 			const auto previous = selected();
@@ -921,14 +919,16 @@ private:
 	bool handleKey(QObject *object, QKeyEvent *event) {
 		if (!visibleContent()) return true;
 		const auto mods = event->modifiers() & ~Qt::KeypadModifier;
-		const auto key = event->key();
+		const auto key = ModalPhysicalKey(*event);
 		const auto enter = key == Qt::Key_Return || key == Qt::Key_Enter;
 		const auto cancel = key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod);
 		const auto modal = ModalKeysEnabled();
+		const auto once = [&] { return AllowModalLayerKey(*event, this); };
+		const auto moving = [&] { return AllowModalLayerKey(*event, this, true); };
 		if (_capture && _pages->currentWidget() == _sheetPage && object == _record) {
 			if (key != Qt::Key_Shift && key != Qt::Key_Control && key != Qt::Key_Meta
 				&& key != Qt::Key_Alt && key != Qt::Key_AltGr && key != Qt::Key_unknown
-				&& !event->isAutoRepeat()) {
+				&& once()) {
 				const auto chord = QKeySequence(event->keyCombination());
 				_line->setText(chord.toString(QKeySequence::PortableText));
 				endCapture();
@@ -938,40 +938,51 @@ private:
 		if (_preedit.contains(object) || _preedit.contains(QApplication::focusWidget())
 			|| (_collection && SettingsCollectionHasPreedit(_collection))) return false;
 		if (const auto button = qobject_cast<QPushButton*>(object); button && enter && !mods) {
-			if (!event->isAutoRepeat()) button->click();
+			if (once()) button->click();
 			return true;
 		}
 		if (object == _filter) {
-			if (cancel) {
-				_filter->setText(_filterBeforeEdit);
+			if (cancel || (modal && ListFilter::Exit(key, mods))) {
+				if (!once()) return true;
 				_tree->setFocus();
 				return true;
 			}
 			if (enter && !mods) {
-				_filterBeforeEdit = _filter->text();
+				if (!once()) return true;
 				_tree->setFocus();
+				if (modal) activateRow();
 				return true;
 			}
-			if ((key == Qt::Key_Down || key == Qt::Key_Up) && !mods) {
-				selectSibling(key == Qt::Key_Down ? 1 : -1);
+			if ((!mods && (key == Qt::Key_Down || key == Qt::Key_Up))
+				|| (mods == kCtrlMod && (key == Qt::Key_N || key == Qt::Key_P))) {
+				if (moving()) selectSibling((key == Qt::Key_Down || key == Qt::Key_N) ? 1 : -1);
 				return true;
 			}
 		}
 		if (_pages->currentWidget() == _sheetPage) {
-			if (const auto list = qobject_cast<QListWidget*>(object); modal && list && !mods
-				&& (key == Qt::Key_J || key == Qt::Key_K)) {
-				list->setCurrentRow(std::clamp(list->currentRow() + (key == Qt::Key_J ? 1 : -1),
-					0, std::max(0, list->count() - 1)));
+			if (const auto list = qobject_cast<QListWidget*>(object); list && !mods
+				&& (key == Qt::Key_Down || key == Qt::Key_Up
+					|| (modal && (key == Qt::Key_J || key == Qt::Key_K)))) {
+				const auto down = (key == Qt::Key_Down || key == Qt::Key_J);
+				if (moving()) {
+					list->setCurrentRow(std::clamp(list->currentRow() + (down ? 1 : -1),
+						0, std::max(0, list->count() - 1)));
+				}
 				return true;
 			}
 			if (_reviewBody && object == _reviewBody && !mods) {
 				if (key == Qt::Key_BracketLeft || key == Qt::Key_BracketRight) {
-					showReviewPage(key == Qt::Key_BracketLeft ? -1 : 1);
+					if (once()) showReviewPage(key == Qt::Key_BracketLeft ? -1 : 1);
 					return true;
 				}
-				if (modal && (key == Qt::Key_J || key == Qt::Key_K)) {
-					_reviewBody->verticalScrollBar()->triggerAction(key == Qt::Key_J
-						? QAbstractSlider::SliderSingleStepAdd : QAbstractSlider::SliderSingleStepSub);
+				if (key == Qt::Key_Down || key == Qt::Key_Up
+					|| (modal && (key == Qt::Key_J || key == Qt::Key_K))) {
+					if (moving()) {
+						const auto direction = (key == Qt::Key_Down || key == Qt::Key_J)
+							? 1 : -1;
+						ScrollModalLayer(*event, this, _reviewBody,
+							direction * _reviewBody->verticalScrollBar()->singleStep());
+					}
 					return true;
 				}
 			}
@@ -979,44 +990,55 @@ private:
 			const auto submit = enter && (mods == kCtrlMod || (!mods && object == _line));
 			switch (SettingsTree::ShouldHandleEditorKey(
 					_preedit.contains(object), submit, !_multi || mods == kCtrlMod, cancel)) {
-			case EditorKey::Stage: if (!event->isAutoRepeat() && !_editingKey.isEmpty()) stageForm(); return true;
-			case EditorKey::Back: back(); return true;
+			case EditorKey::Stage: if (once() && !_editingKey.isEmpty()) stageForm(); return true;
+			case EditorKey::Back: if (once()) back(); return true;
 			case EditorKey::Native: return false;
 			}
 		}
-		if (cancel) { back(); return true; }
-		if (key == Qt::Key_F6) { changePanel(mods.testFlag(Qt::ShiftModifier)); return true; }
+		if (cancel || (modal && ListFilter::Exit(key, mods)
+			&& (object == _tree || object == this))) {
+			if (once()) {
+				if (modal && !_filter->text().isEmpty() && (object == _tree || object == this)) {
+					_filter->clear();
+				} else {
+					back();
+				}
+			}
+			return true;
+		}
+		if (key == Qt::Key_F6) { if (once()) changePanel(mods.testFlag(Qt::ShiftModifier)); return true; }
 		if (key == Qt::Key_Tab && !mods && object == _inspector) {
-			_tree->setFocus();
+			if (once()) _tree->setFocus();
 			return true;
 		}
 		if (object != _tree && object != this) return false;
 		if (((key == Qt::Key_Down || (modal && key == Qt::Key_J)) && !mods)
-			|| (key == Qt::Key_N && mods == kCtrlMod)) selectSibling(1);
+			|| (key == Qt::Key_N && mods == kCtrlMod)) { if (moving()) selectSibling(1); }
 		else if (((key == Qt::Key_Up || (modal && key == Qt::Key_K)) && !mods)
-			|| (key == Qt::Key_P && mods == kCtrlMod)) selectSibling(-1);
-		else if (modal && key == Qt::Key_H && !mods) traverse(false);
-		else if (modal && key == Qt::Key_L && !mods) traverse(true);
+			|| (key == Qt::Key_P && mods == kCtrlMod)) { if (moving()) selectSibling(-1); }
+		else if (modal && key == Qt::Key_H && !mods) { if (moving()) traverse(false); }
+		else if (modal && key == Qt::Key_L && !mods) { if (moving()) traverse(true); }
 		else if ((key == Qt::Key_Left || key == Qt::Key_Right) && !mods) {
-			traverse((key == Qt::Key_Right) == (layoutDirection() != Qt::RightToLeft));
+			if (moving()) traverse((key == Qt::Key_Right) == (layoutDirection() != Qt::RightToLeft));
 		} else if (key == Qt::Key_Tab && !mods) {
+			if (!once()) return true;
 			if (const auto item = _tree->currentItem(); item && item->childCount()) {
 				item->setExpanded(!item->isExpanded());
 			} else {
 				_inspector->setFocus();
 			}
-		} else if (enter && !mods && !event->isAutoRepeat()) activateRow();
+		} else if (enter && !mods) { if (once()) activateRow(); }
 		else if (!modal) return false;
-		else if (key == Qt::Key_Slash && !mods) startFilter();
-		else if (key == Qt::Key_Question) showHelp();
-		else if (key == Qt::Key_R && !mods && !event->isAutoRepeat()) resetSelected();
-		else if (key == Qt::Key_U && !mods && !event->isAutoRepeat()) undo();
-		else if (key == Qt::Key_D && !mods && !event->isAutoRepeat()) showReview();
-		else if (key == Qt::Key_A && mods == Qt::ShiftModifier && !event->isAutoRepeat()) showAccounts();
-		else if (key == Qt::Key_Q && !mods) back();
+		else if (ListFilter::Enter(*event, key)) { if (once()) _filter->setFocus(); }
+		else if (key == Qt::Key_Question) { if (once()) showHelp(); }
+		else if (key == Qt::Key_R && !mods) { if (once()) resetSelected(); }
+		else if (key == Qt::Key_U && !mods) { if (once()) undo(); }
+		else if (key == Qt::Key_D && !mods) { if (once()) showReview(); }
+		else if (key == Qt::Key_A && mods == Qt::ShiftModifier) { if (once()) showAccounts(); }
+		else if (key == Qt::Key_Q && !mods) { if (once()) back(); }
 		else if (((key == Qt::Key_Y || key == Qt::Key_T || key == Qt::Key_Minus) && !mods)
 			|| (key == Qt::Key_Plus && (!mods || mods == Qt::ShiftModifier))) {
-			if (!event->isAutoRepeat()) editShortcut(key);
+			if (once()) editShortcut(key);
 		} else return false;
 		return true;
 	}
@@ -1707,7 +1729,7 @@ private:
 		const auto row = selected();
 		if (row && !row->help.isEmpty()) addSheetWidget(HelpLabel(_sheet, row->help));
 		addSheetWidget(HelpLabel(_sheet, ModalKeysEnabled()
-			? u"j / k Move · h / l Fold or enter · / Filter · Return Edit\n"
+			? u"j / k Move · h / l Fold or enter · i or / Filter · Return Edit\n"
 				"t Toggle · + / − Step · r Reset · u Undo · d Review · y Copy TOML path\n"
 				"A Switch account · F6 Change panel · F8 Privacy screen outside text fields · Esc Back"_q
 			: u"Arrows Move or fold · Return Edit · F6 Change panel · Esc Back\n"
@@ -1715,7 +1737,7 @@ private:
 		addSheetWidget(HelpLabel(_sheet, u"Forms · Ctrl+Return Stage. Return inserts a newline in multiline fields."_q));
 		if (ModalKeysEnabled()) {
 			addSheetWidget(HelpLabel(_sheet, u"Collections · a Add · Shift+D Duplicate · x Remove · Shift+J/K Reorder · u Undo\n"
-				"Chat picker · / Search · Space Add the selected chat"_q));
+				"Chat picker · i or / Search · Space Add the selected chat"_q));
 		}
 		addSheetWidget(HelpLabel(_sheet, u"Review · Effects shows what changes. Lines shows the file diff. "
 			"Use [ / ] to page through Lines while it has focus. Apply changes writes this draft to one file."_q));
@@ -2158,7 +2180,6 @@ private:
 	QString _selection;
 	QString _anchor;
 	QString _accountId;
-	QString _filterBeforeEdit;
 	QLineEdit *_line = nullptr;
 	QPlainTextEdit *_multi = nullptr;
 	QComboBox *_choice = nullptr;
@@ -2295,6 +2316,9 @@ std::optional<bool> FilterCustomizeSettingsInput(QObject *receiver, QEvent *even
 			return widget && (editor.data() == widget || editor->isAncestorOf(widget));
 		};
 		if (owns(target) || ((shortcut || QApplication::activePopupWidget()) && owns(focus))) {
+			if (HandleModalWindowHints(target, event)) {
+				return true;
+			}
 			if (type == QEvent::KeyPress && editor->privacyKey(focus, *static_cast<QKeyEvent*>(event))) {
 				return true;
 			}

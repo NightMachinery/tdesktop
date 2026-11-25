@@ -11,6 +11,7 @@ class MainWindow;
 class QEvent;
 class QKeyEvent;
 class QObject;
+class QAbstractScrollArea;
 class QWidget;
 
 namespace Ui {
@@ -28,6 +29,21 @@ class SectionBuilder;
 namespace Purple {
 
 [[nodiscard]] bool HandleModalKeys(QObject *receiver, QEvent *event);
+[[nodiscard]] bool HandleModalWindowHints(QWidget *receiver, QEvent *event);
+[[nodiscard]] int ModalPhysicalKey(const QKeyEvent &event);
+[[nodiscard]] bool AllowModalLayerKey(
+	const QKeyEvent &event,
+	not_null<QWidget*> layer,
+	bool motion = false);
+void CloseModalFilterLayer(not_null<Ui::LayerWidget*> layer);
+void ScrollModalLayer(
+	const QKeyEvent &event,
+	not_null<QWidget*> layer,
+	not_null<QAbstractScrollArea*> scroll,
+	int delta);
+#ifdef Q_OS_MAC
+[[nodiscard]] bool SwallowModalNativeRepeat(QWidget *window, int nativeKey);
+#endif // Q_OS_MAC
 [[nodiscard]] bool ModalKeysOwnChatListFocus(QWidget *widget);
 [[nodiscard]] bool CalendarDayKeysEnabled();
 [[nodiscard]] int CalendarDayKeyOffset(const QKeyEvent &event);
@@ -35,6 +51,7 @@ namespace Purple {
 void EnsureModalKeysAttached(not_null<MainWindow*> window);
 [[nodiscard]] int ModalKeysStatusHeight(not_null<MainWindow*> window);
 void UpdateModalKeysLayout(not_null<MainWindow*> window, QRect body);
+void RefreshModalKeysColumns(not_null<MainWindow*> window);
 void RaiseModalKeysChrome(not_null<MainWindow*> window);
 
 void InstallMainMenuKeys(

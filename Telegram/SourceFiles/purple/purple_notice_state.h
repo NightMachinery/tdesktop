@@ -31,6 +31,28 @@ enum class NoticeKind {
 	Ack,
 };
 
+enum class NoticeEscape {
+	CancelPrefix,
+	HideHelp,
+	Close,
+};
+
+struct NoticeKeys {
+	bool pendingG = false;
+	bool showHelp = false;
+
+	[[nodiscard]] NoticeEscape escape() {
+		if (pendingG) {
+			pendingG = false;
+			return NoticeEscape::CancelPrefix;
+		} else if (showHelp) {
+			showHelp = false;
+			return NoticeEscape::HideHelp;
+		}
+		return NoticeEscape::Close;
+	}
+};
+
 enum class DeliveryRoute {
 	StockToast,
 	OpenDialogNow,

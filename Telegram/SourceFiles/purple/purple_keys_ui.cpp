@@ -1,7 +1,10 @@
 #include "purple/purple_keys_ui.h"
+#include "purple/purple_hint_targets.h"
 
 #include "purple/purple_keys.h"
 #include "purple/purple_keys_colors.h"
+#include "purple/purple_list_filter_keys.h"
+#include "purple/purple_list_selection.h"
 
 #include "base/event_filter.h"
 #include "data/data_forum_topic.h"
@@ -24,6 +27,7 @@
 #include "styles/style_keys_legend.h"
 #include "styles/style_layers.h"
 #include "styles/style_widgets.h"
+#include "styles/style_window.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
@@ -38,10 +42,6 @@
 #include <QtGui/QTextBlock>
 #include <QtGui/QTextLayout>
 #include <QtWidgets/QTextEdit>
-
-#ifdef Q_OS_MAC
-#include <Carbon/Carbon.h>
-#endif // Q_OS_MAC
 
 #include <algorithm>
 #include <cmath>
@@ -190,21 +190,57 @@ int PaintChords(
 	return cursor - x;
 }
 
-int PhysicalKeyForNav(const QKeyEvent &event) {
-	const auto logical = (event.key() == Qt::Key_Enter)
-		? Qt::Key_Return
-		: event.key();
-#ifdef Q_OS_MAC
-	if (event.timestamp() && event.modifiers().testFlag(Qt::AltModifier)) {
-		switch (event.nativeVirtualKey()) {
-		case kVK_ANSI_P: return Qt::Key_P;
-		case kVK_ANSI_N: return Qt::Key_N;
-		case kVK_ANSI_X: return Qt::Key_X;
-		default: break;
+int ListStep(int key, Qt::KeyboardModifiers mods, bool plainLetters) {
+	if (!mods) {
+		if (key == Qt::Key_Down || (plainLetters && key == Qt::Key_J)) {
+			return 1;
+		} else if (key == Qt::Key_Up || (plainLetters && key == Qt::Key_K)) {
+			return -1;
+		}
+	} else if (mods == kCtrlMod) {
+		if (key == Qt::Key_N || key == Qt::Key_J) {
+			return 1;
+		} else if (key == Qt::Key_P || key == Qt::Key_K) {
+			return -1;
 		}
 	}
-#endif // Q_OS_MAC
-	return logical;
+	return 0;
+}
+
+using FilterResult = base::EventFilterResult;
+
+void InstallListFilter(
+		not_null<Ui::LayerWidget*> layer,
+		not_null<Ui::InputField*> field,
+		Fn<FilterResult(QKeyEvent*)> handler) {
+	const auto edit = field->rawTextEdit();
+	ListFilter::Mark(edit);
+	base::install_event_filter(edit, [=](not_null<QEvent*> event) {
+		if (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut) {
+			layer->update();
+		}
+		if (event->type() != QEvent::KeyPress) {
+			return FilterResult::Continue;
+		}
+		const auto key = static_cast<QKeyEvent*>(event.get());
+		const auto layout = edit->textCursor().block().layout();
+		if (layout && !layout->preeditAreaText().isEmpty()) {
+			return ListFilter::ProtectPreedit(
+				ModalPhysicalKey(*key), key->modifiers(), ModalKeysEnabled())
+				? FilterResult::Cancel : FilterResult::Continue;
+		}
+		return handler(key);
+	});
+}
+
+void ClearListFilterOrClose(
+		not_null<Ui::LayerWidget*> layer,
+		not_null<Ui::InputField*> field) {
+	if (field->getLastText().isEmpty()) {
+		CloseModalFilterLayer(layer);
+	} else {
+		field->setText(QString());
+	}
 }
 
 void PaintHighlightedLabel(
@@ -263,6 +299,12 @@ ModalStatusBar::ModalStatusBar(not_null<QWidget*> parent)
 : RpWidget(parent) {
 	setFocusPolicy(Qt::NoFocus);
 	setAttribute(Qt::WA_OpaquePaintEvent);
+	style::PaletteChanged() | rpl::on_next([this] { update(); }, lifetime());
+}
+
+int ModalStatusBar::PreferredHeight() {
+	const auto fontHeight = st::normalFont->height;
+	return fontHeight + fontHeight / 2 + 2 * st::lineWidth;
 }
 
 void ModalStatusBar::setState(StatusState state) {
@@ -270,210 +312,37 @@ void ModalStatusBar::setState(StatusState state) {
 	update();
 }
 
+void ModalStatusBar::setColumns(StatusColumns columns) {
+	if (_columns != columns) {
+		_columns = std::move(columns);
+		update();
+	}
+}
+
 void ModalStatusBar::paintEvent(QPaintEvent *) {
 	auto p = Painter(this);
-	auto hq = PainterHighQualityEnabler(p);
-	const auto r = rect();
-	const auto rtl = IsRtl(this);
-
-	const auto bg = BlendColor(st::windowBg->c, st::windowBgOver->c, 0.55);
-	p.fillRect(r, bg);
-	p.fillRect(0, 0, r.width(), 1, st::boxDividerBg->c);
-
-	const auto badgeFont = MonoFont(11, true);
-	const auto badgeFm = QFontMetrics(badgeFont);
-	const auto badgeText = _state.badgeText.isEmpty()
-		? u"NORMAL"_q
-		: _state.badgeText;
-	const auto badgeW = std::max(72, badgeFm.horizontalAdvance(badgeText) + 22);
-	const auto badgeRect = rtl
-		? QRect(r.width() - badgeW, 1, badgeW, r.height() - 1)
-		: QRect(0, 1, badgeW, r.height() - 1);
-	p.fillRect(badgeRect, BadgeColor(_state.badge));
-	p.setFont(badgeFont);
-	p.setPen(Qt::white);
-	p.drawText(badgeRect, Qt::AlignCenter, badgeText);
-
-	auto leftX = rtl ? 12 : (badgeW + 12);
-	auto rightX = rtl ? (r.width() - badgeW - 12) : (r.width() - 12);
-
-	const auto uiFont = st::normalFont;
-	const auto uiBold = st::semiboldFont;
-	const auto monoFont = MonoFont(11, false);
-	const auto monoBold = MonoFont(11, true);
-	const auto pillBg = st::windowBg->c;
-	const auto pillMuted = ReadableText(st::windowSubTextFg->c, pillBg);
-
-	// Right-side quiet discovery cue (layer-specific when a layer is open).
-	const auto cue = !_state.rightCue.isEmpty()
-		? _state.rightCue
-		: (_state.localleaderHint.isEmpty()
-			? u"SPC leader  ·  , local  ·  M-x run  ·  ? help"_q
-			: (_state.localleaderHint + u"  ·  M-x run  ·  ? help"_q));
-	const auto cueFm = QFontMetrics(uiFont);
-	const auto cueW = cueFm.horizontalAdvance(cue);
-	const auto minMiddle = _state.rightCue.isEmpty() ? 240 : 120;
-	if (rightX - leftX > cueW + minMiddle) {
-		p.setFont(uiFont);
-		p.setPen(st::windowSubTextFg);
-		const auto cueRect = rtl
-			? QRect(leftX, 1, cueW, r.height() - 1)
-			: QRect(rightX - cueW, 1, cueW, r.height() - 1);
-		p.drawText(cueRect, Qt::AlignVCenter | (rtl ? Qt::AlignRight : Qt::AlignLeft), cue);
-		if (rtl) {
-			leftX += cueW + 14;
-		} else {
-			rightX -= cueW + 14;
-		}
-	}
-
-	auto cursor = rtl ? rightX : leftX;
-	const auto advance = [&](int w, int gap = 10) {
-		if (rtl) {
-			cursor -= w + gap;
-		} else {
-			cursor += w + gap;
-		}
-	};
-	const auto slotRect = [&](int w) {
-		return rtl
-			? QRect(cursor - w, 1, w, r.height() - 1)
-			: QRect(cursor, 1, w, r.height() - 1);
-	};
-	const auto remaining = [&] {
-		return std::max(0, rtl ? (cursor - leftX) : (rightX - cursor));
-	};
-
-	// Pane label.
-	if (!_state.paneLabel.isEmpty() && remaining() > 40) {
-		const auto fm = QFontMetrics(uiBold);
-		const auto w = std::min(remaining(), fm.horizontalAdvance(_state.paneLabel));
-		p.setFont(uiBold);
-		p.setPen(st::windowFg);
-		p.drawText(slotRect(w), Qt::AlignVCenter | Qt::AlignLeft, _state.paneLabel);
-		advance(w, 8);
-	}
-
-	// Context chip (signals active localleader scope).
-	if (!_state.contextChip.isEmpty() && remaining() > 56) {
-		const auto fm = QFontMetrics(monoFont);
-		const auto textW = fm.horizontalAdvance(_state.contextChip);
-		const auto chipW = std::min(remaining(), textW + 14);
-		const auto chipRect = slotRect(chipW).adjusted(0, 4, 0, -4);
-		p.setPen(QPen(st::boxDividerBg->c, 1));
-		p.setBrush(pillBg);
-		p.drawRoundedRect(QRectF(chipRect).adjusted(.5, .5, -.5, -.5), 4, 4);
-		p.setFont(monoFont);
-		p.setPen(pillMuted);
-		p.drawText(chipRect, Qt::AlignCenter, _state.contextChip);
-		advance(chipW, 10);
-	}
-
-	// Compact ZEN mode indicator pill.
-	if (_state.zenMode && remaining() > 44) {
-		const auto zenText = u"ZEN"_q;
-		const auto zenW = MeasureTextWidth(monoBold, zenText) + 10;
-		if (zenW <= remaining()) {
-			const auto zenRect = slotRect(zenW).adjusted(0, 4, 0, -4);
-			auto fill = BadgeColor(BadgeKind::Leader);
-			fill.setAlpha(30);
-			p.setPen(Qt::NoPen);
-			p.setBrush(fill);
-			p.drawRoundedRect(zenRect, 4, 4);
-			p.setFont(monoBold);
-			p.setPen(BadgeColor(BadgeKind::Leader));
-			p.drawText(zenRect, Qt::AlignCenter, zenText);
-			advance(zenW, 8);
-		}
-	}
-
-	// Unread unmuted CHATS breakdown pill: DM / GP / CH.
-	if (_state.unreadKnown && _state.pendingText.isEmpty() && remaining() > 120) {
-		struct BucketPart {
-			QString text;
-			bool active = false;
-		};
-		const std::array<BucketPart, 3> parts = { {
-			{ u"DM "_q + QString::number(_state.unreadDm), _state.unreadDm > 0 },
-			{ u"GP "_q + QString::number(_state.unreadGp), _state.unreadGp > 0 },
-			{ u"CH "_q + QString::number(_state.unreadCh), _state.unreadCh > 0 },
-		} };
-		const auto sep = u" · "_q;
-		const auto sepW = MeasureTextWidth(monoFont, sep) - 2;
-		auto innerW = 0;
-		std::array<int, 3> partW = {};
-		for (auto i = 0; i < 3; ++i) {
-			partW[i] = MeasureTextWidth(parts[i].active ? monoBold : monoFont, parts[i].text) - 1;
-			innerW += partW[i];
-			if (i > 0) {
-				innerW += sepW;
-			}
-		}
-		const auto pillW = innerW + 14;
-		if (pillW <= remaining()) {
-			const auto pillRect = slotRect(pillW).adjusted(0, 4, 0, -4);
-			p.setPen(QPen(st::boxDividerBg->c, 1));
-			p.setBrush(pillBg);
-			p.drawRoundedRect(QRectF(pillRect).adjusted(.5, .5, -.5, -.5), 4, 4);
-			const auto pillActive = ReadableText(st::windowActiveTextFg->c, pillBg);
-			auto px = pillRect.left() + 7;
-			for (auto i = 0; i < 3; ++i) {
-				if (i > 0) {
-					p.setFont(monoFont);
-					p.setPen(pillMuted);
-					p.drawText(QRect(px, pillRect.top(), sepW, pillRect.height()), Qt::AlignCenter, sep);
-					px += sepW;
-				}
-				p.setFont(parts[i].active ? monoBold : monoFont);
-				p.setPen(parts[i].active ? pillActive : pillMuted);
-				p.drawText(
-					QRect(px, pillRect.top(), partW[i], pillRect.height()),
-					Qt::AlignCenter,
-					parts[i].text);
-				px += partW[i];
-			}
-			advance(pillW, 10);
-		}
-	}
-
-	// 0ms live pending count/chord echo chip.
-	if (!_state.pendingText.isEmpty() && remaining() > 48) {
-		const auto fm = QFontMetrics(monoBold);
-		const auto pillText = _state.pendingText;
-		const auto pillW = std::min(remaining(), fm.horizontalAdvance(pillText) + 14);
-		const auto pillRect = slotRect(pillW).adjusted(0, 4, 0, -4);
-		auto accentFill = st::windowActiveTextFg->c;
-		accentFill.setAlpha(28);
-		p.setPen(Qt::NoPen);
-		p.setBrush(accentFill);
-		p.drawRoundedRect(pillRect, 4, 4);
-		p.setFont(monoBold);
-		p.setPen(st::windowActiveTextFg);
-		p.drawText(pillRect, Qt::AlignCenter, pillText);
-		advance(pillW, 8);
-
-		if (!_state.pendingGroup.isEmpty() && remaining() > 48) {
-			const auto grp = u"+"_q + _state.pendingGroup;
-			const auto gfm = QFontMetrics(uiBold);
-			const auto gw = std::min(remaining(), gfm.horizontalAdvance(grp));
-			p.setFont(uiBold);
-			p.setPen(st::windowActiveTextFg);
-			p.drawText(slotRect(gw), Qt::AlignVCenter | Qt::AlignLeft, grp);
-			advance(gw, 10);
-		}
-	}
-
-	// Transient feedback or validation warning.
-	if (!_state.message.isEmpty() && remaining() > 40) {
-		const auto fm = QFontMetrics(uiFont);
-		const auto avail = remaining();
-		const auto elided = fm.elidedText(_state.message, Qt::ElideRight, avail);
-		p.setFont(uiFont);
-		p.setPen(_state.messageIsError
-			? QColor(0xd9, 0x3b, 0x3b)
-			: st::windowFg->c);
-		p.drawText(slotRect(avail), Qt::AlignVCenter | Qt::AlignLeft, elided);
-	}
+	PaintModalStatusBar(
+		p,
+		rect(),
+		_columns,
+		_state,
+		{
+			.window = st::windowBg->c,
+			.rail = st::sideBarBg->c,
+			.dialogs = st::dialogsBg->c,
+			.chat = st::historyComposeAreaBg->c,
+			.info = st::windowBg->c,
+			.divider = st::shadowFg->c,
+			.text = st::windowFg->c,
+			.muted = st::windowSubTextFg->c,
+			.error = st::attentionButtonFg->c,
+			.accent = st::windowActiveTextFg->c,
+		},
+		st::normalFont->f,
+		st::semiboldFont->f,
+		st::windowFiltersButton.style.font->f,
+		BadgeColor(_state.badge),
+		IsRtl(this));
 }
 
 // ---------------------------------------------------------------------------
@@ -1017,7 +886,7 @@ public:
 		this,
 		st::defaultMultiSelectSearchField,
 		Ui::InputField::Mode::SingleLine,
-		rpl::single(u"Filter bindings (orderless, e.g. \"chat pin\")..."_q))) {
+		rpl::single(u"Filter bindings (e.g. \"chat pin\")"_q))) {
 		setFocusPolicy(Qt::StrongFocus);
 		_close->setClickedCallback([=] { closeLayer(); });
 		_filter->changes() | rpl::on_next([=] {
@@ -1025,18 +894,27 @@ public:
 				_bindingsWidget->setFilter(_filter->getLastText());
 			}
 		}, lifetime());
-		base::install_event_filter(_filter->rawTextEdit(), [=](not_null<QEvent*> e) {
-			if (e->type() != QEvent::KeyPress) {
-				return base::EventFilterResult::Continue;
-			}
-			const auto k = static_cast<QKeyEvent*>(e.get());
+		InstallListFilter(this, _filter, [=](QKeyEvent *k) {
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
-			if (k->key() == Qt::Key_Escape
-				|| (k->key() == Qt::Key_G && mods == kCtrlMod)) {
-				closeLayer();
+			const auto key = ModalPhysicalKey(*k);
+			const auto step = ListStep(key, mods, false);
+			if (step) {
+				if (AllowModalLayerKey(*k, this, true)) {
+					ScrollModalLayer(*k, this, _scroll, 48 * step);
+				}
+				return base::EventFilterResult::Cancel;
+			}
+			if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
+				if (AllowModalLayerKey(*k, this)) {
+					if (ModalKeysEnabled()) {
+						setFocus();
+					} else {
+						closeLayer();
+					}
+				}
 				return base::EventFilterResult::Cancel;
 			} else if (k->key() == Qt::Key_Tab || k->key() == Qt::Key_Backtab) {
-				toggleTab();
+				if (AllowModalLayerKey(*k, this)) toggleTab();
 				return base::EventFilterResult::Cancel;
 			}
 			return base::EventFilterResult::Continue;
@@ -1091,23 +969,25 @@ protected:
 
 	void keyPressEvent(QKeyEvent *e) override {
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
-		const auto key = e->key();
+		const auto key = ModalPhysicalKey(*e);
 		const auto modal = ModalKeysEnabled();
-		if (key == Qt::Key_Escape
-			|| (modal && key == Qt::Key_Q && !mods)
-			|| (key == Qt::Key_G && mods == kCtrlMod)) {
-			closeLayer();
+		const auto step = ListStep(key, mods, modal);
+		if (!AllowModalLayerKey(*e, this, step != 0)) {
+			return;
+		}
+		if (modal && ListFilter::Exit(key, mods) && _showAll) {
+			ClearListFilterOrClose(this, _filter);
+			return;
+		} else if (ListFilter::Exit(key, mods, modal) || (modal && key == Qt::Key_Q && !mods)) {
+			CloseModalFilterLayer(this);
 			return;
 		} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
 			toggleTab();
 			return;
-		} else if ((key == Qt::Key_Down || (modal && key == Qt::Key_J)) && !mods) {
-			_scroll->scrollToY(_scroll->scrollTop() + 48);
+		} else if (step) {
+			ScrollModalLayer(*e, this, _scroll, 48 * step);
 			return;
-		} else if ((key == Qt::Key_Up || (modal && key == Qt::Key_K)) && !mods) {
-			_scroll->scrollToY(std::max(0, _scroll->scrollTop() - 48));
-			return;
-		} else if (modal && key == Qt::Key_Slash && !mods) {
+		} else if (modal && ListFilter::Enter(*e, key)) {
 			if (!_showAll) {
 				toggleTab();
 			}
@@ -1199,13 +1079,16 @@ protected:
 
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
-		const auto leftHint = ModalKeysEnabled()
-			? u"TAB switch view  ·  j/k scroll  ·  / filter  ·  q close"_q
-			: u"TAB switch view  ·  ↑/↓ scroll  ·  ESC close"_q;
+		const auto leftHint = !ModalKeysEnabled()
+			? u"TAB switch view · ↑/↓ scroll · Esc close"_q
+			: (_showAll && _filter->hasFocus())
+			? u"TAB cheatsheet · C-n/C-p scroll · Esc list"_q
+			: u"TAB switch view · j/k scroll · i or / filter · q close"_q;
+		const auto hintWidth = width() / 2 - 20;
 		p.drawText(
-			QRect(rtl ? (width() / 2) : 20, height() - kFooterH, width() / 2 - 20, kFooterH),
+			QRect(rtl ? (width() / 2) : 20, height() - kFooterH, hintWidth, kFooterH),
 			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
-			leftHint);
+			ElideText(st::normalFont, leftHint, hintWidth));
 
 		if (!_data.keymapError.isEmpty() || !_data.keymapPath.isEmpty()) {
 			auto prettyPath = _data.keymapPath;
@@ -1356,7 +1239,10 @@ protected:
 
 	void keyPressEvent(QKeyEvent *e) override {
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
-		const auto key = e->key();
+		const auto key = ModalPhysicalKey(*e);
+		if (!AllowModalLayerKey(*e, this)) {
+			return;
+		}
 		if (key == Qt::Key_Escape
 			|| (ModalKeysEnabled() && key == Qt::Key_Q && !mods)
 			|| (key == Qt::Key_G && mods == kCtrlMod)) {
@@ -1748,6 +1634,7 @@ public:
 			? u"Type commands or initials (e.g. \"opm\")..."_q
 			: _config.placeholder)))
 	, _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll)) {
+		setFocusPolicy(Qt::StrongFocus);
 		_candidates.reserve(_config.items.size());
 		for (auto i = 0; i < int(_config.items.size()); ++i) {
 			const auto &it = _config.items[i];
@@ -1782,34 +1669,31 @@ public:
 			activateRow(_selected);
 		}, lifetime());
 
-		base::install_event_filter(_input->rawTextEdit(), [=](not_null<QEvent*> e) {
-			if (e->type() != QEvent::KeyPress) {
-				return base::EventFilterResult::Continue;
-			}
-			const auto k = static_cast<QKeyEvent*>(e.get());
-			const auto layout = _input->rawTextEdit()->textCursor().block().layout();
-			if (layout && !layout->preeditAreaText().isEmpty()) {
-				return base::EventFilterResult::Continue;
-			}
+		InstallListFilter(this, _input, [=](QKeyEvent *k) {
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
-			const auto key = PhysicalKeyForNav(*k);
-			if (key == Qt::Key_Escape
-				|| (key == Qt::Key_G && mods == kCtrlMod)) {
-				cancel();
+			const auto key = ModalPhysicalKey(*k);
+			if (ListFilter::Submit(key)) {
+				return AllowModalLayerKey(*k, this)
+					? base::EventFilterResult::Continue
+					: base::EventFilterResult::Cancel;
+			} else if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
+				if (AllowModalLayerKey(*k, this)) cancel();
 				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Down
-				|| (key == Qt::Key_Tab && !mods)
-				|| ((key == Qt::Key_N || key == Qt::Key_J) && mods == kCtrlMod)) {
-				moveSelection(1);
+			} else if (key == Qt::Key_F6 && !mods) {
+				if (AllowModalLayerKey(*k, this)) setFocus();
 				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Up
-				|| key == Qt::Key_Backtab
-				|| (key == Qt::Key_Tab && mods == Qt::ShiftModifier)
-				|| ((key == Qt::Key_P || key == Qt::Key_K) && mods == kCtrlMod)) {
-				moveSelection(-1);
+			} else if (const auto step = ListStep(key, mods, false)) {
+				if (AllowModalLayerKey(*k, this, true)) moveSelection(step);
+				return base::EventFilterResult::Cancel;
+			} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
+				if (AllowModalLayerKey(*k, this)) {
+					moveSelection((key == Qt::Key_Backtab || mods == Qt::ShiftModifier) ? -1 : 1);
+				}
 				return base::EventFilterResult::Cancel;
 			} else if (mods == Qt::AltModifier && (key == Qt::Key_P || key == Qt::Key_N)) {
-				stepHistory(key == Qt::Key_P ? 1 : -1);
+				if (AllowModalLayerKey(*k, this, true)) {
+					stepHistory(key == Qt::Key_P ? 1 : -1);
+				}
 				return base::EventFilterResult::Cancel;
 			}
 			return base::EventFilterResult::Continue;
@@ -1819,6 +1703,25 @@ public:
 	}
 
 protected:
+	void keyPressEvent(QKeyEvent *event) override {
+		const auto mods = event->modifiers() & ~Qt::KeypadModifier;
+		const auto key = ModalPhysicalKey(*event);
+		if (const auto step = ListStep(key, mods, ModalKeysEnabled())) {
+			if (AllowModalLayerKey(*event, this, true)) moveSelection(step);
+		} else if (ListFilter::Submit(key)) {
+			if (AllowModalLayerKey(*event, this)) activateRow(_selected);
+		} else if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
+			if (AllowModalLayerKey(*event, this)) cancel();
+		} else if (ModalKeysEnabled() && key == Qt::Key_Q && !mods) {
+			if (AllowModalLayerKey(*event, this)) cancel();
+		} else if ((key == Qt::Key_F6 && !mods)
+			|| (ModalKeysEnabled() && ListFilter::Enter(*event, key))) {
+			if (AllowModalLayerKey(*event, this)) _input->setFocusFast();
+		} else {
+			LayerWidget::keyPressEvent(event);
+		}
+	}
+
 	void doSetInnerFocus() override {
 		_input->setFocusFast();
 	}
@@ -1911,10 +1814,16 @@ protected:
 		p.fillRect(0, height() - kFooterH, width(), 1, st::boxDividerBg->c);
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
+		const auto activate = _config.describeMode ? u"RET describe"_q : u"RET run"_q;
+		const auto footer = !ModalKeysEnabled()
+			? u"C-n/C-p move · %1 · F6 search/list · Esc close"_q.arg(activate)
+			: _input->hasFocus()
+			? u"C-n/C-p move · %1 · Esc close"_q.arg(activate)
+			: u"j/k move · %1 · i or / filter · Esc close"_q.arg(activate);
 		p.drawText(
 			footerRect.adjusted(14, 0, -14, 0),
 			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
-			u"C-n/p move  ·  RET run  ·  M-p/n history  ·  ESC close"_q);
+			ElideText(st::normalFont, footer, width() - 28));
 	}
 
 private:
@@ -2123,7 +2032,9 @@ protected:
 		if (_visible.empty()) {
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
-			p.drawText(rect(), Qt::AlignCenter, u"No unread unmuted chats match."_q);
+			p.drawText(rect(), Qt::AlignCenter, _items.empty()
+				? u"No unread unmuted chats."_q
+				: u"No unread unmuted chats match."_q);
 			return;
 		}
 
@@ -2324,7 +2235,7 @@ public:
 		this,
 		st::defaultMultiSelectSearchField,
 		Ui::InputField::Mode::SingleLine,
-		rpl::single(u"Filter unread chats (orderless, e.g. \"dm\", \"gp\", \"bot\")..."_q)))
+		rpl::single(u"i or / to filter"_q)))
 	, _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll)) {
 		setFocusPolicy(Qt::StrongFocus);
 		_close->setClickedCallback([=] { closeLayer(); });
@@ -2343,30 +2254,22 @@ public:
 			openRow(_selected);
 		}, lifetime());
 
-		base::install_event_filter(_filter->rawTextEdit(), [=](not_null<QEvent*> e) {
-			if (e->type() != QEvent::KeyPress) {
-				return base::EventFilterResult::Continue;
-			}
-			const auto k = static_cast<QKeyEvent*>(e.get());
-			const auto layout = _filter->rawTextEdit()->textCursor().block().layout();
-			if (layout && !layout->preeditAreaText().isEmpty()) {
-				return base::EventFilterResult::Continue;
-			}
+		InstallListFilter(this, _filter, [=](QKeyEvent *k) {
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
-			const auto key = PhysicalKeyForNav(*k);
-			if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
-				if (!_filter->getLastText().isEmpty()) {
-					_filter->setText(QString());
-					setFocus();
-				} else {
+			const auto key = ModalPhysicalKey(*k);
+			if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+				return AllowModalLayerKey(*k, this)
+					? base::EventFilterResult::Continue
+					: base::EventFilterResult::Cancel;
+			} else if (ListFilter::Exit(key, mods)) {
+				if (AllowModalLayerKey(*k, this)) {
 					setFocus();
 				}
-				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Down || ((key == Qt::Key_N || key == Qt::Key_J) && mods == kCtrlMod)) {
-				moveSelection(1);
-				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Up || ((key == Qt::Key_P || key == Qt::Key_K) && mods == kCtrlMod)) {
-				moveSelection(-1);
+				return FilterResult::Cancel;
+			} else if (const auto step = ListStep(key, mods, false)) {
+				if (AllowModalLayerKey(*k, this, true)) {
+					moveSelection(step);
+				}
 				return base::EventFilterResult::Cancel;
 			}
 			return base::EventFilterResult::Continue;
@@ -2412,7 +2315,17 @@ protected:
 			return;
 		}
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
-		const auto key = PhysicalKeyForNav(*e);
+		const auto key = ModalPhysicalKey(*e);
+		const auto step = ListStep(key, mods, true);
+		const auto motion = step && _pendingPrefix.isNull() && _pendingConfirmTargets.empty();
+		if (!AllowModalLayerKey(*e, this, motion)) {
+			return;
+		}
+
+		if (key == Qt::Key_Q && !mods) {
+			closeLayer();
+			return;
+		}
 
 		if (!_pendingConfirmTargets.empty()) {
 			if ((key == Qt::Key_Y && !mods) || key == Qt::Key_Return || key == Qt::Key_Enter) {
@@ -2423,7 +2336,6 @@ protected:
 			}
 			if ((key == Qt::Key_N && !mods)
 				|| key == Qt::Key_Escape
-				|| (key == Qt::Key_Q && !mods)
 				|| (key == Qt::Key_G && mods == kCtrlMod)) {
 				_pendingConfirmTargets.clear();
 				update();
@@ -2460,25 +2372,15 @@ protected:
 			return;
 		}
 
-		if (key == Qt::Key_Escape
-			|| (key == Qt::Key_Q && !mods)
-			|| (key == Qt::Key_G && mods == kCtrlMod)) {
-			closeLayer();
+		if (ListFilter::Exit(key, mods)) {
+			if (_selected >= 0) _selection.keepCurrentOnClear();
+			ClearListFilterOrClose(this, _filter);
 			return;
-		} else if (key == Qt::Key_Slash && !mods) {
+		} else if (ListFilter::Enter(*e, key)) {
 			_filter->setFocusFast();
 			return;
-		} else if (key == Qt::Key_J && !mods) {
-			moveSelection(1);
-			return;
-		} else if (key == Qt::Key_K && !mods) {
-			moveSelection(-1);
-			return;
-		} else if (key == Qt::Key_Down || (key == Qt::Key_N && mods == kCtrlMod)) {
-			moveSelection(1);
-			return;
-		} else if (key == Qt::Key_Up || (key == Qt::Key_P && mods == kCtrlMod)) {
-			moveSelection(-1);
+		} else if (step) {
+			moveSelection(step);
 			return;
 		} else if (key == Qt::Key_G && mods == Qt::ShiftModifier) {
 			jumpSelection(int(_visible.size()) - 1);
@@ -2591,7 +2493,9 @@ protected:
 				? u"* d mark DMs  ·  * g mark groups  ·  * c mark channels"_q
 				: (_pendingPrefix == u'g')
 				? u"g g top  ·  g r refresh"_q
-				: u"j/k move  ·  RET open  ·  / filter  ·  m/u/U/t/* mark  ·  x read  ·  q close"_q;
+				: _filter->hasFocus()
+				? u"RET open · C-n/C-p move · Esc list"_q
+				: u"j/k move · RET open · i or / filter · m/u/U/t/* mark · x read · q close"_q;
 			p.drawText(
 				footerRect.adjusted(16, 0, -16, 0),
 				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
@@ -2601,13 +2505,22 @@ protected:
 
 private:
 	void refilter() {
-		_visible = ModalUnread::FilterBufferItems(_config.items, _filter->getLastText());
-		_selected = std::clamp(_selected, 0, std::max(0, int(_visible.size()) - 1));
+		refilter(ModalUnread::SelectedPeer(_config.items, _visible, _selected));
+	}
+
+	void refilter(uint64_t selectedPeer) {
+		const auto query = _filter->getLastText();
+		_visible = ModalUnread::FilterBufferItems(_config.items, query);
+		_selected = _selection.refilter(
+			_visible,
+			selectedPeer ? std::make_optional(selectedPeer) : std::nullopt,
+			_selected,
+			!query.isEmpty(),
+			[&](int index) { return _config.items[index].peerId; });
 		if (_rows) {
 			_rows->setData(_config.items, _visible, _marked, _selected);
 		}
-		_scroll->scrollToY(0);
-		update();
+		syncSelection();
 	}
 
 	void moveSelection(int delta) {
@@ -2631,12 +2544,9 @@ private:
 		if (_rows) {
 			_rows->setSelectionAndMarks(_selected, _marked);
 		}
-		const auto rowTop = 4 + _selected * UnreadBufferRowsWidget::kRowHeight;
-		const auto rowBottom = rowTop + UnreadBufferRowsWidget::kRowHeight;
-		if (rowTop < _scroll->scrollTop()) {
-			_scroll->scrollToY(rowTop);
-		} else if (rowBottom > _scroll->scrollTop() + _scroll->height()) {
-			_scroll->scrollToY(rowBottom - _scroll->height());
+		if (_selected >= 0) {
+			const auto rowTop = 4 + _selected * UnreadBufferRowsWidget::kRowHeight;
+			_scroll->scrollToY(rowTop, rowTop + UnreadBufferRowsWidget::kRowHeight);
 		}
 		update();
 	}
@@ -2648,8 +2558,9 @@ private:
 
 	void refreshItems() {
 		if (_config.onRefresh) {
+			const auto peer = ModalUnread::SelectedPeer(_config.items, _visible, _selected);
 			_config.items = _config.onRefresh();
-			refilter();
+			refilter(peer);
 		}
 	}
 
@@ -2697,6 +2608,7 @@ private:
 	}
 
 	UnreadBufferConfig _config;
+	ListSelection<uint64_t> _selection;
 	std::vector<int> _visible;
 	QSet<uint64_t> _marked;
 	std::vector<PeerId> _pendingConfirmTargets;
@@ -2714,7 +2626,7 @@ private:
 // TopicPickerLayer (Forum Groups & Threaded Bots)
 // ---------------------------------------------------------------------------
 
-class TopicRowsWidget final : public Ui::RpWidget {
+class TopicRowsWidget final : public Ui::RpWidget, public WindowHintSource {
 public:
 	TopicRowsWidget(
 		not_null<QWidget*> parent,
@@ -2730,6 +2642,31 @@ public:
 
 	static constexpr int kRowHeight = 44;
 	static constexpr int kMoreRowHeight = 34;
+
+	void collectWindowHints(const QRect &clip, std::vector<WindowHintTarget> &out) override {
+		const auto guard = QPointer(this);
+		const auto origin = mapToGlobal(QPoint());
+		for (auto row = 0; row < int(_visible.size()); ++row) {
+			const auto geometry = QRect(0, 4 + row * kRowHeight, width(), kRowHeight);
+			const auto bounds = geometry.translated(origin).intersected(clip);
+			if (bounds.isEmpty()) {
+				continue;
+			}
+			const auto topic = _items[_visible[row]].rootId;
+			out.push_back({
+				.widget = this,
+				.bounds = bounds,
+				.name = _items[_visible[row]].title,
+				.current = [=] {
+					return guard && _session && row < int(_visible.size())
+						&& _items[_visible[row]].rootId == topic
+						&& geometry.translated(mapToGlobal(QPoint()))
+							.intersected(WindowHintClip(this)) == bounds;
+				},
+				.activate = [=] { _onClick(row); },
+			});
+		}
+	}
 
 	void setData(
 			const std::vector<TopicItem> &items,
@@ -3022,7 +2959,7 @@ public:
 		this,
 		st::defaultMultiSelectSearchField,
 		Ui::InputField::Mode::SingleLine,
-		rpl::single(u"Filter topics (orderless)..."_q)))
+		rpl::single(u"i or / to filter topics"_q)))
 	, _topicAction(_config.actionLabel.isEmpty() ? nullptr
 		: Ui::CreateChild<Ui::RoundButton>(
 			this, rpl::single(_config.actionLabel + u"  (c)"_q), st::defaultLightButton))
@@ -3078,35 +3015,29 @@ public:
 
 		_filter->changes() | rpl::on_next([=] {
 			_autoLoadPaused = false;
-			refilter(/*preserveScroll=*/false, MsgId(0));
+			refilter(/*preserveScroll=*/false, selectedRoot());
 			maybeRequestMore();
 		}, lifetime());
 		_filter->submits() | rpl::on_next([=](Qt::KeyboardModifiers) {
 			openRow(_selected);
 		}, lifetime());
 
-		base::install_event_filter(_filter->rawTextEdit(), [=](not_null<QEvent*> e) {
-			if (e->type() != QEvent::KeyPress) {
-				return base::EventFilterResult::Continue;
-			}
-			const auto k = static_cast<QKeyEvent*>(e.get());
-			const auto layout = _filter->rawTextEdit()->textCursor().block().layout();
-			if (layout && !layout->preeditAreaText().isEmpty()) {
-				return base::EventFilterResult::Continue;
-			}
+		InstallListFilter(this, _filter, [=](QKeyEvent *k) {
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
-			const auto key = PhysicalKeyForNav(*k);
-			if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
-				if (!_filter->getLastText().isEmpty()) {
-					_filter->setText(QString());
+			const auto key = ModalPhysicalKey(*k);
+			if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+				return AllowModalLayerKey(*k, this)
+					? base::EventFilterResult::Continue
+					: base::EventFilterResult::Cancel;
+			} else if (ListFilter::Exit(key, mods)) {
+				if (AllowModalLayerKey(*k, this)) {
+					setFocus();
 				}
-				setFocus();
-				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Down || ((key == Qt::Key_N || key == Qt::Key_J) && mods == kCtrlMod)) {
-				moveSelection(1);
-				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Up || ((key == Qt::Key_P || key == Qt::Key_K) && mods == kCtrlMod)) {
-				moveSelection(-1);
+				return FilterResult::Cancel;
+			} else if (const auto step = ListStep(key, mods, false)) {
+				if (AllowModalLayerKey(*k, this, true)) {
+					moveSelection(step);
+				}
 				return base::EventFilterResult::Cancel;
 			}
 			return base::EventFilterResult::Continue;
@@ -3161,7 +3092,16 @@ protected:
 			return;
 		}
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
-		const auto key = PhysicalKeyForNav(*e);
+		const auto key = ModalPhysicalKey(*e);
+		const auto step = ListStep(key, mods, true);
+		if (!AllowModalLayerKey(*e, this, step != 0 && !_pendingG)) {
+			return;
+		}
+		if (key == Qt::Key_Q && !mods) {
+			closeLayer();
+			return;
+		}
+
 		if (_pendingG) {
 			_pendingG = false;
 			if (key == Qt::Key_G && !mods) {
@@ -3178,12 +3118,11 @@ protected:
 				return;
 			}
 		}
-		if (key == Qt::Key_Escape
-			|| (key == Qt::Key_Q && !mods)
-			|| (key == Qt::Key_G && mods == kCtrlMod)) {
-			closeLayer();
+		if (ListFilter::Exit(key, mods)) {
+			if (_selected >= 0) _selection.keepCurrentOnClear();
+			ClearListFilterOrClose(this, _filter);
 			return;
-		} else if (key == Qt::Key_Slash && !mods) {
+		} else if (ListFilter::Enter(*e, key)) {
 			_filter->setFocusFast();
 			return;
 		} else if (key == Qt::Key_G && !mods) {
@@ -3196,22 +3135,13 @@ protected:
 		} else if (key == Qt::Key_L && mods == Qt::ShiftModifier) {
 			requestMore();
 			return;
-		} else if (key == Qt::Key_J && !mods) {
-			moveSelection(1);
-			return;
-		} else if (key == Qt::Key_K && !mods) {
-			moveSelection(-1);
-			return;
-		} else if (key == Qt::Key_Down || (key == Qt::Key_N && mods == kCtrlMod)) {
-			moveSelection(1);
-			return;
-		} else if (key == Qt::Key_Up || (key == Qt::Key_P && mods == kCtrlMod)) {
-			moveSelection(-1);
+		} else if (step) {
+			moveSelection(step);
 			return;
 		} else if (key == Qt::Key_U && !mods) {
 			_unreadOnly = !_unreadOnly;
 			_autoLoadPaused = false;
-			refilter(/*preserveScroll=*/false, MsgId(0));
+			refilter(/*preserveScroll=*/false, selectedRoot());
 			maybeRequestMore();
 			return;
 		} else if (key == Qt::Key_C && !mods && _topicAction) {
@@ -3285,7 +3215,10 @@ protected:
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
 		const auto hint = [&] {
-			auto out = u"j/k move  ·  RET open  ·  / filter  ·  u unread"_q;
+			if (_filter->hasFocus()) {
+				return u"RET open · C-n/C-p move · Esc list"_q;
+			}
+			auto out = u"j/k move · RET open · i or / filter · u unread"_q;
 			if (_hasMore) {
 				out += _loadTimeout.isActive() ? u"  ·  loading..."_q : u"  ·  L more"_q;
 			}
@@ -3309,15 +3242,17 @@ private:
 		callback();
 	}
 
+	MsgId selectedRoot() const {
+		return (_selected >= 0 && _selected < int(_visible.size()))
+			? _config.items[_visible[_selected]].rootId
+			: MsgId(0);
+	}
+
 	void refreshFromSource(bool preserveScroll) {
 		if (!_config.onRefresh) {
 			return;
 		}
-		const auto keepRootId = (_selected >= 0
-				&& _selected < int(_visible.size())
-				&& _visible[_selected] < int(_config.items.size()))
-			? _config.items[_visible[_selected]].rootId
-			: MsgId(0);
+		const auto keepRootId = selectedRoot();
 		auto snap = _config.onRefresh();
 		_config.items = std::move(snap.items);
 		_hasMore = snap.hasMore;
@@ -3369,9 +3304,9 @@ private:
 	}
 
 	void refilter(bool preserveScroll, MsgId keepRootId) {
-		const auto tokens = ModalMx::ParseTokens(_filter->getLastText());
+		const auto query = _filter->getLastText();
+		const auto tokens = ModalMx::ParseTokens(query);
 		_visible.clear();
-		auto restoredSelected = -1;
 		for (auto i = 0; i < int(_config.items.size()); ++i) {
 			const auto &it = _config.items[i];
 			if (_unreadOnly && it.unreadCount <= 0 && it.mentions <= 0) {
@@ -3387,21 +3322,22 @@ private:
 					continue;
 				}
 			}
-			if (keepRootId != 0 && it.rootId == keepRootId) {
-				restoredSelected = int(_visible.size());
-			}
 			_visible.push_back(i);
 		}
-		if (restoredSelected >= 0) {
-			_selected = restoredSelected;
-		} else {
-			_selected = std::clamp(_selected, 0, std::max(0, int(_visible.size()) - 1));
-		}
+		_selected = _selection.refilter(
+			_visible,
+			(keepRootId != 0) ? std::make_optional(keepRootId) : std::nullopt,
+			_selected,
+			!query.isEmpty(),
+			[&](int index) { return _config.items[index].rootId; });
 		if (_rows) {
 			_rows->setData(_config.items, _visible, _selected);
 			_rows->setStatus(_hasMore, _loadTimeout.isActive());
 		}
-		if (!preserveScroll) {
+		if (!preserveScroll && !_visible.empty()) {
+			const auto top = 4 + _selected * TopicRowsWidget::kRowHeight;
+			_scroll->scrollToY(top, top + TopicRowsWidget::kRowHeight);
+		} else if (!preserveScroll) {
 			_scroll->scrollToY(0);
 		}
 		update();
@@ -3440,6 +3376,7 @@ private:
 	}
 
 	TopicPickerConfig _config;
+	ListSelection<MsgId> _selection;
 	bool _unreadOnly = false;
 	bool _hasMore = false;
 	QTimer _loadTimeout;
@@ -3687,7 +3624,7 @@ protected:
 		}
 		constexpr auto kHeaderH = 54;
 		constexpr auto kActionsH = 52;
-		const auto helpH = _showHelp ? 34 : 0;
+		const auto helpH = helpHeight();
 		const auto bodyH = _body ? _body->height() : 120;
 		const auto maxBodyH = std::max(140, int(parentSize.height() * 0.62) - kHeaderH - kActionsH - helpH);
 		const auto h = std::min(parentSize.height() - 48, kHeaderH + std::min(bodyH, maxBodyH) + helpH + kActionsH);
@@ -3696,15 +3633,18 @@ protected:
 
 	void resizeEvent(QResizeEvent *e) override {
 		LayerWidget::resizeEvent(e);
+		layoutControls();
+	}
+
+	void layoutControls() {
 		constexpr auto kHeaderH = 54;
 		constexpr auto kActionsH = 52;
-		const auto helpH = _showHelp ? 34 : 0;
 		if (IsRtl(this)) {
 			_close->move(12, (kHeaderH - _close->height()) / 2);
 		} else {
 			_close->move(width() - 12 - _close->width(), (kHeaderH - _close->height()) / 2);
 		}
-		_scroll->setGeometry(0, kHeaderH, width(), std::max(60, height() - kHeaderH - kActionsH - helpH));
+		_scroll->setGeometry(0, kHeaderH, width(), std::max(60, height() - kHeaderH - kActionsH - helpHeight()));
 		if (_body) {
 			_body->relayout(_scroll->width());
 		}
@@ -3746,9 +3686,9 @@ protected:
 		}
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
 		const auto modal = ModalKeysEnabled();
-		const auto key = modal ? PhysicalKeyForNav(*e) : e->key();
+		const auto key = modal ? ModalPhysicalKey(*e) : e->key();
 		if (!modal) {
-			_pendingG = false;
+			_keys.pendingG = false;
 			switch (key) {
 			case Qt::Key_Escape:
 			case Qt::Key_Tab:
@@ -3765,6 +3705,20 @@ protected:
 				return;
 			}
 		}
+		const auto step = ListStep(key, mods, modal);
+		const auto horizontal = key == Qt::Key_Left || key == Qt::Key_Right
+			|| (modal && !mods && (key == Qt::Key_H || key == Qt::Key_L));
+		if (!AllowModalLayerKey(*e, this, !_keys.pendingG && (step || horizontal))) {
+			return;
+		}
+		if (key == Qt::Key_Escape || (modal && ListFilter::Exit(key, mods))) {
+			switch (_keys.escape()) {
+			case ModalNotices::NoticeEscape::CancelPrefix: update(); break;
+			case ModalNotices::NoticeEscape::HideHelp: refreshHelp(); break;
+			case ModalNotices::NoticeEscape::Close: closeLayer(); break;
+			}
+			return;
+		}
 		const auto isActionKey = (key == Qt::Key_Return
 			|| key == Qt::Key_Enter
 			|| key == Qt::Key_O
@@ -3778,40 +3732,30 @@ protected:
 				return;
 			}
 		}
-		if (_pendingG) {
-			_pendingG = false;
+		if (_keys.pendingG) {
+			_keys.pendingG = false;
 			if (key == Qt::Key_G && !mods) {
 				_scroll->scrollToY(0);
-				return;
 			}
+			update();
+			return;
 		}
-		if (key == Qt::Key_Escape
-			|| (key == Qt::Key_Q && !mods)
-			|| (key == Qt::Key_G && mods == kCtrlMod)) {
+		if (key == Qt::Key_Q && !mods) {
 			closeLayer();
 			return;
 		} else if (key == Qt::Key_Question || (key == Qt::Key_Slash && mods == Qt::ShiftModifier)) {
-			_showHelp = !_showHelp;
-			parentResized();
-			update();
+			_keys.showHelp = !_keys.showHelp;
+			refreshHelp();
 			return;
 		} else if (key == Qt::Key_G && !mods) {
-			_pendingG = true;
+			_keys.pendingG = true;
+			update();
 			return;
 		} else if (key == Qt::Key_G && mods == Qt::ShiftModifier) {
 			_scroll->scrollToY(_scroll->scrollTopMax());
 			return;
-		} else if (key == Qt::Key_J && !mods) {
-			scrollBy(44);
-			return;
-		} else if (key == Qt::Key_K && !mods) {
-			scrollBy(-44);
-			return;
-		} else if (key == Qt::Key_Down || (key == Qt::Key_N && mods == kCtrlMod)) {
-			scrollBy(44);
-			return;
-		} else if (key == Qt::Key_Up || (key == Qt::Key_P && mods == kCtrlMod)) {
-			scrollBy(-44);
+		} else if (step) {
+			ScrollModalLayer(*e, this, _scroll, 44 * step);
 			return;
 		} else if (key == Qt::Key_Tab && !mods) {
 			moveButton(1);
@@ -3855,7 +3799,7 @@ protected:
 
 		constexpr auto kHeaderH = 54;
 		constexpr auto kActionsH = 52;
-		const auto helpH = _showHelp ? 34 : 0;
+		const auto helpH = helpHeight();
 		const auto rtl = IsRtl(this);
 		const auto mono = MonoFont(10, true);
 
@@ -3889,13 +3833,13 @@ protected:
 		p.fillRect(0, kHeaderH - 1, width(), 1, st::boxDividerBg->c);
 
 		// Optional ? help strip.
-		if (_showHelp && ModalKeysEnabled()) {
+		if (helpH) {
 			const auto helpRect = QRect(0, height() - kActionsH - helpH, width(), helpH);
 			p.fillRect(helpRect, BlendColor(st::windowBg->c, st::windowBgOver->c, 0.45));
 			p.fillRect(0, helpRect.top(), width(), 1, st::boxDividerBg->c);
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
-			const auto helpText = u"j/k/gg/G scroll  ·  TAB/h/l buttons  ·  o select action  ·  RET activate  ·  y copy  ·  q/ESC close"_q;
+			const auto helpText = u"Esc hide help · j/k/gg/G scroll · Tab/h/l buttons · o select action · RET activate · y copy · q close"_q;
 			p.drawText(
 				helpRect.adjusted(16, 0, -16, 0),
 				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
@@ -3907,7 +3851,7 @@ protected:
 		p.fillRect(0, actionsTop, width(), kActionsH, BlendColor(st::windowBg->c, st::windowBgOver->c, 0.35));
 		p.fillRect(0, actionsTop, width(), 1, st::boxDividerBg->c);
 
-		if (!_copiedCue.isEmpty()) {
+		if (!_copiedCue.isEmpty() && !_keys.pendingG) {
 			p.setFont(st::semiboldFont);
 			p.setPen(BadgeColor(BadgeKind::Normal));
 			p.drawText(
@@ -3917,7 +3861,7 @@ protected:
 		} else if (ModalKeysEnabled()) {
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
-			const auto hint = u"? help"_q;
+			const auto hint = _keys.pendingG ? u"g … Esc"_q : u"? help"_q;
 			p.drawText(
 				QRect(rtl ? (width() - 100) : 16, actionsTop, 84, kActionsH),
 				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
@@ -3963,6 +3907,16 @@ private:
 		QString label;
 	};
 
+	[[nodiscard]] int helpHeight() const {
+		return (_keys.showHelp && ModalKeysEnabled()) ? 34 : 0;
+	}
+
+	void refreshHelp() {
+		parentResized();
+		layoutControls();
+		update();
+	}
+
 	void layoutButtonRects() {
 		constexpr auto kActionsH = 52;
 		constexpr auto kBtnH = 32;
@@ -3987,11 +3941,6 @@ private:
 				x -= kGap;
 			}
 		}
-	}
-
-	void scrollBy(int dy) {
-		const auto next = std::clamp(_scroll->scrollTop() + dy, 0, _scroll->scrollTopMax());
-		_scroll->scrollToY(next);
 	}
 
 	void moveButton(int delta) {
@@ -4043,8 +3992,7 @@ private:
 	std::vector<QRect> _buttonRects;
 	int _focusedButton = 0;
 	int _hoveredButton = -1;
-	bool _pendingG = false;
-	bool _showHelp = false;
+	ModalNotices::NoticeKeys _keys;
 	bool _closing = false;
 	qint64 _openedAtMs = 0;
 	QString _copiedCue;
@@ -4118,7 +4066,9 @@ protected:
 		if (_visible.empty()) {
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
-			p.drawText(rect(), Qt::AlignCenter, u"No notices recorded in this session."_q);
+			p.drawText(rect(), Qt::AlignCenter, _items.empty()
+				? u"No notices recorded in this session."_q
+				: u"No notices match the filter."_q);
 			return;
 		}
 
@@ -4234,7 +4184,7 @@ public:
 		this,
 		st::defaultMultiSelectSearchField,
 		Ui::InputField::Mode::SingleLine,
-		rpl::single(u"Filter notices (orderless)..."_q)))
+		rpl::single(u"i or / to filter notices"_q)))
 	, _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll)) {
 		setFocusPolicy(Qt::StrongFocus);
 		_close->setClickedCallback([=] { closeLayer(); });
@@ -4252,28 +4202,22 @@ public:
 			inspectRow(_selected);
 		}, lifetime());
 
-		base::install_event_filter(_filter->rawTextEdit(), [=](not_null<QEvent*> e) {
-			if (e->type() != QEvent::KeyPress) {
-				return base::EventFilterResult::Continue;
-			}
-			const auto k = static_cast<QKeyEvent*>(e.get());
-			const auto layout = _filter->rawTextEdit()->textCursor().block().layout();
-			if (layout && !layout->preeditAreaText().isEmpty()) {
-				return base::EventFilterResult::Continue;
-			}
+		InstallListFilter(this, _filter, [=](QKeyEvent *k) {
 			const auto mods = k->modifiers() & ~Qt::KeypadModifier;
-			const auto key = PhysicalKeyForNav(*k);
-			if (key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod)) {
-				if (!_filter->getLastText().isEmpty()) {
-					_filter->setText(QString());
+			const auto key = ModalPhysicalKey(*k);
+			if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+				return AllowModalLayerKey(*k, this)
+					? base::EventFilterResult::Continue
+					: base::EventFilterResult::Cancel;
+			} else if (ListFilter::Exit(key, mods)) {
+				if (AllowModalLayerKey(*k, this)) {
+					setFocus();
 				}
-				setFocus();
-				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Down || ((key == Qt::Key_N || key == Qt::Key_J) && mods == kCtrlMod)) {
-				moveSelection(1);
-				return base::EventFilterResult::Cancel;
-			} else if (key == Qt::Key_Up || ((key == Qt::Key_P || key == Qt::Key_K) && mods == kCtrlMod)) {
-				moveSelection(-1);
+				return FilterResult::Cancel;
+			} else if (const auto step = ListStep(key, mods, false)) {
+				if (AllowModalLayerKey(*k, this, true)) {
+					moveSelection(step);
+				}
 				return base::EventFilterResult::Cancel;
 			}
 			return base::EventFilterResult::Continue;
@@ -4319,7 +4263,16 @@ protected:
 			return;
 		}
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
-		const auto key = PhysicalKeyForNav(*e);
+		const auto key = ModalPhysicalKey(*e);
+		const auto step = ListStep(key, mods, true);
+		if (!AllowModalLayerKey(*e, this, step != 0 && !_pendingG)) {
+			return;
+		}
+		if (key == Qt::Key_Q && !mods) {
+			closeLayer();
+			return;
+		}
+
 		if (_pendingG) {
 			_pendingG = false;
 			if (key == Qt::Key_G && !mods) {
@@ -4327,12 +4280,11 @@ protected:
 				return;
 			}
 		}
-		if (key == Qt::Key_Escape
-			|| (key == Qt::Key_Q && !mods)
-			|| (key == Qt::Key_G && mods == kCtrlMod)) {
-			closeLayer();
+		if (ListFilter::Exit(key, mods)) {
+			if (_selected >= 0) _selection.keepCurrentOnClear();
+			ClearListFilterOrClose(this, _filter);
 			return;
-		} else if (key == Qt::Key_Slash && !mods) {
+		} else if (ListFilter::Enter(*e, key)) {
 			_filter->setFocusFast();
 			return;
 		} else if (key == Qt::Key_G && !mods) {
@@ -4341,17 +4293,8 @@ protected:
 		} else if (key == Qt::Key_G && mods == Qt::ShiftModifier) {
 			moveSelection(int(_visible.size()));
 			return;
-		} else if (key == Qt::Key_J && !mods) {
-			moveSelection(1);
-			return;
-		} else if (key == Qt::Key_K && !mods) {
-			moveSelection(-1);
-			return;
-		} else if (key == Qt::Key_Down || (key == Qt::Key_N && mods == kCtrlMod)) {
-			moveSelection(1);
-			return;
-		} else if (key == Qt::Key_Up || (key == Qt::Key_P && mods == kCtrlMod)) {
-			moveSelection(-1);
+		} else if (step) {
+			moveSelection(step);
 			return;
 		} else if (key == Qt::Key_Y && !mods) {
 			if (_selected >= 0 && _selected < int(_visible.size()) && _config.onCopy) {
@@ -4424,7 +4367,9 @@ protected:
 		p.fillRect(0, height() - kFooterH, width(), 1, st::boxDividerBg->c);
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
-		const auto hint = u"j/k/gg/G move  ·  RET/o open  ·  / filter  ·  y copy  ·  c clear  ·  q close"_q;
+		const auto hint = _filter->hasFocus()
+			? u"RET open · C-n/C-p move · Esc list"_q
+			: u"j/k move · RET open · i or / filter · y copy · c clear · q close"_q;
 		p.drawText(
 			footerRect.adjusted(16, 0, -16, 0),
 			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
@@ -4432,8 +4377,18 @@ protected:
 	}
 
 private:
+	using Identity = std::pair<QString, uint64_t>;
+
 	void refilter() {
-		const auto tokens = ModalMx::ParseTokens(_filter->getLastText());
+		const auto query = _filter->getLastText();
+		const auto tokens = ModalMx::ParseTokens(query);
+		const auto identify = [this](int index) {
+			const auto &item = _config.items[index];
+			return Identity(item.accountKey, item.id);
+		};
+		const auto selected = (_selected >= 0 && _selected < int(_visible.size()))
+			? std::make_optional(identify(_visible[_selected]))
+			: std::nullopt;
 		_visible.clear();
 		for (auto i = 0; i < int(_config.items.size()); ++i) {
 			const auto &it = _config.items[i];
@@ -4449,11 +4404,12 @@ private:
 			}
 			_visible.push_back(i);
 		}
-		_selected = std::clamp(_selected, 0, std::max(0, int(_visible.size()) - 1));
+		_selected = _selection.refilter(
+			_visible, selected, _selected, !query.isEmpty(), identify);
 		if (_rows) {
 			_rows->setData(_config.items, _visible, _selected);
 		}
-		_scroll->scrollToY(0);
+		ensureSelectionVisible();
 		update();
 	}
 
@@ -4466,12 +4422,13 @@ private:
 		if (_rows) {
 			_rows->setSelected(_selected);
 		}
-		const auto rowTop = 4 + _selected * NoticeHistoryRowsWidget::kRowHeight;
-		const auto rowBottom = rowTop + NoticeHistoryRowsWidget::kRowHeight;
-		if (rowTop < _scroll->scrollTop()) {
-			_scroll->scrollToY(rowTop);
-		} else if (rowBottom > _scroll->scrollTop() + _scroll->height()) {
-			_scroll->scrollToY(rowBottom - _scroll->height());
+		ensureSelectionVisible();
+	}
+
+	void ensureSelectionVisible() {
+		if (_selected >= 0) {
+			const auto rowTop = 4 + _selected * NoticeHistoryRowsWidget::kRowHeight;
+			_scroll->scrollToY(rowTop, rowTop + NoticeHistoryRowsWidget::kRowHeight);
 		}
 	}
 
@@ -4489,6 +4446,7 @@ private:
 	}
 
 	NoticeHistoryConfig _config;
+	ListSelection<Identity> _selection;
 	std::vector<int> _visible;
 	Ui::IconButton *_close = nullptr;
 	Ui::InputField *_filter = nullptr;

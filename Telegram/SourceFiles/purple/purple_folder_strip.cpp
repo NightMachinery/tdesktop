@@ -204,6 +204,28 @@ bool CheckAndJumpToNearChatsFilter(
 	return true;
 }
 
+bool StepModalChatsFilter(
+		not_null<Window::SessionController*> controller,
+		int delta,
+		bool jump) {
+	const auto session = &controller->session();
+	const auto &list = ShownList(session);
+	const auto count = std::min(
+		int(list.size()),
+		Data::PremiumLimits(session).dialogFiltersCurrent() + 1);
+	if (count < 2) {
+		return false;
+	}
+	const auto id = controller->activeChatsFilterCurrent();
+	const auto index = int(ranges::find(list, id, &Data::ChatFilter::id) - begin(list));
+	const auto start = (index < count) ? index : (delta > 0) ? count - 1 : 0;
+	const auto changed = (start + delta % count + count) % count;
+	if (jump && index != changed) {
+		controller->setActiveChatsFilter(list[changed].id());
+	}
+	return true;
+}
+
 void EscapeToHome(not_null<Window::SessionController*> controller) {
 	const auto home = HomeFilterId(&controller->session());
 	if (controller->activeChatsFilterCurrent() != home) {

@@ -82,9 +82,10 @@
   "] T"     :topic-next
   "] U"     :topic-next-unread
 
-  ; Search and quick URL hint.
+  ; Search and window-wide hints.
   "/"       :search-messages
-  "f"       :message-hint-open-url
+  "f"       :window-hint
+  "F"       :window-hint-menu
   "SPC s s" :search-messages
   "SPC s c" :chat-palette
 
@@ -197,7 +198,9 @@
   "h" :topic-parent}
 
  :chats
- {"p" :preview-chat
+ {"J" :folder-next
+  "K" :folder-previous
+  "p" :preview-chat
   "m" :open-chat-menu
   "a" :open-archived-chats
   "f" :folder-next

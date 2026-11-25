@@ -160,6 +160,7 @@ void Forum::preloadTopics() {
 }
 
 void Forum::reloadTopics() {
+	_topicsLoadFailed = false;
 	_topicsList.setLoaded(false);
 	session().api().request(base::take(_requestId)).cancel();
 	_offset = {};
@@ -203,6 +204,7 @@ void Forum::requestTopics() {
 		requestSomeStale();
 	}).fail([=](const MTP::Error &error) {
 		_requestId = 0;
+		_topicsLoadFailed = true;
 		_topicsList.setLoaded();
 		if (error.type() == u"CHANNEL_FORUM_MISSING"_q && channel()) {
 			const auto flags = channel()->flags() & ~ChannelDataFlag::Forum;

@@ -36,10 +36,15 @@ the numbers.
   preview while keeping passcode/setup-email locks and their boxes on top),
   blocks `handleStartFiles()` while active, and replaces the window title with
   `Clock`.
+- `platform/mac/main_window_mac.mm`: consumes already claimed single-shot
+  repeats before Cocoa can reinterpret them as text after a focus or mode change.
 - `mainwidget.h`, `mainwidget.cpp`, `window/window_filters_menu.h`, and
   `window/window_session_controller.*`: hides the folder strip, dialogs column,
   side shadows, and third column while Zen fullscreen chat mode is active,
-  restoring only widgets Zen itself hid.
+  restoring only widgets Zen itself hid. After each `MainWidget` layout pass,
+  Purple refreshes the modal status segments from the live widget bounds
+  and divider positions, including during dialog-width animation. The status
+  text uses the stock avatar padding and live composer field and icon positions.
 - `window/notifications_manager.cpp`, `media/view/media_view_overlay_widget.cpp`,
   `media/system_media_controls_manager.cpp`, `tray.cpp`,
   `tray_accounts_menu.cpp`, and `platform/mac/global_menu_mac.mm`: suppresses
@@ -51,6 +56,11 @@ the numbers.
   modal commands can use Telegram's contextual shortcut handlers.
 - `dialogs/dialogs_widget.*` and `history/history_widget.*`: focus eligibility
   adapters expose the existing dialogs cursor and eligible history controls.
+- `dialogs/dialogs_widget.*` and `dialogs/dialogs_inner_widget.*`: expose the
+  visible dialogs list and its keyboard-selected entry to open or preview
+  the same row from another pane.
+- `dialogs/dialogs_inner_widget.h` and `info/media/info_media_list_widget.h`:
+  admit the hint adapters to the stock row geometry and identity checks.
 - `platform/mac/main_window_mac.mm`: keeps the preliminary typing notification
   from moving focus to search while Normal mode owns the chat list.
 - `history/history_inner_widget.*`: visible message enumeration and geometry
@@ -63,13 +73,19 @@ the numbers.
 - `history/history_widget.h`, `history/view/history_view_chat_section.h`,
   `history/view/history_view_scheduled_section.h`, and
   `history/view/controls/history_view_compose_controls.h` grant the attachment
-  shortcut access to the native pickers and their attachment controls.
+  shortcut access to the native pickers and their attachment controls. That
+  access also locates the composer anchors for the status text.
 - `history/view/history_view_list_widget.*`: visible enumeration, layout
   cancellation and focus preservation for hint selection.
 - `history/view/history_view_message.*`: exposes rendered body text and its
   bounds so Purple can place a hint on each visible link.
 - `history/history_inner_widget.cpp` and `history/view/history_view_list_widget.cpp`:
   accept an explicit hinted item in the native keyboard context menu path.
+- `history/history_inner_widget.cpp` and `history/view/history_view_context_menu.*`:
+  give the hint actions access to the native message menu before popup and
+  defer read receipt and reaction metadata lookups to the full native menu.
+- `dialogs/dialogs_inner_widget.*` and `window/window_filters_menu.*`: give the
+  hint actions access to the native chat, Archive, and folder menu builders.
 - `window/section_widget.cpp`: repaint subscription and an early solid-color
   paint for live history when wallpaper artwork is hidden.
 - `window/window_session_controller.cpp`: applies the live chat style through
@@ -159,6 +175,10 @@ the numbers.
   for the birthday-triggered gift button in both composers.
 
 ## Recipient picker visibility
+
+- `boxes/peer_list_box.cpp` shares the modal filter entry and exit keys with
+  the chat palette and searchable peer pickers. The handler receives the
+  chat-palette classification so pressing Escape closes it directly.
 
 - `boxes/share_box.cpp`: candidate guards for default, folder-filtered and server
   search sources, plus two calls and a friend declaration for the owned share
@@ -2048,6 +2068,12 @@ worker's pending database transactions. The existing playlist menu hook in
 - `boxes/peers/edit_forum_topic_box.cpp`: refreshes the edited bot thread by
   ID after a successful or already-applied edit. The normal topic update
   notifies the stock header and Purple topic picker.
+
+### Forum topic paging
+
+- `data/data_forum.{h,cpp}` exposes whether the last page request failed.
+  The next-unread command uses it because the stock list is marked loaded
+  on both completion and failure. Reload clears the failure flag.
 
 ### Per-chat translation exclusion
 

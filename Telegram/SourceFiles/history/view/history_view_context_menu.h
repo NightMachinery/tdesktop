@@ -52,6 +52,7 @@ struct ContextMenuRequest {
 	TextForMimeData selectedText;
 	SelectedQuote quote;
 	bool overSelection = false;
+	bool passive = false;
 	PointState pointState = PointState();
 };
 

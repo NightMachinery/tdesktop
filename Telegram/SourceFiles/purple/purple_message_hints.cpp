@@ -1,4 +1,6 @@
 #include "purple/purple_message_hints.h"
+#include "purple/purple_hint_labels.h"
+#include "purple/purple_hint_paint.h"
 #include "purple/purple_message_hint_placement.h"
 
 #include "base/unixtime.h"
@@ -6,6 +8,7 @@
 #include "data/components/scheduled_messages.h"
 #include "data/data_channel.h"
 #include "data/data_groups.h"
+#include "data/data_message_reactions.h"
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_inner_widget.h"
@@ -14,6 +17,7 @@
 #include "history/history_item_text.h"
 #include "history/history_widget.h"
 #include "history/view/history_view_context_menu.h"
+#include "history/view/history_view_cursor_state.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_list_widget.h"
 #include "history/view/history_view_message.h"
@@ -26,6 +30,7 @@
 #include "ui/round_rect.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/elastic_scroll.h"
+#include "ui/widgets/popup_menu.h"
 #include "window/window_session_controller.h"
 
 #include "styles/palette.h"
@@ -36,9 +41,9 @@
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPainter>
+#include <QtWidgets/QApplication>
 
 #include <array>
-#include <string_view>
 
 namespace Purple {
 namespace {
@@ -48,12 +53,16 @@ public:
 	MessageHintMenuEvent(
 		not_null<HistoryItem*> item,
 		QPoint local,
-		QPoint global)
+		QPoint global,
+		bool capture = false)
 	: QContextMenuEvent(QContextMenuEvent::Keyboard, local, global)
-	, item(item) {
+	, item(item)
+	, capture(capture) {
 	}
 
 	const not_null<HistoryItem*> item;
+	const bool capture;
+	WindowHintTarget::Menu menu;
 
 };
 
@@ -91,7 +100,8 @@ struct BodyLinkHit {
 
 std::vector<BodyLinkHit> VisibleBodyLinks(
 		not_null<HistoryView::Message*> message,
-		QRect clip) {
+		QRect clip,
+		bool all = false) {
 	auto result = std::vector<BodyLinkHit>();
 	const auto [text, bounds] = message->purpleBodyLinkLayout();
 	if (!text || !clip.intersects(bounds)) {
@@ -99,7 +109,7 @@ std::vector<BodyLinkHit> VisibleBodyLinks(
 	}
 	const auto exported = text->toTextWithEntities();
 	for (const auto &entity : exported.entities) {
-		if (entity.type() != EntityType::Url
+		if (!all && entity.type() != EntityType::Url
 			&& entity.type() != EntityType::CustomUrl) {
 			continue;
 		}
@@ -122,7 +132,7 @@ std::vector<BodyLinkHit> VisibleBodyLinks(
 				continue;
 			}
 			const auto state = BodyLinkState(message, rect.center());
-			if (dynamic_cast<UrlClickHandler*>(state.link.get())
+			if (state.link && (all || dynamic_cast<UrlClickHandler*>(state.link.get()))
 				&& text->linkRangeFor(state.link) == range
 				&& state.itemId == message->textItem()->fullId()) {
 				result.push_back({ rect, state.link });
@@ -157,17 +167,6 @@ QRect PlaceLinkBadge(
 	return box;
 }
 
-constexpr auto kHintLetters = std::u16string_view(u"asdfghjkl");
-
-QString HintLabel(size_t index, int digits) {
-	auto result = QString(digits, QChar());
-	for (auto i = digits; i > 0; --i) {
-		result[i - 1] = QChar(kHintLetters[index % kHintLetters.size()]);
-		index /= kHintLetters.size();
-	}
-	return result;
-}
-
 QSize LabelSize(const QString &label) {
 	const auto &font = st::defaultToast.style.font;
 	const auto &padding = st::msgServicePadding;
@@ -183,6 +182,19 @@ HistoryItem *MessageHintMenuItem(
 		HistoryItem *focused) {
 	const auto hint = dynamic_cast<const MessageHintMenuEvent*>(event);
 	return hint ? hint->item.get() : focused;
+}
+
+bool CapturingHintMenu(QContextMenuEvent *event) {
+	const auto hint = dynamic_cast<const MessageHintMenuEvent*>(event);
+	return hint && hint->capture;
+}
+
+bool CaptureHintMenu(QContextMenuEvent *event, WindowHintTarget::Menu &menu) {
+	if (CapturingHintMenu(event)) {
+		static_cast<MessageHintMenuEvent*>(event)->menu = std::move(menu);
+		return true;
+	}
+	return false;
 }
 
 class MessageHints::Overlay final : public Ui::RpWidget {
@@ -208,7 +220,7 @@ protected:
 			}
 			const auto anchor = entry.rect.translated(-geometry().topLeft());
 			const auto bubble = entry.bubbleRect.translated(-geometry().topLeft());
-			const auto box = MessageHintBadgeRect(
+			const auto box = !entry.windowBadge.isEmpty() ? entry.windowBadge : MessageHintBadgeRect(
 				bubble, anchor.y(), LabelSize(entry.label), rect(),
 				st::lineWidth, style::RightToLeft());
 			const auto placed = entry.bodyLink
@@ -222,31 +234,7 @@ protected:
 					p.setPen(QPen(QColor(0xb8, 0x92, 0x00), 1.5));
 					p.drawLine(placed.center(), MessageHintLeaderEnd(placed.center(), anchor));
 				}
-				auto hq = PainterHighQualityEnabler(p);
-				p.setPen(QPen(QColor(0xb8, 0x92, 0x00), 1));
-				p.setBrush(QColor(0xff, 0xd8, 0x4a));
-				p.drawRoundedRect(QRectF(placed).adjusted(.5, .5, -.5, -.5), 4, 4);
-				const auto upper = entry.label.toUpper();
-				const auto typedLen = int(_hints._prefix.size());
-				if (typedLen > 0 && typedLen < upper.size()) {
-					const auto fm = QFontMetrics(p.font());
-					const auto typed = upper.left(typedLen);
-					const auto rest = upper.mid(typedLen);
-					const auto totalW = fm.horizontalAdvance(upper);
-					const auto typedW = fm.horizontalAdvance(typed);
-					const auto startX = placed.x() + (placed.width() - totalW) / 2;
-					p.setPen(QColor(0xb9, 0x1c, 0x1c));
-					p.drawText(QRect(startX, placed.y(), typedW, placed.height()),
-						Qt::AlignLeft | Qt::AlignVCenter,
-						typed);
-					p.setPen(QColor(0x1c, 0x19, 0x17));
-					p.drawText(QRect(startX + typedW, placed.y(), totalW - typedW, placed.height()),
-						Qt::AlignLeft | Qt::AlignVCenter,
-						rest);
-				} else {
-					p.setPen(QColor(0x1c, 0x19, 0x17));
-					p.drawText(placed, Qt::AlignCenter, upper);
-				}
+				PaintHintBadge(p, placed, entry.label, int(_hints._prefix.size()));
 			}
 		}
 	}
@@ -264,6 +252,16 @@ MessageHints::~MessageHints() {
 
 bool MessageHints::active() const {
 	return _overlay != nullptr;
+}
+
+bool MessageHints::windowActive() const {
+	return active() && _windowRoot;
+}
+
+bool MessageHints::affectedBy(QWidget *widget) const {
+	return windowActive() && widget != _overlay.data()
+		&& (widget == _windowRoot || _windowRoot->isAncestorOf(widget)
+			|| widget->isAncestorOf(_windowRoot));
 }
 
 Ui::RpWidget *MessageHints::Target::widget() const {
@@ -500,14 +498,9 @@ std::vector<MessageHints::Entry> MessageHints::snapshot() const {
 	} else {
 		section->purpleEnumerateVisible(collect);
 	}
-	auto digits = 1;
-	auto capacity = kHintLetters.size();
-	while (entries.size() > capacity) {
-		++digits;
-		capacity *= kHintLetters.size();
-	}
+	const auto labels = HintLabels(entries.size());
 	for (auto i = size_t(0); i != entries.size(); ++i) {
-		entries[i].label = HintLabel(i, digits);
+		entries[i].label = QString::fromStdString(labels[i]);
 	}
 	return entries;
 }
@@ -532,6 +525,260 @@ bool MessageHints::start(Target view, Action action) {
 	_overlay->raise();
 	watch();
 	return active();
+}
+
+bool MessageHints::startWindow(
+		Ui::RpWidget *root,
+		Main::Session *session,
+		QWidget *focus,
+		bool menus) {
+	clear();
+	if (!root || !session || session->frozen()) {
+		return false;
+	}
+	_windowRoot = root;
+	_windowMenus = menus;
+	_session = base::make_weak(session);
+	auto targets = CollectWindowHintTargets(root);
+	for (const auto widget : root->findChildren<QWidget*>()) {
+		const auto main = dynamic_cast<HistoryInner*>(widget);
+		const auto section = dynamic_cast<HistoryView::ListWidget*>(widget);
+		if (main || section) {
+			appendWindowMessages({ .main = main, .section = section }, session, menus, targets);
+		}
+	}
+	const auto focusCenter = focus ? focus->mapToGlobal(focus->rect().center())
+		: root->mapToGlobal(root->rect().center());
+	const auto rank = [&](const WindowHintTarget &entry) {
+		return std::pair(!entry.mainList, (entry.bounds.center() - focusCenter).manhattanLength());
+	};
+	std::stable_sort(begin(targets), end(targets), [&](const auto &a, const auto &b) {
+		return rank(a) < rank(b);
+	});
+	const auto origin = root->mapToGlobal(QPoint());
+	const auto viewport = WindowHintClip(root).translated(-origin);
+	const auto labels = HintLabels(targets.size());
+	auto badges = std::vector<QRect>();
+	for (auto &entry : targets) {
+		if (!WindowHintExposed(entry.widget, entry.bounds.center())) {
+			continue;
+		}
+		auto label = QString::fromStdString(labels[_entries.size()]);
+		const auto size = LabelSize(label.toUpper());
+		const auto bounds = entry.bounds.translated(-origin);
+		const auto bubble = entry.bubble.translated(-origin);
+		const auto box = entry.bubble.isEmpty()
+			? WindowHintAnchor(bounds, size, entry.mainList, style::RightToLeft())
+			: MessageHintBadgeRect(bubble, bounds.top(), size, viewport, st::lineWidth, style::RightToLeft());
+		auto placed = PlaceHintBadge(box, viewport, badges);
+		if (placed.isEmpty()) {
+			continue;
+		}
+		badges.push_back(placed);
+		_entries.push_back({ .rect = bounds, .label = std::move(label), .windowBadge = placed });
+		_windowEntries.push_back(std::move(entry));
+	}
+	if (_entries.empty()) {
+		clear();
+		return false;
+	}
+	_globalClip = WindowHintClip(root);
+	_overlay = new Overlay(root, *this);
+	_overlay->setGeometry(root->rect());
+	_overlay->show();
+	_overlay->raise();
+	const auto &data = session->data();
+	rpl::merge(
+		data.newItemAdded() | rpl::to_empty,
+		data.itemRemoved() | rpl::to_empty,
+		data.itemDataChanges() | rpl::to_empty,
+		data.viewLayoutChanged() | rpl::to_empty
+	) | rpl::on_next([this] { clear(); }, _watch);
+	return true;
+}
+
+void MessageHints::appendWindowMessages(
+		Target view,
+		Main::Session *session,
+		bool menus,
+		std::vector<WindowHintTarget> &out) {
+	const auto widget = view.widget();
+	const auto clip = WindowHintClip(widget);
+	if (clip.isEmpty() || &view.session() != session
+		|| (view.main && (view.main->hasPendingResizedItems() || view.main->_chooseForReportReason))
+		|| (view.section && (view.section->_resizePending || view.section->_refreshingViewer
+			|| view.section->_chooseForReportReason))) {
+		return;
+	}
+	view.scheduled = view.section && view.section->elementContext() == HistoryView::Context::ScheduledTopic;
+	const auto origin = widget->mapToGlobal(QPoint());
+	const auto viewport = clip.translated(-origin);
+	const auto guard = QPointer(widget);
+	const auto alive = base::make_weak(session);
+	const auto collect = [&](not_null<HistoryView::Element*> element, int top, int bottom) {
+		const auto item = element->data();
+		if (element->isHidden() || element->isHiddenByGroup()
+			|| item->history()->purpleHiddenFromView()) {
+			return true;
+		}
+		const auto id = item->fullId();
+		const auto delta = QPoint(0, top);
+		const auto inner = element->innerGeometry();
+		const auto bubble = QRect(inner.x(), top + element->marginTop(), inner.width(),
+			bottom - top - element->marginTop() - element->marginBottom());
+		const auto current = [=] {
+			const auto item = alive ? alive->data().message(id) : nullptr;
+			return guard && item && !item->history()->purpleHiddenFromView() && (view.main
+				? view.main->viewByItem(item) : view.section->viewForItem(item)) == element
+				&& (view.main ? view.main->itemTop(element) : view.section->itemTop(element)) == top;
+		};
+		const auto clippedBubble = bubble.intersected(viewport);
+		const auto message = !clippedBubble.isEmpty() && !item->isEmpty() && !item->isService();
+		const auto reply = message && item->isRegular() && !item->isSponsored()
+			&& IsServerMsgId(item->id) && CanSendReply(item) && canCompose(view, item, Action::Reply);
+		if (reply || (menus && message)) {
+			const auto reactions = menus ? Data::LookupPossibleReactions(item) : Data::PossibleItemReactionsRef();
+			auto messages = std::vector<FullMsgId>{ id };
+			if (const auto group = session->data().groups().find(item)) {
+				for (const auto part : group->items) {
+					messages.push_back(part->fullId());
+				}
+			}
+			out.push_back({
+				.widget = widget,
+				.bounds = clippedBubble.translated(origin),
+				.bubble = bubble.translated(origin),
+				.name = u"Message actions"_q,
+				.reply = reply,
+				.kind = WindowHintTarget::Kind::Message,
+				.messages = std::move(messages),
+				.current = [=] { return current() && (menus || CanSendReply(element->data())); },
+				.activate = reply ? Fn<void()>([=] {
+					apply(view, element->data(), Action::Reply, clippedBubble.center());
+				}) : Fn<void()>(),
+				.nativeMenu = [=] { return buildMenu(view, element, clippedBubble.center()); },
+				.fullMenu = [=] { apply(view, element->data(), Action::Menu, clippedBubble.center()); },
+				.canReact = !reactions.recent.empty() || !reactions.stickers.empty() || reactions.customAllowed,
+			});
+		}
+		auto handlers = QSet<const ClickHandler*>();
+		const auto add = [&](QRect bounds, bool body, ClickHandlerPtr handler, FullMsgId owner) {
+			if (!handler || handlers.contains(handler.get())) {
+				return;
+			}
+			handlers.insert(handler.get());
+			const auto point = bounds.center();
+			const auto hit = [=] {
+				return body ? BodyLinkState(element, point) : element->textState(point, {});
+			};
+			out.push_back({
+				.widget = widget,
+				.bounds = bounds.translated(origin + delta),
+				.name = handler->tooltip(),
+				.current = [=] {
+					return current() && widget->mapToGlobal(QPoint()) == origin
+						&& hit().link == handler;
+				},
+				.activate = [=] {
+					ActivateClickHandler(widget, handler, view.main
+						? view.main->prepareClickContext(Qt::LeftButton, owner)
+						: view.section->prepareClickContext(Qt::LeftButton, owner));
+				},
+			});
+		};
+		const auto region = QRect(0, top, widget->width(), bottom - top).intersected(viewport)
+			.translated(-delta);
+		if (const auto message = dynamic_cast<HistoryView::Message*>(element.get())) {
+			for (const auto &link : VisibleBodyLinks(message, region, true)) {
+				add(link.rect, true, link.handler, message->textItem()->fullId());
+			}
+		}
+		const auto step = std::max(st::lineWidth * 8, 4);
+		for (auto y = region.top() + step / 2; y <= region.bottom(); y += step) {
+			for (auto x = region.left() + step / 2; x <= region.right(); x += step) {
+				const auto point = QPoint(x, y);
+				const auto state = element->textState(point, {});
+				add(QRect(point, QSize(1, 1)), false, state.link, state.itemId ? state.itemId : id);
+			}
+		}
+		return true;
+	};
+	if (view.main) {
+		view.main->purpleEnumerateVisible(collect);
+	} else {
+		view.section->purpleEnumerateVisible(collect);
+	}
+}
+
+WindowHintTarget::Menu MessageHints::buildMenu(
+		Target view,
+		not_null<HistoryView::Element*> element,
+		QPoint local) {
+	if (view.session().frozen()) {
+		return {};
+	}
+	const auto item = element->data();
+	if (const auto main = view.main) {
+		const auto previous = main->_dragStateItem;
+		const auto guard = QPointer(main);
+		auto event = MessageHintMenuEvent(item, local, main->mapToGlobal(local), true);
+		main->showContextMenu(&event);
+		if (guard) {
+			main->_dragStateItem = previous;
+		}
+		return std::move(event.menu);
+	} else if (const auto controller = view.section->controllerOrNull()) {
+		auto request = HistoryView::ContextMenuRequest(controller);
+		request.view = element;
+		request.item = item;
+		request.pointState = HistoryView::PointState::Inside;
+		request.passive = true;
+		return HistoryView::FillContextMenu(view.section, request);
+	}
+	return {};
+}
+
+MessageHints::Input MessageHints::typeWindow(
+		int key,
+		Ui::RpWidget *root,
+		Main::Session *session,
+		Fn<void(WindowHintTarget)> showMenu) {
+	if (!windowActive() || root != _windowRoot || session != _session.get()
+		|| WindowHintClip(root) != _globalClip) {
+		clear();
+		return Input::Finished;
+	}
+	if (key == Qt::Key_Backspace || key == Qt::Key_Delete) {
+		_prefix.chop(1);
+		_overlay->update();
+		return Input::Pending;
+	} else if (key < Qt::Key_A || key > Qt::Key_Z) {
+		clear();
+		return Input::Unknown;
+	}
+	_prefix.append(QChar(key - Qt::Key_A + 'a'));
+	const auto i = ranges::find_if(_entries, [&](const Entry &entry) {
+		return entry.label.startsWith(_prefix);
+	});
+	if (i == end(_entries)) {
+		clear();
+		return Input::Unknown;
+	} else if (i->label != _prefix) {
+		_overlay->update();
+		return Input::Pending;
+	}
+	auto entry = std::move(_windowEntries[i - begin(_entries)]);
+	const auto menus = _windowMenus;
+	clear();
+	if (!entry.current() || !WindowHintExposed(entry.widget, entry.bounds.center())) {
+		return Input::Finished;
+	}
+	if (menus) {
+		showMenu(std::move(entry));
+		return Input::Finished;
+	}
+	entry.activate();
+	return entry.reply ? Input::LeaveNormal : Input::Finished;
 }
 
 void MessageHints::watch() {
@@ -762,10 +1009,13 @@ MessageHints::Input MessageHints::apply(
 
 void MessageHints::clear() {
 	_watch.destroy();
+	_windowRoot = nullptr;
+	_windowMenus = false;
 	delete _overlay.data();
 	_view = nullptr;
 	_session = {};
 	_entries.clear();
+	_windowEntries.clear();
 	_prefix.clear();
 	_globalClip = {};
 }

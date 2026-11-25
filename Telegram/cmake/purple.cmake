@@ -190,11 +190,16 @@ PRIVATE
     purple/purple_chat_background.h
     purple/purple_keys.cpp
     purple/purple_keys.h
+    purple/purple_key_repeat.h
+    purple/purple_key_scroll.h
     purple/purple_keys_colors.h
     purple/purple_keys_mx.h
     purple/purple_keys_ui.cpp
     purple/purple_keys_ui.h
+    purple/purple_status_bar.h
     purple/purple_keys_unread.h
+    purple/purple_list_filter_keys.h
+    purple/purple_list_selection.h
     purple/purple_keys_zen.h
     purple/purple_notice_state.h
     purple/purple_diagnostics.cpp
@@ -208,6 +213,14 @@ PRIVATE
     purple/purple_privacy_state.h
     purple/purple_privacy_weather.h
     purple/purple_message_hint_placement.h
+    purple/purple_hint_labels.h
+    purple/purple_hint_hydra.cpp
+    purple/purple_hint_hydra.h
+    purple/purple_hint_item_identity.h
+    purple/purple_hint_mnemonics.h
+    purple/purple_hint_paint.h
+    purple/purple_hint_targets.cpp
+    purple/purple_hint_targets.h
     purple/purple_message_hints.cpp
     purple/purple_message_hints.h
     purple/purple_instant_replaces.cpp
