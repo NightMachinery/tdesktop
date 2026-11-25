@@ -67,9 +67,13 @@ with at most four strokes per chord:
 
 - **Navigate:** `j` / `k` move the chat cursor (in the chat list) or scroll the
   conversation (in a chat), repeatable with counts (`5j`). `J` / `K` (`C-j` /
-  `C-k`) step through chats from any pane. `RET` / `o` open the highlighted
-  chat. `h` / `l` (`SPC w h` / `SPC w l` / `C-w h` / `C-w l`) switch between
-  the chat list and conversation; `SPC w w` (`C-w w`) toggles panes. `C-d` /
+  `C-k`, `] c` / `[ c`) step through the visible chat list from another pane.
+  `RET` / `o` open the highlighted row from the list or after one of those
+  steps. The status line shows `RET open` while the same row stays highlighted.
+  Moving the pointer over the list, clicking, or switching folders clears the
+  keyboard selection. `h` / `l` (`SPC w h` / `SPC w l` / `C-w h` / `C-w l`)
+  switch between the chat list and conversation, and `SPC w w` (`C-w w`)
+  toggles panes. `C-d` /
   `C-u` scroll half a page, `C-f` / `C-b` (`]` / `[` `m`) scroll a full page,
   `G` / `] ]` jump to latest, `] u` / `g u` jump to unread, `] f` / `[ f` step
   folders.

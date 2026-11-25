@@ -2691,7 +2691,7 @@ bool Widget::searchHasFocus() const {
 	return _searchHasFocus;
 }
 
-InnerWidget *Widget::purpleKeysList(QWidget *focus) const {
+InnerWidget *Widget::purpleKeysList(const QWidget *focus) const {
 	return ((focus == this || focus == _inner)
 		&& isVisible()
 		&& !_showAnimation
@@ -2704,6 +2704,12 @@ InnerWidget *Widget::purpleKeysList(QWidget *focus) const {
 		&& _inner->state() == WidgetState::Default)
 		? _inner
 		: nullptr;
+}
+
+InnerWidget *Widget::purpleVisibleKeysList() const {
+	return _childList
+		? _childList->purpleVisibleKeysList()
+		: purpleKeysList(this);
 }
 
 Data::Forum *Widget::openedForum() const {

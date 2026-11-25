@@ -236,7 +236,7 @@ ordered(routing, "const auto result = _hints.type", "if (!guard)",
 stroke = between(keys, "void Keys::stroke", "void Keys::dispatch")
 ordered(stroke, "_frozenEffective = EffectiveBindings", "IsExactLocalleader(_prefix)",
         "_swallowNext = true", "const auto action = b.action", "const auto inspect = _inspect",
-        "KeyRepeat::CanArm", "clearPrefix()", "if (inspect)", "showDescribeKeyResult",
+        "KeyRepeat::CanArm", "clearPrefix(false, opensCursor)", "if (inspect)", "showDescribeKeyResult",
         "CommandAvailable(action, target)", "_motion.start", "dispatch(action, target, count,")
 repeat_path = between(keys, "void Keys::repeat", "bool Keys::layerKey")
 ordered(repeat_path, "Enabled()", "_normal", "_preeditInput", "_prefix.empty()", "_count",
@@ -338,6 +338,28 @@ ordered(dispatch, "case Action::ToggleNightMode:", "editingTheme()",
         "ToggleNightModeWithConfirmation", "Window::Theme::ToggleNightMode();",
         "Window::Theme::KeepApplied();")
 ordered(dispatch, "case Action::OpenChat:", "chooseRow()")
+cursor = between(keys, "Dialogs::InnerWidget *Keys::liveChatCursor", "QWidget *Keys::windowFocusWidget")
+ordered(cursor, "controller != owner()", "isLayerShown()", "ChatsInnerList(controller)",
+        "list != _chatCursor.list", "purpleKeyboardSelection()", "key != _chatCursor.row",
+        "key.owningHistory()", "purpleHiddenFromView()")
+ordered(between(keys, "bool Available(", "bool RequiresModalInput"),
+        "case Action::PreviewChat:", "case Action::OpenChat:", "target.chatCursorAvailable")
+ordered(keys, "const auto stepChatList", "ChatsInnerList(current)", "processKeyDispatch",
+        "purpleKeyboardSelection()", "_chatCursor = row")
+ordered(dispatch, "case Action::OpenChat:", "liveChatCursor(current)", "_chatCursor = {};",
+        "list->showChatPreview()", "list->chooseRow()", "activeChatCurrent() == picked", "activate()")
+ordered(stroke, "const auto opensCursor", "target.chatCursorAvailable",
+        "Action::OpenChat || action == Action::PreviewChat", "clearPrefix(false, opensCursor)")
+ordered(keys, "void Keys::clearPrefix", "if (!keepChatCursor)", "_chatCursor = {};")
+ordered(keys, "bool Keys::eventFilter", "type == QEvent::MouseMove", "globalPosition().toPoint()",
+        "type == QEvent::MouseButtonPress", "type == QEvent::Hide", "_chatCursor = {};")
+ordered(status_fn, "target.focus && liveChatCursor(target.controller)", 'u"RET open"_q')
+ordered(read("dialogs/dialogs_widget.cpp"), "InnerWidget *Widget::purpleVisibleKeysList",
+        "_childList->purpleVisibleKeysList()", "purpleKeysList(this)")
+ordered(read("dialogs/dialogs_inner_widget.cpp"), "InnerWidget::computeChosenRow",
+        ".key = row->folder", ".key = _selected->key()", "Key InnerWidget::purpleKeyboardSelection",
+        "!_mouseSelection", "computeChosenRow().key")
+assert '"J/K to pick a chat first"' in keys
 
 # Verify Doom-aligned SPC leader + localleader (, / SPC m) bindings and zero 4-stroke chords.
 assert ':localleader ["," "SPC m"]' in defaults
