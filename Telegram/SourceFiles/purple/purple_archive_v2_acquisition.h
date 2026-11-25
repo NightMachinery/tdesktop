@@ -3,6 +3,8 @@
 #include "purple/purple_archive_v2_store.h"
 #include "purple/purple_archive_v2_media.h"
 
+#include <deque>
+
 namespace Purple::ArchiveV2 {
 
 struct MediaTarget {
@@ -37,7 +39,7 @@ public:
 private:
 	std::shared_ptr<Lease> _lease;
 	QByteArray _generation;
-	std::optional<MediaRequest> _pending;
+	std::deque<MediaRequest> _pending;
 };
 
 [[nodiscard]] std::optional<BlobInput> CompleteFile(BlobInput input, const QString &path);

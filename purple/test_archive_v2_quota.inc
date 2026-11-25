@@ -75,6 +75,7 @@ CapturedEvent MediaRow(const QByteArray &id, int number, bool timed, int64 obser
 BlobInput MediaFile(const CapturedEvent &event, const QByteArray &data) {
 	auto result = SampleBlob(event.storeId, data);
 	result.identity = event.identity;
+	result.timed = event.attachments.front().timed;
 	return result;
 }
 
@@ -197,6 +198,74 @@ void QuotaDiskAndAge() {
 	const auto pageSize = Count(path, u"PRAGMA page_size"_q);
 	CHECK(reusable > 64 && pageSize > 0);
 	CHECK(trimmed && trimmed->database == QFileInfo(path).size() && trimmed->database >= reusable * pageSize);
+}
+
+void OverlappingAdmissions() {
+	Section = "v2 multiple pending media requests and explicit queue saturation";
+	const auto id = QByteArray(16, 'q');
+	const auto lease = std::make_shared<Lease>();
+	auto admits = MediaAdmission(lease, id);
+	const auto request = [&](int i) {
+		return MediaRequest{ MediaTarget{ id, Sample(id).identity, 1, i, "source",
+			MediaKind::Photo, true }, ChatClass::Direct, u"user:19"_q, 100 };
+	};
+	for (auto i = 0; i != 32; ++i) {
+		CHECK(admits.begin(Policy(), request(i), MediaTrigger::ExplicitOpen, true, false).action == MediaAction::Request);
+	}
+	const auto overflow = admits.begin(Policy(), request(32), MediaTrigger::ExplicitOpen, true, false);
+	CHECK(overflow.action == MediaAction::Describe && overflow.reason == MediaReason::QueueFull);
+	CHECK(admits.begin(Policy(), request(0), MediaTrigger::ExplicitOpen, true, false).action == MediaAction::Describe);
+	for (auto i = 0; i != 32; ++i) CHECK(admits.finish(Policy(), request(i).target));
+}
+
+void ReadyMediaPriority() {
+	Section = "v2 in-flight media leaves room for timed FIFO, ordinary FIFO and target deduplication";
+	const auto temp = std::make_shared<QTemporaryDir>();
+	struct Queue {
+		std::promise<QByteArray> opened;
+		std::promise<void> entered;
+		std::promise<void> release;
+		std::promise<std::vector<int>> finished;
+		std::vector<int> reads;
+	};
+	const auto state = std::make_shared<Queue>();
+	auto ready = state->opened.get_future();
+	auto entered = state->entered.get_future();
+	const auto release = state->release.get_future().share();
+	auto finished = state->finished.get_future();
+	auto worker = Writer(Options(temp->path()), [state, temp, first = true](StoreEffect result, QByteArray id) mutable {
+		if (std::exchange(first, false)) state->opened.set_value(result ? id : QByteArray());
+		if (state->reads.size() == 5 && result.committed) state->finished.set_value(std::exchange(state->reads, {}));
+	});
+	CHECK(ready.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+	if (ready.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+	const auto id = ready.get();
+	const auto staged = std::make_shared<std::promise<void>>();
+	auto rowsReady = staged->get_future();
+	const auto event = [id](int n) { return MediaRow(id, n, n == 3 || n == 4, 1700000000); };
+	for (auto n = 1; n <= 5; ++n) CHECK(worker.post(event(n)));
+	CHECK(worker.query(id, [staged](V2Store &) { staged->set_value(); }));
+	CHECK(rowsReady.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+	if (rowsReady.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+	const auto file = [&](int n) {
+		auto input = MediaFile(event(n), QByteArray(16, char('A' + n)));
+		input.read = [state, release, n, read = std::move(input.read)](qsizetype size) {
+			if (size > 1) {
+				state->reads.push_back(n);
+				if (n == 1) { state->entered.set_value(); release.wait(); }
+			}
+			return read(size);
+		};
+		return input;
+	};
+	CHECK(worker.postBlob(file(1)));
+	CHECK(entered.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+	for (const auto n : { 1, 2, 3, 4, 2, 5 }) CHECK(worker.postBlob(file(n)));
+	state->release.set_value();
+	CHECK(finished.wait_for(std::chrono::seconds(10)) == std::future_status::ready);
+	if (finished.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+		CHECK((finished.get() == std::vector{ 1, 3, 4, 2, 5 }));
+	}
 }
 
 void VerifiedCompleteFile() {

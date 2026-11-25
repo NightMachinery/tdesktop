@@ -2554,6 +2554,8 @@ int main(int argc, char** argv) {
 	V2Fixtures::QueueCancellation();
 	V2Fixtures::MediaGate();
 	V2Fixtures::SeparatePressure();
+	V2Fixtures::OverlappingAdmissions();
+	V2Fixtures::ReadyMediaPriority();
 	V2Fixtures::QuotaDiskAndAge();
 	V2Fixtures::VerifiedCompleteFile();
 	V2Fixtures::HistoryAndCleanup();

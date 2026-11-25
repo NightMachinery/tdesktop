@@ -1,5 +1,9 @@
 #include "purple/purple_archive_v2_writer.h"
 
+#include "purple/purple_archive_v2_media.h"
+
+#include <algorithm>
+
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -32,8 +36,8 @@ struct Writer::State {
 	std::mutex mutex;
 	std::condition_variable changed;
 	std::deque<Job> jobs;
-	std::optional<BlobInput> blob;
-	bool mediaWriting = false;
+	std::deque<std::shared_ptr<BlobInput>> blobs;
+	std::shared_ptr<BlobInput> writing;
 	int64 bytes = 0;
 	bool stopped = false;
 	std::optional<QByteArray> logout;
@@ -80,9 +84,16 @@ StoreEffect Writer::post(CapturedEvent event) {
 
 StoreEffect Writer::postBlob(BlobInput input) {
 	const auto lock = std::lock_guard(_state->mutex);
-	if (_state->stopped || !_state->lease->live.load()) return { u"scope_retired"_q };
-	if (_state->blob || _state->mediaWriting) return { u"store_busy"_q };
-	_state->blob = std::move(input);
+	const auto revision = _state->lease->mediaRevision.load();
+	if (_state->stopped || !_state->lease->live.load() || input.revision != revision) return { u"scope_retired"_q };
+	std::erase_if(_state->blobs, [&](const auto &queued) { return queued->revision != revision; });
+	const auto matches = [&](const auto &other) { return input.sameTarget(*other); };
+	if ((_state->writing && matches(_state->writing))
+		|| std::any_of(_state->blobs.begin(), _state->blobs.end(), matches)) return {};
+	if (_state->blobs.size() >= kMediaQueue) return { u"media_queue_full"_q };
+	const auto position = input.timed ? std::find_if(_state->blobs.begin(), _state->blobs.end(),
+		[](const auto &other) { return !other->timed; }) : _state->blobs.end();
+	_state->blobs.insert(position, std::make_shared<BlobInput>(std::move(input)));
 	_state->changed.notify_one();
 	return {};
 }
@@ -127,7 +138,7 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 	for (;;) {
 		auto lock = std::unique_lock(state->mutex);
 		const auto ready = state->changed.wait_for(lock, std::chrono::minutes(1),
-			[&] { return state->stopped || !state->jobs.empty() || state->blob.has_value(); });
+			[&] { return state->stopped || !state->jobs.empty() || !state->blobs.empty(); });
 		if (!ready) {
 			lock.unlock();
 			const auto result = store->maintain();
@@ -146,13 +157,13 @@ void Writer::run(std::shared_ptr<State> state, StoreOptions options) {
 			return;
 		}
 		if (state->jobs.empty()) {
-			auto blob = std::exchange(state->blob, std::nullopt);
-			state->mediaWriting = true;
+			auto blob = state->writing = std::move(state->blobs.front());
+			state->blobs.pop_front();
 			lock.unlock();
 			auto effect = store->writeBlob(*blob);
 			{
 				const auto guard = std::lock_guard(state->mutex);
-				state->mediaWriting = false;
+				state->writing.reset();
 			}
 			if (state->lease->live.load()) report(std::move(effect), store->id());
 			continue;

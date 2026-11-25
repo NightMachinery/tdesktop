@@ -144,6 +144,11 @@ struct BlobInput {
 	QByteArray digest;
 	QByteArray source;
 	std::function<QByteArray(qsizetype)> read;
+	bool timed = false;
+	[[nodiscard]] bool sameTarget(const BlobInput &other) const {
+		return storeId == other.storeId && revision == other.revision && identity == other.identity
+			&& sequence == other.sequence && ordinal == other.ordinal && source == other.source;
+	}
 };
 
 struct Usage {
