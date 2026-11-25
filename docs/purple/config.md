@@ -316,7 +316,8 @@ replacement name. The editor repairs recognized references in the destination
 file. Update references in other files separately.
 
 Choose **Review** (`d`) to read the draft's **Effects** and **Lines**. Check
-the destination path, the before and after lines, and any warnings. **Apply
+the destination path, the before and after lines, and any warnings. Effects
+groups changes by TOML path and calls out renames and their updated references. **Apply
 changes** uses the guarded writer for that destination. Consequential changes
 ask for confirmation. Peek changes use the existing countdown and Peek
 confirmation. A successful local write gives feedback in Customize. If the
@@ -324,7 +325,8 @@ primary file was saved and its last-good copy could not be refreshed, the
 editor reports both outcomes.
 
 If a source changes on disk, the conflict view compares the opening file,
-current file, and draft when that destination is still available. **Reload
+current file, and draft when that destination is still available. It starts
+with differing settings. **Show raw files** opens the complete comparison. **Reload
 and review** replays edits when their routes and reviewed dependencies agree.
 If the edit overlaps a disk change or a checked reference changed, discard
 the draft and edit again against the fresh source. For invalid TOML, use the

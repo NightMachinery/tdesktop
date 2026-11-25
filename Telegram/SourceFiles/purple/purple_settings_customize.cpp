@@ -17,6 +17,7 @@
 #include "purple/purple_settings_customize_look.h"
 #include "purple/purple_settings_editor.h"
 #include "purple/purple_settings_focus.h"
+#include "purple/purple_settings_review_display.h"
 #include "purple/purple_settings_draft.h"
 #include "purple/purple_settings_structures.h"
 #include "purple/purple_settings_tree.h"
@@ -55,6 +56,8 @@
 #include <QtWidgets/QScrollArea>
 #include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QTreeWidget>
+#include <QtWidgets/QTextEdit>
+#include <QtWidgets/QToolTip>
 #include <QtWidgets/QVBoxLayout>
 
 #include <tuple>
@@ -523,6 +526,9 @@ private:
 	void applyPalette() {
 		CustomizeLook::Apply(this, st::windowBg->c, st::windowBgOver->c, st::windowFg->c,
 			st::windowSubTextFg->c, st::windowActiveTextFg->c, st::boxDividerBg->c);
+		if (_reviewBody && _reviewEffectsShown && visibleContent()) {
+			if (const auto frame = _frames.current()) _reviewBody->setHtml(reviewEffects(frame->review->preview()));
+		}
 	}
 
 	bool sameSession() const {
@@ -552,6 +558,7 @@ private:
 		if (!sameSession()) {
 			retire();
 		} else if (!visibleContent()) {
+			QToolTip::hideText();
 			if (_pages->currentWidget() == _sheetPage && !_editingKey.isEmpty()) {
 				_pausedForm = true;
 				_formFocus = SettingsFocus(QApplication::focusWidget());
@@ -629,8 +636,10 @@ private:
 		}
 		_draftStale = !matches;
 		if (_draftStale) {
-			AnnounceError(_formStatus ? _formStatus : _feedback,
-				u"The settings source changed. Your input is kept until you leave this form."_q);
+			const auto formOpen = (_pages->currentWidget() == _sheetPage) && !_editingKey.isEmpty();
+			AnnounceError(formOpen && _formStatus ? _formStatus : _feedback, formOpen
+				? u"The settings source changed. Your input is kept until you leave this form."_q
+				: u"The settings source changed. Review the staged draft against the current file."_q);
 		}
 	}
 
@@ -980,6 +989,7 @@ private:
 		_catalogueLifetime.destroy();
 		_sheetBack = {};
 		_reviewBody = nullptr;
+		_reviewEffectsShown = false;
 		_applyMessage.clear();
 		_reviewPages.clear();
 		_pausedForm = false;
@@ -1037,36 +1047,55 @@ private:
 		return button;
 	}
 
+	void sheetPath(const QString &path) {
+		const auto chip = new CustomizeLook::Chip(_sheet);
+		chip->setDetails(u"Destination"_q, path);
+		addSheetWidget(chip);
+	}
+
 	void showSheet(QWidget *focus) {
 		if (!visibleContent()) return;
 		_pages->setCurrentWidget(_sheetPage);
 		if (focus) focus->setFocus();
 	}
 
-	QPlainTextEdit *sheetText(const QString &content, const QString &name) {
-		const auto text = new QPlainTextEdit(content, _sheet);
+	QTextEdit *sheetText(const QString &content, const QString &name) {
+		const auto text = new QTextEdit(_sheet);
+		text->setPlainText(content);
 		text->setReadOnly(true);
 		text->setAccessibleName(name);
 		text->setLayoutDirection(Qt::LeftToRight);
-		text->setLineWrapMode(QPlainTextEdit::NoWrap);
+		text->setLineWrapMode(QTextEdit::WidgetWidth);
+		text->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+		text->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 		addSheetWidget(text);
 		return text;
 	}
 
 	QString reviewEffects(const SettingsEditorPreview &preview) const {
-		auto lines = QStringList();
-		for (const auto &entry : preview.summary.entries) {
-			for (const auto &key : entry.keys) {
-				const auto before = key.beforeValue.value_or(u"absent"_q);
-				const auto after = key.afterValue.value_or(u"absent"_q);
-				lines.push_back(u"%1 %2 · %3 → %4"_q.arg(key.table, key.key, before, after));
+		const auto frame = _frames.current();
+		const auto edits = frame ? std::get_if<std::vector<SettingsEdit>>(&frame->intent) : nullptr;
+		auto renames = std::vector<SettingsReviewDisplay::Rename>();
+		if (edits) {
+			for (const auto &edit : *edits) {
+				const auto op = std::get_if<SettingsObjectEdit>(&edit.operation);
+				if (!op || op->operation != SettingsCollectionOp::Rename || edit.address.empty()) continue;
+				const auto name = std::get_if<QString>(&edit.address.back());
+				if (!name) continue;
+				auto destination = edit.address;
+				destination.back() = op->name;
+				auto references = QStringList();
+				for (const auto &address : SettingsStructures::RewriteReferences(
+						preview.before, edit.address, op->name).uses) {
+					if (!SettingsStructures::SourceMatches(preview.before, preview.after, address)) {
+						references.push_back(SettingsTree::Address(address));
+					}
+				}
+				renames.push_back({ SettingsTree::Address(edit.address), SettingsTree::Address(destination),
+					*name, op->name, std::move(references) });
 			}
 		}
-		for (const auto &finding : preview.impact.findings) {
-			if (finding.dangerous || finding.kind != ConfigImpactKind::ValueChanged) {
-				lines.push_back(finding.label);
-			}
-		}
+		auto effective = std::map<QString, QString>();
 		for (const auto &address : preview.changedAddresses) {
 			const auto descriptor = FindSettingDescriptor(address);
 			if (!descriptor || !SettingsTree::IsScalar(descriptor->codec)) continue;
@@ -1075,8 +1104,24 @@ private:
 			const auto before = SettingsTree::ValueText(value);
 			value.effective = EffectiveSettingValue(preview.afterLayers.effective.settings, address);
 			const auto after = SettingsTree::ValueText(value);
-			if (!before.isEmpty() || !after.isEmpty()) {
-				lines.push_back(u"Effective %1 · %2 → %3"_q.arg(SettingsTree::Address(address), before, after));
+			if (before != after) {
+				effective.emplace(SettingsTree::Address(address), u"Effective · %1 → %2"_q.arg(before, after));
+			}
+		}
+		const auto color = CustomizeLook::Tone(this, "customizeSurface", QPalette::Base);
+		auto html = SettingsReviewDisplay::Effects(preview.summary, renames,
+			ModalUi::ReadableText(QColor(0xb9, 0x3a, 0x42), color),
+			ModalUi::ReadableText(QColor(0x31, 0x81, 0x52), color), effective);
+		auto lines = QStringList();
+		for (const auto &finding : preview.impact.findings) {
+			const auto renamed = (finding.kind == ConfigImpactKind::ListLoss
+				|| finding.kind == ConfigImpactKind::PresetLoss
+				|| finding.kind == ConfigImpactKind::AppWideLoss)
+				&& std::any_of(renames.begin(), renames.end(), [&](const auto &rename) {
+					return SettingsReviewDisplay::Owns(rename.from, finding.change.table);
+				});
+			if (!renamed && (finding.dangerous || finding.kind != ConfigImpactKind::ValueChanged)) {
+				lines.push_back(finding.label);
 			}
 		}
 		for (const auto &warning : preview.physicalBefore.warnings) {
@@ -1092,12 +1137,14 @@ private:
 		if (preview.incompleteTrace) lines.push_back(u"Some effective reads could not be verified."_q);
 		if (preview.offlineGlobalSource) lines.push_back(u"The app-wide source account is signed out."_q);
 		if (preview.usesGlobalRecovery) lines.push_back(u"Effective settings use an app-wide recovery copy."_q);
-		if (lines.empty()) lines.push_back(u"The change affects the stored representation. See Lines."_q);
-		return lines.join(u'\n');
+		if (html.isEmpty() && lines.isEmpty()) lines.push_back(u"The change affects the stored representation. See Lines."_q);
+		return html + (lines.isEmpty() ? QString() : SettingsReviewDisplay::Block(u"Notes"_q,
+			{ SettingsReviewDisplay::Escaped(lines.join(u'\n')) }));
 	}
 
 	void showReviewPage(int delta) {
 		if (!_reviewBody || _reviewPages.empty() || !visibleContent()) return;
+		_reviewEffectsShown = false;
 		_reviewPage = std::clamp(_reviewPage + delta, 0, int(_reviewPages.size()) - 1);
 		_reviewBody->setPlainText(u"Page %1 of %2\n\n"_q.arg(_reviewPage + 1).arg(_reviewPages.size())
 			+ _reviewPages[_reviewPage]);
@@ -1118,20 +1165,34 @@ private:
 		clearSheet();
 		const auto &preview = review->preview();
 		sheetTitle(u"Review settings changes"_q);
-		addSheetWidget(Label(_sheet, Isolate(preview.path)));
+		sheetPath(preview.path);
 		if (preview.diff.truncated) {
 			addSheetWidget(Label(_sheet, u"The compact diff reached its limit. Lines includes both complete files in pages."_q));
 		}
 		_reviewPages = SettingsStructures::ReviewLines(preview.diff, preview.before, preview.after);
 		_reviewPage = 0;
-		const auto effects = reviewEffects(preview);
-		_reviewBody = sheetText(effects, u"Reviewed settings effects and lines"_q);
-		const auto back = sheetButton(u"Back"_q, [this] { returnToTree(); });
-		sheetButton(u"Effects"_q, [this, effects] { _reviewBody->setPlainText(effects); });
-		sheetButton(u"Lines"_q, [this] { showReviewPage(0); });
-		sheetButton(u"Previous page"_q, [this] { showReviewPage(-1); });
-		sheetButton(u"Next page"_q, [this] { showReviewPage(1); });
-		const auto apply = sheetButton(u"Apply changes"_q, [this, review] { approve(review); });
+		_reviewBody = sheetText({}, u"Reviewed settings effects and lines"_q);
+		_reviewEffectsShown = true;
+		_reviewBody->setHtml(reviewEffects(preview));
+		const auto actions = new CustomizeLook::Actions(_sheet);
+		addSheetWidget(actions);
+		const auto action = [&](const QString &text, Fn<void()> run) {
+			const auto button = Button(actions, text);
+			actions->append(button);
+			button->installEventFilter(this);
+			connect(button, &QPushButton::clicked, this, std::move(run));
+			return button;
+		};
+		const auto back = action(u"Back"_q, [this] { returnToTree(); });
+		action(u"Effects"_q, [this, review, body = QPointer(_reviewBody)] {
+			if (!body || body != _reviewBody || !visibleContent()) return;
+			_reviewEffectsShown = true;
+			body->setHtml(reviewEffects(review->preview()));
+		});
+		action(u"Lines"_q, [this] { showReviewPage(0); });
+		action(u"Previous page"_q, [this] { showReviewPage(-1); });
+		action(u"Next page"_q, [this] { showReviewPage(1); });
+		const auto apply = action(u"Apply changes"_q, [this, review] { approve(review); });
 		apply->setEnabled(!preview.diff.truncated || !_reviewPages.empty());
 		showSheet(back);
 	}
@@ -1149,8 +1210,8 @@ private:
 		}
 		clearSheet();
 		sheetTitle(u"Confirm settings change"_q);
-		addSheetWidget(Label(_sheet, Isolate(preview.path)));
-		sheetText(reviewEffects(preview), u"Consequences"_q);
+		sheetPath(preview.path);
+		sheetText({}, u"Consequences"_q)->setHtml(reviewEffects(preview));
 		_sheetBack = [this] { showReview(); };
 		const auto cancel = sheetButton(u"Cancel"_q, _sheetBack);
 		const auto apply = sheetButton(u"Confirm and apply"_q, [this, review] { submitReview(review); });
@@ -1231,10 +1292,18 @@ private:
 			: matches(fresh.globalSource) ? &fresh.globalSource->file.input : nullptr;
 		clearSheet();
 		sheetTitle(u"Settings changed since this draft"_q);
+		sheetPath(preview.path);
 		if (disk) {
-			sheetText(u"Opened\n%1\n\nOn disk\n%2\n\nDraft\n%3"_q.arg(
-				QString::fromUtf8(preview.before), QString::fromUtf8(disk->bytes), QString::fromUtf8(preview.after)),
-				u"Opened, current and draft settings"_q);
+			const auto onDisk = disk->state == SettingsFileState::ReadError
+				? ConfigChangeSummary() : SummarizeConfigChange(preview.before, disk->bytes);
+			const auto differences = SettingsReviewDisplay::Conflict(preview.summary, onDisk);
+			if (!differences.isEmpty()) {
+				sheetText({}, u"Differing settings"_q)->setHtml(differences);
+			} else {
+				addSheetWidget(HelpLabel(_sheet, u"The source changed without a comparable setting value."_q));
+			}
+		} else {
+			addSheetWidget(HelpLabel(_sheet, u"The reviewed destination is no longer available."_q));
 		}
 		const auto keep = sheetButton(u"Keep draft for comparison"_q, [this] { returnToTree(); });
 		sheetButton(u"Reload and review"_q, [this, review, fresh] {
@@ -1256,6 +1325,22 @@ private:
 			showReview();
 		});
 		sheetButton(u"Discard draft"_q, [this] { discardDraft(); });
+		if (disk) {
+			const auto raw = sheetText(u"Yours\n%1\n\nOn disk\n%2\n\nOriginal\n%3"_q.arg(
+				QString::fromUtf8(preview.after), QString::fromUtf8(disk->bytes), QString::fromUtf8(preview.before)),
+				u"Raw settings files"_q);
+			raw->hide();
+			const auto toggle = Button(_sheet, u"Show raw files"_q);
+			addSheetWidget(toggle);
+			connect(toggle, &QPushButton::clicked, this, [this, toggle, raw] {
+				const auto show = !raw->isVisible();
+				raw->setVisible(show);
+				toggle->setText(show ? u"Hide raw files"_q : u"Show raw files"_q);
+				if (show) _sheetPage->ensureWidgetVisible(raw);
+			});
+			_sheetLayout->removeWidget(raw);
+			_sheetLayout->addWidget(raw);
+		}
 		showSheet(keep);
 	}
 
@@ -1410,7 +1495,7 @@ private:
 		clearSheet();
 		_editingKey = row.key;
 		sheetTitle(row.label);
-		addSheetWidget(Label(_sheet, Isolate(target.path)));
+		sheetPath(target.path);
 		if (field && !session) {
 			addSheetWidget(Label(_sheet, u"The source account is signed out. Recorded IDs and typed IDs are available."_q));
 		}
@@ -2025,12 +2110,13 @@ private:
 	QPointer<QWidget> _collection;
 	rpl::lifetime _catalogueLifetime;
 	std::optional<SettingsDraft::FormValue> _formBaseline;
-	QPlainTextEdit *_reviewBody = nullptr;
+	QTextEdit *_reviewBody = nullptr;
 	QPointer<QLabel> _applyMessage;
 	QStringList _reviewPages;
 	Fn<void()> _sheetBack;
 	Fn<void()> _afterApply;
 	int _reviewPage = 0;
+	bool _reviewEffectsShown = false;
 	uint64_t _applySerial = 0;
 	bool _applyInFlight = false;
 	bool _pausedForm = false;

@@ -87,11 +87,14 @@ ordered(keys, "case Action::CustomizeSettings:", "ShowCustomizeSettings")
 ordered(keys, ".onPick = [guard", "Available(action, restoredTarget)", "guard->dispatch(action, restored, 1)")
 customize = read("purple/purple_settings_customize.cpp")
 customize_look = read("purple/purple_settings_customize_look.h")
-ordered(customize_look, "class Chip", "setToolTip(_details)", "setAccessibleDescription(_details)", "Qt::ElideMiddle")
+ordered(customize_look, "class Chip", "setToolTip(details)", "setAccessibleDescription(details)", "Qt::ElideMiddle")
 ordered(customize_look, "class Tree", "setAlternatingRowColors(false)", "drawBranches")
 assert "new QPushButton" not in customize
 ordered(customize, "void closeForm()", "_exitFocus.restore(_sheet)", "SettingsFocus(_lastField")
 ordered(customize, "void returnToTree()", "SettingsFocus(_browserFocus)", "previous.restore(_browser)")
+ordered(customize, "void showConflict(", "SummarizeConfigChange(preview.before, disk->bytes)",
+        "SettingsReviewDisplay::Conflict", "raw->hide()", "Show raw files")
+ordered(customize, "QTextEdit *sheetText", "WrapAtWordBoundaryOrAnywhere", "ScrollBarAlwaysOff")
 ordered(customize, "sessionDataAboutToBeCleared()", "retire()", "PrivacyScreenChanges()")
 ordered(customize, "void protectionChanged()", "setCurrentWidget(_covered)",
         "refreshFromDisk()", "_resumeRefused = _draftStale", "_coverClose->show()",

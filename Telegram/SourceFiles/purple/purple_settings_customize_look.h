@@ -3,7 +3,6 @@
 #include "purple/purple_keys_colors.h"
 
 #include <QtGui/QPainter>
-#include <QtWidgets/QGridLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QTreeWidget>
@@ -34,6 +33,7 @@ inline void Apply(QWidget *root, QColor bg, QColor surface, QColor ink, QColor m
 	const auto radius = std::max(3, unit / 3);
 	root->setProperty("customizeBackground", bg);
 	root->setProperty("customizeInk", ink);
+	root->setProperty("customizeSurface", surface);
 	root->setProperty("customizeAccent", focus);
 	root->setProperty("customizeSelectionInk", selectedInk);
 	auto palette = root->palette();
@@ -147,47 +147,63 @@ private:
 
 class Actions final : public QWidget {
 public:
-	explicit Actions(QWidget *parent) : QWidget(parent), _layout(new QGridLayout(this)) {
-		_layout->setContentsMargins({});
-		_layout->setAlignment(Qt::AlignLeft);
+	explicit Actions(QWidget *parent) : QWidget(parent) {
+		auto policy = QSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+		policy.setHeightForWidth(true);
+		setSizePolicy(policy);
 	}
 
 	void append(QPushButton *action) {
+		action->setParent(this);
 		_actions.push_back(action);
-		_lastWidth = -1;
-		reflow();
+		action->show();
+		updateGeometry();
+		place(width(), true);
 	}
+
+	QSize minimumSizeHint() const override {
+		auto size = QSize(0, 0);
+		for (const auto button : _actions) size = size.expandedTo(button->sizeHint());
+		return size;
+	}
+
+	QSize sizeHint() const override {
+		auto size = minimumSizeHint();
+		auto width = 0;
+		for (const auto button : _actions) width += button->sizeHint().width() + gap();
+		size.setWidth(std::max(0, width - gap()));
+		return size;
+	}
+
+	int heightForWidth(int width) const override { return place(width, false); }
 
 protected:
 	void resizeEvent(QResizeEvent *event) override {
 		QWidget::resizeEvent(event);
-		reflow();
+		place(width(), true);
 	}
 
 private:
-	void reflow() {
-		if (_lastWidth == width()) return;
-		_lastWidth = width();
-		const auto gap = std::max(3, fontMetrics().height() / 3);
-		_layout->setSpacing(gap);
-		auto at = 0;
-		auto row = 0;
-		auto column = 0;
+	int gap() const { return std::max(3, fontMetrics().height() / 3); }
+
+	int place(int width, bool apply) const {
+		auto x = 0;
+		auto y = 0;
+		auto line = 0;
 		for (const auto button : _actions) {
-			const auto width = button->sizeHint().width();
-			if (column && at + width > this->width()) {
-				++row;
-				column = at = 0;
+			const auto size = button->sizeHint();
+			if (x && x + size.width() > width) {
+				y += line + gap();
+				x = line = 0;
 			}
-			_layout->removeWidget(button);
-			_layout->addWidget(button, row, column++, Qt::AlignLeft);
-			at += width + gap;
+			if (apply) button->setGeometry(QRect(QPoint(x, y), size));
+			x += size.width() + gap();
+			line = std::max(line, size.height());
 		}
+		return y + line;
 	}
 
-	QGridLayout *_layout;
 	std::vector<QPushButton*> _actions;
-	int _lastWidth = -1;
 };
 
 class Chip final : public QLabel {
@@ -200,10 +216,12 @@ public:
 	}
 
 	void setDetails(QString title, QString path = {}) {
-		_details = path.isEmpty() ? std::move(title) : title + QStringLiteral(" · ") + path;
-		setToolTip(_details);
-		setAccessibleName(title.isEmpty() ? _details : title);
-		setAccessibleDescription(_details);
+		_title = std::move(title);
+		_path = std::move(path);
+		const auto details = _path.isEmpty() ? _title : _title + QStringLiteral(" · ") + _path;
+		setToolTip(details);
+		setAccessibleName(_title);
+		setAccessibleDescription(details);
 		refresh();
 	}
 
@@ -229,9 +247,18 @@ private:
 	void refresh() {
 		const auto padding = fontMetrics().height() / 2;
 		setIndent(padding);
-		setText(fontMetrics().elidedText(_details, Qt::ElideMiddle, std::max(0, width() - 2 * padding)));
+		const auto fm = fontMetrics();
+		const auto available = std::max(0, width() - 2 * padding);
+		if (_path.isEmpty()) {
+			setText(fm.elidedText(_title, Qt::ElideRight, available));
+		} else {
+			const auto prefix = fm.elidedText(_title, Qt::ElideRight, available / 2) + QStringLiteral(" · ");
+			setText(prefix + fm.elidedText(_path, Qt::ElideMiddle,
+				std::max(0, available - fm.horizontalAdvance(prefix))));
+		}
 	}
-	QString _details;
+	QString _title;
+	QString _path;
 };
 
 class Tree final : public QTreeWidget {
