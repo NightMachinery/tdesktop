@@ -81,6 +81,10 @@ Open **Playlists** from the main menu to create folders or move playlists
 between them. Use Tab and Shift+Tab to focus playlist and folder actions, then
 press Enter or Space to activate the focused action. Removing a folder places
 its playlists back at the top level.
+
+On a playlist track, Enter or Space plays once per press. Arrow navigation and
+Alt+Up or Alt+Down reordering can repeat while held.
+
 Hyper holds automatically created playlists. Folder names and placement are
 saved for each account on this Desktop installation.
 

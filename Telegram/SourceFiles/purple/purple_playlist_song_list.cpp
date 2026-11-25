@@ -1032,7 +1032,11 @@ void PlaylistSongList::Rows::keyPressEvent(QKeyEvent *e) {
 		return;
 	}
 	e->accept();
-	if (*action != TrackListAction::Mark || !e->isAutoRepeat()) navigate(*action, 1);
+	if (e->isAutoRepeat() && (*action == TrackListAction::Mark
+		|| (_mode == Mode::Playlist && *action == TrackListAction::Play))) {
+		return;
+	}
+	navigate(*action, 1);
 }
 
 void PlaylistSongList::Rows::setRows(
