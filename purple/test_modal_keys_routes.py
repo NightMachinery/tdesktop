@@ -246,7 +246,7 @@ ordered(keys, "QEvent::InputMethodQuery", "watched == _normalComposer",
 ordered(keys, "void Keys::clearPrefix", "_motion.cancel(keepChatNavigation)", "_layerMotion.cancel()")
 ordered(keys, "owner->activeChatEntryChanges()", "contextChanged(true)", "contextChanged(false)")
 actions = between(keys, "const Command kCommands[]", "using Chord")
-armed = re.findall(r"\{ Action::(\w+),[^\n]*\n[^\n]*RepeatPolicy::(SameTarget|ChatNavigation)", actions)
+armed = re.findall(r"\{ Action::(\w+),[^\n]*\n[^\n]*\n[^\n]*RepeatPolicy::(SameTarget|ChatNavigation)", actions)
 assert set(armed) == {
     ("MoveUp", "SameTarget"), ("MoveDown", "SameTarget"),
     ("PreviousChat", "ChatNavigation"), ("NextChat", "ChatNavigation"),

@@ -274,10 +274,11 @@ struct Candidate {
 	QString category;
 	QString keysText;
 	bool available = true;
+	QString aliases;
 };
 
 // Returns -1 if the candidate does not match all tokens; otherwise:
-//   0 = empty query
+//   0 = empty query or a match that needs alias words
 //   3 = every token matches the title (label or its word initials)
 //   2 = at least one token matches the title, remaining tokens match metadata
 //   1 = matched only via group/category, :command-id, or key chord text
@@ -291,13 +292,21 @@ struct Candidate {
 	const auto initials = WordInitials(it.label);
 	const auto fullHay = (it.label + u' ' + it.id + u' '
 		+ it.category + u' ' + it.keysText).toCaseFolded();
+	const auto aliases = it.aliases.toCaseFolded();
 	auto titleMatches = 0;
+	auto needsAlias = false;
 	for (const auto &t : tokens) {
 		if (MatchToken(t, labelFolded, initials)) {
 			++titleMatches;
 		} else if (!MatchToken(t, fullHay, initials)) {
-			return -1;
+			if (aliases.isEmpty() || !MatchToken(t, aliases, QString())) {
+				return -1;
+			}
+			needsAlias = true;
 		}
+	}
+	if (needsAlias) {
+		return 0;
 	}
 	if (titleMatches == int(tokens.size())) {
 		return 3;

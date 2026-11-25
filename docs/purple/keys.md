@@ -133,12 +133,14 @@ with at most four strokes per chord:
 - **`M-x` / `:` / `SPC :` / `SPC SPC` (Command Palette):** upper-third anchored
   layer (never jumps vertically as results narrow) with an `amx` + `orderless`
   ranking engine: available commands first, then title matches ahead of
-  group/id-only matches, with `amx` top-7 recency, invocation frequency,
+  group/id and alias matches, with `amx` top-7 recency, invocation frequency,
   shorter labels, and A-Z breaking ties inside each tier (persisted in
   `mx-history.json`). Space-separated query terms match in any order as
   substrings, safe regexes, or word initialisms (`opm` for Open pinned
   messages), highlighting matches in both the title and the category/command-id
-  subtitle alongside right-aligned live keycaps. Navigate with `C-n`/`C-p`,
+  subtitle alongside right-aligned live keycaps. Matching aliases appear in
+  the subtitle when they help find a command. Try `music play` for playback
+  toggle. Navigate with `C-n`/`C-p`,
   `C-j`/`C-k`, arrows, or `Tab`/`S-Tab`; step input history with `M-p`/`M-n`.
   Hold the arrow, Control, or Alt motions to repeat them. `F6` switches between
   the search field and results. With modal input enabled, hold `j` or `k` to

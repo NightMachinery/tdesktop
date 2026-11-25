@@ -1566,7 +1566,9 @@ public:
 	void setResults(
 			std::vector<int> filtered,
 			std::vector<ModalMx::OrderlessToken> tokens,
+			std::vector<QString> aliasReasons,
 			int selected) {
+		_aliasReasons = std::move(aliasReasons);
 		_filtered = std::move(filtered);
 		_tokens = std::move(tokens);
 		_selected = selected;
@@ -1717,7 +1719,10 @@ protected:
 				labelColor,
 				st::windowActiveTextFg->c);
 
-			const auto sub = item.category.isEmpty()
+			const auto &aliases = _aliasReasons[_filtered[row]];
+			const auto sub = !aliases.isEmpty()
+				? (aliases + u"  ·  :"_q + item.id)
+				: item.category.isEmpty()
 				? (u":"_q + item.id)
 				: (item.category + u"  ·  :"_q + item.id);
 			const auto subSpans = ModalMx::SubtitleMatchSpans(sub, _tokens);
@@ -1739,6 +1744,7 @@ private:
 	Fn<void(int)> _onClick;
 	std::vector<int> _filtered;
 	std::vector<ModalMx::OrderlessToken> _tokens;
+	std::vector<QString> _aliasReasons;
 	int _selected = 0;
 	int _hovered = -1;
 };
@@ -1770,6 +1776,7 @@ public:
 				.category = it.category,
 				.keysText = keysJoined.join(u' '),
 				.available = it.available,
+				.aliases = it.aliases,
 			});
 		}
 		auto rows = object_ptr<PaletteRowsWidget>(
@@ -1958,7 +1965,26 @@ private:
 		const auto query = _input->getLastText();
 		_filtered = ModalMx::RankAndFilter(_candidates, _config.history, query);
 		_selected = 0;
-		_rows->setResults(_filtered, ModalMx::ParseTokens(query), _selected);
+		auto tokens = ModalMx::ParseTokens(query);
+		auto aliasReasons = std::vector<QString>(_candidates.size());
+		if (!tokens.empty()) {
+			for (const auto index : _filtered) {
+				const auto &candidate = _candidates[index];
+				if (ModalMx::CandidateMatchTier(candidate, tokens) != 0) {
+					continue;
+				}
+				auto matched = QStringList();
+				for (const auto &word : candidate.aliases.split(u' ', Qt::SkipEmptyParts)) {
+					if (ranges::any_of(tokens, [&](const auto &token) {
+						return ModalMx::MatchToken(token, word.toCaseFolded(), {});
+					})) {
+						matched.push_back(word);
+					}
+				}
+				aliasReasons[index] = matched.join(u' ');
+			}
+		}
+		_rows->setResults(_filtered, std::move(tokens), std::move(aliasReasons), _selected);
 		_scroll->scrollToY(0);
 		if (parentWidget()) {
 			parentResized();

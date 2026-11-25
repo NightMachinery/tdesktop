@@ -152,6 +152,7 @@ struct PaletteItem {
 	QString id;
 	QString label;
 	QString category;
+	QString aliases;
 	QString unavailableReason;
 	std::vector<QStringList> chords;
 	bool available = true;
