@@ -463,6 +463,14 @@ ordered(archive_cpp, "void ShowArchiveRemovalPending()", ".appScoped = true",
         "void RemoveArchiveAtLogout", "ShowArchiveRemovalPending();", "archive:discard_failed:")
 ordered(archive_cpp, 'failure = u"discard-held"_q', "Could not discard the account's archive; reason=%1",
         ".arg(i->second.failure)", "ShowPurpleNotice")
+topic_edit = read("boxes/peers/edit_forum_topic_box.cpp")
+ordered(topic_edit, "const auto refreshBotTopic", "bot ? peer->forum() : nullptr",
+        "liveForum->requestTopic(rootId)", "MTPmessages_EditForumTopic",
+        "api->applyUpdates(result)", "refreshBotTopic();", "TOPIC_NOT_MODIFIED",
+        "if (unchanged)", "refreshBotTopic();")
+ordered(keys, "using TopicFlag = Data::TopicUpdate::Flag",
+        "topicUpdates(TopicFlag::Title | TopicFlag::IconId)",
+        "update.topic->peer()->id == peerId", "CreateTopicPickerLayer")
 st_cover_cpp = read("purple/purple_screentime_cover.cpp")
 ordered(st_cover_cpp, "ShowPurpleAck", ".persistent = true")
 last_seen_cpp = read("purple/purple_last_seen.cpp")

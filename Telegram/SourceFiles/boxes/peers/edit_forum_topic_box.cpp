@@ -561,6 +561,11 @@ void EditForumTopicBox(
 			using Flag = MTPmessages_EditForumTopic::Flag;
 			const auto api = &forum->session().api();
 			const auto weak = base::make_weak(box);
+			const auto refreshBotTopic = [peer = forum->peer, rootId, bot] {
+				if (const auto liveForum = bot ? peer->forum() : nullptr) {
+					liveForum->requestTopic(rootId);
+				}
+			};
 			state->requestId = api->request(MTPmessages_EditForumTopic(
 				MTP_flags(Flag::f_title
 					| (topic->isGeneral() ? Flag() : Flag::f_icon_emoji_id)),
@@ -572,12 +577,17 @@ void EditForumTopicBox(
 				MTPBool() // hidden
 			)).done([=](const MTPUpdates &result) {
 				api->applyUpdates(result);
+				refreshBotTopic();
 				if (const auto strong = weak.get()) {
 					strong->closeBox();
 				}
 			}).fail([=](const MTP::Error &error) {
+				const auto unchanged = (error.type() == u"TOPIC_NOT_MODIFIED");
+				if (unchanged) {
+					refreshBotTopic();
+				}
 				if (const auto strong = weak.get()) {
-					if (error.type() == u"TOPIC_NOT_MODIFIED") {
+					if (unchanged) {
 						strong->closeBox();
 					} else {
 						state->requestId = -1;

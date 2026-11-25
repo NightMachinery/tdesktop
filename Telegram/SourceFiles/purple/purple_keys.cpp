@@ -13,6 +13,7 @@
 #include "data/data_chat.h"
 #include "data/data_document.h"
 #include "data/data_folder.h"
+#include "data/data_changes.h"
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
 #include "data/data_session.h"
@@ -2495,10 +2496,15 @@ void Keys::showTopicPicker(bool unreadOnly, const Target &target) {
 	const auto weakCtrl = base::make_weak(current);
 	const auto weakSession = base::make_weak(&current->session());
 	const auto peerId = forum->peer()->id;
+	using TopicFlag = Data::TopicUpdate::Flag;
 	auto updates = rpl::merge(
 		forum->topicDestroyed() | rpl::to_empty,
 		forum->topicsList()->unreadStateChanges() | rpl::to_empty,
-		forum->topicsList()->fullSize().changes() | rpl::to_empty);
+		forum->topicsList()->fullSize().changes() | rpl::to_empty,
+		current->session().changes().topicUpdates(TopicFlag::Title | TopicFlag::IconId)
+			| rpl::filter([peerId](const Data::TopicUpdate &update) {
+				return update.topic->peer()->id == peerId;
+			}) | rpl::to_empty);
 	_activeLayer = ActiveLayer::TopicPicker;
 	auto layer = ModalUi::CreateTopicPickerLayer({
 		.session = weakSession,

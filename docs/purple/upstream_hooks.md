@@ -2043,6 +2043,12 @@ worker's pending database transactions. The existing playlist menu hook in
   scoped search. Purple uses the same pinned search field, result controls,
   and back-stack state as global Settings search.
 
+### Bot thread edit refresh
+
+- `boxes/peers/edit_forum_topic_box.cpp`: refreshes the edited bot thread by
+  ID after a successful or already-applied edit. The normal topic update
+  notifies the stock header and Purple topic picker.
+
 ### Per-chat translation exclusion
 
 - `history/view/history_view_translate_bar.cpp`: includes
