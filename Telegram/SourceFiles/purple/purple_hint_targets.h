@@ -1,6 +1,8 @@
 #pragma once
 
 #include "base/basic_types.h"
+#include "base/unique_qptr.h"
+#include "data/data_msg_id.h"
 
 #include <QtCore/QPointer>
 #include <QtCore/QRect>
@@ -10,17 +12,30 @@
 
 class QWidget;
 
+namespace Ui {
+class PopupMenu;
+} // namespace Ui
+
 namespace Purple {
 
 struct WindowHintTarget {
+	enum class Kind { Control, Message, Chat, Folder };
+	using Menu = base::unique_qptr<Ui::PopupMenu>;
+	using MenuBuilder = Fn<Menu()>;
+
 	QPointer<QWidget> widget;
 	QRect bounds;
 	QRect bubble;
 	QString name;
 	bool mainList = false;
 	bool reply = false;
+	Kind kind = Kind::Control;
+	std::vector<FullMsgId> messages;
 	Fn<bool()> current;
 	Fn<void()> activate;
+	MenuBuilder nativeMenu;
+	Fn<void()> fullMenu;
+	bool canReact = false;
 };
 
 class WindowHintSource {
@@ -35,5 +50,6 @@ public:
 [[nodiscard]] bool WindowHintExposed(QWidget *widget, QPoint globalPoint);
 [[nodiscard]] std::vector<WindowHintTarget> CollectWindowHintTargets(QWidget *root);
 void ClickWindowHint(QWidget *widget, QPoint localPoint);
+void RegisterFolderHintMenu(QWidget *button, WindowHintTarget::MenuBuilder builder);
 
 } // namespace Purple

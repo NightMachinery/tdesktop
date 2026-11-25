@@ -1977,7 +1977,7 @@ base::unique_qptr<Ui::PopupMenu> FillContextMenu(
 		st::popupMenuWithIcons);
 
 	// Build the full message menu.
-	FillContextMenuItems(result, list, request, hasPollOption);
+	FillContextMenuItems(result, list, request, hasPollOption || request.passive);
 
 	if (item) {
 		const auto media = item->media();

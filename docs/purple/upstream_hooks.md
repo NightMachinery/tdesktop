@@ -77,6 +77,11 @@ the numbers.
   bounds so Purple can place a hint on each visible link.
 - `history/history_inner_widget.cpp` and `history/view/history_view_list_widget.cpp`:
   accept an explicit hinted item in the native keyboard context menu path.
+- `history/history_inner_widget.cpp` and `history/view/history_view_context_menu.*`:
+  give the hint actions access to the native message menu before popup and
+  defer read receipt and reaction metadata lookups to the full native menu.
+- `dialogs/dialogs_inner_widget.*` and `window/window_filters_menu.*`: give the
+  hint actions access to the native chat, Archive, and folder menu builders.
 - `window/section_widget.cpp`: repaint subscription and an early solid-color
   paint for live history when wallpaper artwork is hidden.
 - `window/window_session_controller.cpp`: applies the live chat style through

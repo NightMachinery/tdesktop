@@ -1,5 +1,6 @@
 #include "purple/purple_message_hints.h"
 #include "purple/purple_hint_labels.h"
+#include "purple/purple_hint_paint.h"
 #include "purple/purple_message_hint_placement.h"
 
 #include "base/unixtime.h"
@@ -7,6 +8,7 @@
 #include "data/components/scheduled_messages.h"
 #include "data/data_channel.h"
 #include "data/data_groups.h"
+#include "data/data_message_reactions.h"
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_inner_widget.h"
@@ -15,6 +17,7 @@
 #include "history/history_item_text.h"
 #include "history/history_widget.h"
 #include "history/view/history_view_context_menu.h"
+#include "history/view/history_view_cursor_state.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_list_widget.h"
 #include "history/view/history_view_message.h"
@@ -27,6 +30,7 @@
 #include "ui/round_rect.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/elastic_scroll.h"
+#include "ui/widgets/popup_menu.h"
 #include "window/window_session_controller.h"
 
 #include "styles/palette.h"
@@ -49,12 +53,16 @@ public:
 	MessageHintMenuEvent(
 		not_null<HistoryItem*> item,
 		QPoint local,
-		QPoint global)
+		QPoint global,
+		bool capture = false)
 	: QContextMenuEvent(QContextMenuEvent::Keyboard, local, global)
-	, item(item) {
+	, item(item)
+	, capture(capture) {
 	}
 
 	const not_null<HistoryItem*> item;
+	const bool capture;
+	WindowHintTarget::Menu menu;
 
 };
 
@@ -176,6 +184,19 @@ HistoryItem *MessageHintMenuItem(
 	return hint ? hint->item.get() : focused;
 }
 
+bool CapturingHintMenu(QContextMenuEvent *event) {
+	const auto hint = dynamic_cast<const MessageHintMenuEvent*>(event);
+	return hint && hint->capture;
+}
+
+bool CaptureHintMenu(QContextMenuEvent *event, WindowHintTarget::Menu &menu) {
+	if (CapturingHintMenu(event)) {
+		static_cast<MessageHintMenuEvent*>(event)->menu = std::move(menu);
+		return true;
+	}
+	return false;
+}
+
 class MessageHints::Overlay final : public Ui::RpWidget {
 public:
 	Overlay(not_null<Ui::RpWidget*> parent, const MessageHints &hints)
@@ -213,31 +234,7 @@ protected:
 					p.setPen(QPen(QColor(0xb8, 0x92, 0x00), 1.5));
 					p.drawLine(placed.center(), MessageHintLeaderEnd(placed.center(), anchor));
 				}
-				auto hq = PainterHighQualityEnabler(p);
-				p.setPen(QPen(QColor(0xb8, 0x92, 0x00), 1));
-				p.setBrush(QColor(0xff, 0xd8, 0x4a));
-				p.drawRoundedRect(QRectF(placed).adjusted(.5, .5, -.5, -.5), 4, 4);
-				const auto upper = entry.label.toUpper();
-				const auto typedLen = int(_hints._prefix.size());
-				if (typedLen > 0 && typedLen < upper.size()) {
-					const auto fm = QFontMetrics(p.font());
-					const auto typed = upper.left(typedLen);
-					const auto rest = upper.mid(typedLen);
-					const auto totalW = fm.horizontalAdvance(upper);
-					const auto typedW = fm.horizontalAdvance(typed);
-					const auto startX = placed.x() + (placed.width() - totalW) / 2;
-					p.setPen(QColor(0xb9, 0x1c, 0x1c));
-					p.drawText(QRect(startX, placed.y(), typedW, placed.height()),
-						Qt::AlignLeft | Qt::AlignVCenter,
-						typed);
-					p.setPen(QColor(0x1c, 0x19, 0x17));
-					p.drawText(QRect(startX + typedW, placed.y(), totalW - typedW, placed.height()),
-						Qt::AlignLeft | Qt::AlignVCenter,
-						rest);
-				} else {
-					p.setPen(QColor(0x1c, 0x19, 0x17));
-					p.drawText(placed, Qt::AlignCenter, upper);
-				}
+				PaintHintBadge(p, placed, entry.label, int(_hints._prefix.size()));
 			}
 		}
 	}
@@ -533,19 +530,21 @@ bool MessageHints::start(Target view, Action action) {
 bool MessageHints::startWindow(
 		Ui::RpWidget *root,
 		Main::Session *session,
-		QWidget *focus) {
+		QWidget *focus,
+		bool menus) {
 	clear();
 	if (!root || !session || session->frozen()) {
 		return false;
 	}
 	_windowRoot = root;
+	_windowMenus = menus;
 	_session = base::make_weak(session);
 	auto targets = CollectWindowHintTargets(root);
 	for (const auto widget : root->findChildren<QWidget*>()) {
 		const auto main = dynamic_cast<HistoryInner*>(widget);
 		const auto section = dynamic_cast<HistoryView::ListWidget*>(widget);
 		if (main || section) {
-			appendWindowMessages({ .main = main, .section = section }, session, targets);
+			appendWindowMessages({ .main = main, .section = section }, session, menus, targets);
 		}
 	}
 	const auto focusCenter = focus ? focus->mapToGlobal(focus->rect().center())
@@ -602,6 +601,7 @@ bool MessageHints::startWindow(
 void MessageHints::appendWindowMessages(
 		Target view,
 		Main::Session *session,
+		bool menus,
 		std::vector<WindowHintTarget> &out) {
 	const auto widget = view.widget();
 	const auto clip = WindowHintClip(widget);
@@ -630,21 +630,36 @@ void MessageHints::appendWindowMessages(
 		const auto current = [=] {
 			const auto item = alive ? alive->data().message(id) : nullptr;
 			return guard && item && !item->history()->purpleHiddenFromView() && (view.main
-				? view.main->viewByItem(item) : view.section->viewForItem(item)) == element;
+				? view.main->viewByItem(item) : view.section->viewForItem(item)) == element
+				&& (view.main ? view.main->itemTop(element) : view.section->itemTop(element)) == top;
 		};
 		const auto clippedBubble = bubble.intersected(viewport);
-		const auto reply = !clippedBubble.isEmpty() && item->isRegular() && !item->isEmpty()
-			&& !item->isService() && !item->isSponsored() && IsServerMsgId(item->id)
-			&& CanSendReply(item) && canCompose(view, item, Action::Reply);
-		if (reply) {
+		const auto message = !clippedBubble.isEmpty() && !item->isEmpty() && !item->isService();
+		const auto reply = message && item->isRegular() && !item->isSponsored()
+			&& IsServerMsgId(item->id) && CanSendReply(item) && canCompose(view, item, Action::Reply);
+		if (reply || (menus && message)) {
+			const auto reactions = menus ? Data::LookupPossibleReactions(item) : Data::PossibleItemReactionsRef();
+			auto messages = std::vector<FullMsgId>{ id };
+			if (const auto group = session->data().groups().find(item)) {
+				for (const auto part : group->items) {
+					messages.push_back(part->fullId());
+				}
+			}
 			out.push_back({
 				.widget = widget,
 				.bounds = clippedBubble.translated(origin),
 				.bubble = bubble.translated(origin),
-				.name = u"Reply"_q,
-				.reply = true,
-				.current = [=] { return current() && CanSendReply(element->data()); },
-				.activate = [=] { apply(view, element->data(), Action::Reply, clippedBubble.center()); },
+				.name = u"Message actions"_q,
+				.reply = reply,
+				.kind = WindowHintTarget::Kind::Message,
+				.messages = std::move(messages),
+				.current = [=] { return current() && (menus || CanSendReply(element->data())); },
+				.activate = reply ? Fn<void()>([=] {
+					apply(view, element->data(), Action::Reply, clippedBubble.center());
+				}) : Fn<void()>(),
+				.nativeMenu = [=] { return buildMenu(view, element, clippedBubble.center()); },
+				.fullMenu = [=] { apply(view, element->data(), Action::Menu, clippedBubble.center()); },
+				.canReact = !reactions.recent.empty() || !reactions.stickers.empty() || reactions.customAllowed,
 			});
 		}
 		auto handlers = QSet<const ClickHandler*>();
@@ -696,7 +711,39 @@ void MessageHints::appendWindowMessages(
 	}
 }
 
-MessageHints::Input MessageHints::typeWindow(int key, Ui::RpWidget *root, Main::Session *session) {
+WindowHintTarget::Menu MessageHints::buildMenu(
+		Target view,
+		not_null<HistoryView::Element*> element,
+		QPoint local) {
+	if (view.session().frozen()) {
+		return {};
+	}
+	const auto item = element->data();
+	if (const auto main = view.main) {
+		const auto previous = main->_dragStateItem;
+		const auto guard = QPointer(main);
+		auto event = MessageHintMenuEvent(item, local, main->mapToGlobal(local), true);
+		main->showContextMenu(&event);
+		if (guard) {
+			main->_dragStateItem = previous;
+		}
+		return std::move(event.menu);
+	} else if (const auto controller = view.section->controllerOrNull()) {
+		auto request = HistoryView::ContextMenuRequest(controller);
+		request.view = element;
+		request.item = item;
+		request.pointState = HistoryView::PointState::Inside;
+		request.passive = true;
+		return HistoryView::FillContextMenu(view.section, request);
+	}
+	return {};
+}
+
+MessageHints::Input MessageHints::typeWindow(
+		int key,
+		Ui::RpWidget *root,
+		Main::Session *session,
+		Fn<void(WindowHintTarget)> showMenu) {
 	if (!windowActive() || root != _windowRoot || session != _session.get()
 		|| WindowHintClip(root) != _globalClip) {
 		clear();
@@ -722,8 +769,13 @@ MessageHints::Input MessageHints::typeWindow(int key, Ui::RpWidget *root, Main::
 		return Input::Pending;
 	}
 	auto entry = std::move(_windowEntries[i - begin(_entries)]);
+	const auto menus = _windowMenus;
 	clear();
 	if (!entry.current() || !WindowHintExposed(entry.widget, entry.bounds.center())) {
+		return Input::Finished;
+	}
+	if (menus) {
+		showMenu(std::move(entry));
 		return Input::Finished;
 	}
 	entry.activate();
@@ -959,6 +1011,7 @@ MessageHints::Input MessageHints::apply(
 void MessageHints::clear() {
 	_watch.destroy();
 	_windowRoot = nullptr;
+	_windowMenus = false;
 	delete _overlay.data();
 	_view = nullptr;
 	_session = {};

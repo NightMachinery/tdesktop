@@ -273,6 +273,7 @@ public:
 	void accessibilityChildSetFocus(quintptr identity) override;
 	void accessibilityChildActivate(quintptr identity) override;
 	friend class Purple::HintDialogRows;
+	[[nodiscard]] Key purpleHintCollapsedRow(int row) const;
 
 protected:
 	void visibleTopBottomUpdated(

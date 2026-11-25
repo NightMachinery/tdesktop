@@ -57,12 +57,17 @@ public:
 	[[nodiscard]] bool startWindow(
 		Ui::RpWidget *root,
 		Main::Session *session,
-		QWidget *focus);
+		QWidget *focus,
+		bool menus = false);
 	[[nodiscard]] bool active() const;
 	[[nodiscard]] bool windowActive() const;
 	[[nodiscard]] bool affectedBy(QWidget *widget) const;
 	[[nodiscard]] Input type(int key, Target view);
-	[[nodiscard]] Input typeWindow(int key, Ui::RpWidget *root, Main::Session *session);
+	[[nodiscard]] Input typeWindow(
+		int key,
+		Ui::RpWidget *root,
+		Main::Session *session,
+		Fn<void(WindowHintTarget)> showMenu);
 	void clear();
 
 private:
@@ -107,7 +112,12 @@ private:
 	static void appendWindowMessages(
 		Target view,
 		Main::Session *session,
+		bool menus,
 		std::vector<WindowHintTarget> &out);
+	[[nodiscard]] static WindowHintTarget::Menu buildMenu(
+		Target view,
+		not_null<HistoryView::Element*> element,
+		QPoint local);
 	static Input applyBodyLink(
 		Target view,
 		not_null<const HistoryView::Element*> element,
@@ -126,6 +136,7 @@ private:
 	base::weak_ptr<Main::Session> _session;
 	Action _action = Action::Select;
 	bool _scheduled = false;
+	bool _windowMenus = false;
 	std::vector<Entry> _entries;
 	std::vector<WindowHintTarget> _windowEntries;
 	QString _prefix;
@@ -137,5 +148,9 @@ private:
 [[nodiscard]] HistoryItem *MessageHintMenuItem(
 	QContextMenuEvent *event,
 	HistoryItem *focused);
+[[nodiscard]] bool CapturingHintMenu(QContextMenuEvent *event);
+[[nodiscard]] bool CaptureHintMenu(
+	QContextMenuEvent *event,
+	WindowHintTarget::Menu &menu);
 
 } // namespace Purple

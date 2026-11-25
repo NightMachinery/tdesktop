@@ -368,7 +368,7 @@ universal = read("purple/purple_message_hints.cpp")
 hint_targets = read("purple/purple_hint_targets.cpp")
 ordered(keys, "Ui::RpWidget *Keys::hintRoot()", "if (!owner())", "stack->topShownLayer()")
 ordered(keys, "bool Keys::handleWindowHints", "receiver == _preeditInput", "_hints.windowActive()",
-        "event->isAutoRepeat()", "_hints.typeWindow(key, hintRoot(), &current->session())")
+        "event->isAutoRepeat()", "_hints.typeWindow(key, hintRoot(), &current->session(),")
 ordered(universal, "bool MessageHints::startWindow", "CollectWindowHintTargets(root)",
         "appendWindowMessages", "HintLabels(targets.size())", "WindowHintExposed", "PlaceHintBadge")
 ordered(universal, "MessageHints::Input MessageHints::typeWindow", "session != _session.get()",
@@ -380,6 +380,18 @@ ordered(hint_targets, "class HintDialogRows", "At(list, index)", "At(guard, inde
 ordered(hint_targets, "class HintMediaRows", "item->fullId()", "live.layout->getItem()->fullId() == id")
 ordered(hint_targets, "void AddButton", "SendButton::Type::Record", "SendButton::Type::Round",
         "send->state() == *sendState", "clicked(Qt::NoModifier, Qt::LeftButton)")
+hydra = read("purple/purple_hint_hydra.cpp")
+ordered(hydra, "void keyPressEvent", "AllowModalLayerKey(*e, this)", "live()", "Qt::Key_Backspace", "Qt::Key_Return")
+ordered(hydra, "void load(", "menu->actions()", "action->isEnabled()", "menu->ensureSubmenu", "HintMnemonics")
+ordered(hydra, "void choose(", "action.child", "action.native->trigger()", "const auto menu = std::move(_menu)",
+        "closeLayer();", "if (allowed() && current())", "trigger()")
+ordered(keys, "void Keys::showHintHydra", "guard->owner() == original.get()", "target.nativeMenu()", "target.current()",
+        "CreateHintHydra", "data.itemRemoved()", "data.itemDataChanges()", "ranges::contains(watched, id)")
+ordered(universal, "WindowHintTarget::Menu MessageHints::buildMenu", "view.session().frozen()",
+        "MessageHintMenuEvent", "main->showContextMenu(&event)", "request.passive = true", "FillContextMenu")
+ordered(read("history/history_inner_widget.cpp"), "Purple::AddSelfDestructSaveAction(_menu.get(), leaderOrSelf)",
+        "Purple::CaptureHintMenu(e, _menu)", "AttachSelectorToMenu", "_menu->popupPrepared()")
+assert "->popup(" not in hydra
 
 # Bare J/K select folders only in the list. The other chat-cursor chords
 # remain in Normal, and explicit overlays take precedence over the defaults.
@@ -687,7 +699,7 @@ ordered(background, "readPref<bool>(kVisiblePref, true)", "VisibilityChanges.fir
 
 hints = read("purple/purple_message_hints.cpp")
 ordered(hints, "setFocusPolicy(Qt::NoFocus)", "Qt::WA_TransparentForMouseEvents")
-ordered(hints, "0xff, 0xd8, 0x4a", "0xb9, 0x1c, 0x1c")
+ordered(read("purple/purple_hint_paint.h"), "0xff, 0xd8, 0x4a", "0xb9, 0x1c, 0x1c")
 ordered(hints, "bool MessageHints::eligible", "hasCopyRestriction", "goodForSelection")
 
 menu = read("window/window_main_menu.cpp")

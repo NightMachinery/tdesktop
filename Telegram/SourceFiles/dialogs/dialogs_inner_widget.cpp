@@ -6905,6 +6905,10 @@ int InnerWidget::defaultChildIndexOfSelected() const {
 	return collapsed + (shownIndex - skip);
 }
 
+Key InnerWidget::purpleHintCollapsedRow(int row) const {
+	return _collapsedRows[row]->folder;
+}
+
 int InnerWidget::accessibilityChildCount() const {
 	if (_state == WidgetState::Default) {
 		return defaultChildCount();
