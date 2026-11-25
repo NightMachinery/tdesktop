@@ -123,16 +123,36 @@ with at most four strokes per chord:
     `, f` / `, F` next/previous folder.
   - In Music (`:music`): `, p` play/pause, `, s` stop, `, n` / `, N` next/prev
     track, `, f` / `, b` seek forward/back, `, l` playlists.
-- **Yank (`y`) and message hints (`g`, `f`):**
+- **Window hints (`f` / `F`):** `f` labels visible chats, topics, folders,
+  supported links, media, and controls. A message label starts a reply when
+  replies are allowed. The topmost Purple or Telegram layer owns the hints
+  when a box is open. Type the label, use `DEL` to undo a letter, or press
+  `Esc` / `C-g` to cancel. The composer and search fields retain normal typing
+  in Insert mode. Window hints are unavailable while locked or covered.
+- **Hint actions (`F`):** choose a label to see the target's actions. Press
+  the displayed key or use `j` / `k` and `RET`. `RET` runs the default action
+  where one is available. `DEL` goes back from a submenu, `?` explains the
+  keys, and `Esc` / `C-g` closes the panel. Message menus use `y` for copy,
+  `r` for reply, `d` for delete, and `m` for the full native menu when those
+  actions are available. `R` opens Telegram's reaction picker from that menu.
+  Telegram still shows its usual confirmations.
+- **Yank (`y`) and message hints (`g`):**
   - `y y` / `y m` copy visible message text, `y l` copy message link, `y u`
     copy URL in message text.
-  - `f` / `g o` open visible URL in message text.
+  - `g o` opens a visible URL in message text.
   - `g s` select message, `g m` open message context menu, `g r` reply to
     message, `g e` edit message, `g u` jump to unread.
   - Hint tags render in high-contrast amber-gold with crimson typed-prefix
     highlighting and follow Telegram's copy and selection restrictions.
 - **Insert mode (`:insert`):** `C-[` enters Normal mode, `M-x` opens the
   command palette and restores focus to the composer on cancel.
+
+Window hints cover Qt buttons, dialog and topic rows, shared media and Music
+rows, and message elements with a click handler. Native OS dialogs, embedded
+webviews, hold-to-record controls, and painted targets without a supported hit
+test are outside their scope. A narrow or crowded viewport may omit a label
+when there is nowhere to place it without covering another label. The full
+native message menu includes live reaction and read-receipt details.
 
 ## Help views and `M-x` command palette
 

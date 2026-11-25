@@ -567,9 +567,8 @@ bool MessageHints::startWindow(
 		const auto size = LabelSize(label.toUpper());
 		const auto bounds = entry.bounds.translated(-origin);
 		const auto bubble = entry.bubble.translated(-origin);
-		const auto anchor = QRect(bounds.center() - QPoint(size.width() / 2, size.height() / 2), size);
 		const auto box = entry.bubble.isEmpty()
-			? anchor
+			? WindowHintAnchor(bounds, size, entry.mainList, style::RightToLeft())
 			: MessageHintBadgeRect(bubble, bounds.top(), size, viewport, st::lineWidth, style::RightToLeft());
 		auto placed = PlaceHintBadge(box, viewport, badges);
 		if (placed.isEmpty()) {

@@ -1,4 +1,5 @@
 #include "purple/purple_hint_targets.h"
+#include "purple/purple_hint_item_identity.h"
 
 #include "data/data_forum_topic.h"
 #include "data/data_peer.h"
@@ -19,6 +20,7 @@
 
 #include <QtGui/QMouseEvent>
 #include <QtWidgets/QAbstractButton>
+#include <QtWidgets/QAbstractItemView>
 #include <QtWidgets/QApplication>
 
 #include <optional>
@@ -181,6 +183,36 @@ public:
 
 namespace {
 
+void AddItemView(QAbstractItemView *view, std::vector<WindowHintTarget> &out) {
+	const auto viewport = view->viewport();
+	const auto origin = viewport->mapToGlobal(QPoint());
+	const auto visible = WindowHintClip(viewport).translated(-origin);
+	auto seen = QSet<QPersistentModelIndex>();
+	const auto step = std::max(1, st::lineWidth * 8);
+	for (auto y = visible.top(); y <= visible.bottom(); y += step) {
+		for (auto x = visible.left(); x <= visible.right(); x += step) {
+			const auto index = QPersistentModelIndex(view->indexAt(QPoint(x, y)));
+			if (!index.isValid() || seen.contains(index) || !index.flags().testFlag(Qt::ItemIsEnabled)) {
+				continue;
+			}
+			seen.insert(index);
+			const auto row = view->visualRect(index).intersected(visible);
+			if (row.isEmpty()) {
+				continue;
+			}
+			const auto local = row.center();
+			const auto identity = HintItemIdentity{ view, viewport, index, origin, local };
+			out.push_back({
+				.widget = viewport,
+				.bounds = row.translated(origin),
+				.name = index.data().toString(),
+				.current = [=] { return identity.current(); },
+				.activate = [=] { ClickWindowHint(viewport, local); },
+			});
+		}
+	}
+}
+
 class FolderHintMenu final : public QObject {
 public:
 	FolderHintMenu(QWidget *button, WindowHintTarget::MenuBuilder builder)
@@ -289,6 +321,8 @@ std::vector<WindowHintTarget> CollectWindowHintTargets(QWidget *root) {
 			HintDialogRows::Append(dialogs, clip, result);
 		} else if (const auto media = dynamic_cast<Info::Media::ListWidget*>(widget)) {
 			HintMediaRows::Append(media, clip, result);
+		} else if (const auto view = qobject_cast<QAbstractItemView*>(widget)) {
+			AddItemView(view, result);
 		} else {
 			AddButton(widget, clip, result);
 		}

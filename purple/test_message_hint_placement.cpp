@@ -41,5 +41,7 @@ int main() {
 	}
 	check(Purple::PlaceHintBadge(QRect(0, 0, 201, 20), viewport, {}).isEmpty(),
 		"an oversized badge cannot be drawn");
-	std::cout << "475 checks, 0 failures\n";
+	check(Purple::WindowHintAnchor(both, badge, false, false).right() == both.right(), "control cap uses trailing edge");
+	check(Purple::WindowHintAnchor(both, badge, true, true).right() == both.right(), "RTL row cap uses leading edge");
+	std::cout << "477 checks, 0 failures\n";
 }

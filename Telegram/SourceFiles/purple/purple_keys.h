@@ -29,6 +29,7 @@ class SectionBuilder;
 namespace Purple {
 
 [[nodiscard]] bool HandleModalKeys(QObject *receiver, QEvent *event);
+[[nodiscard]] bool HandleModalWindowHints(QWidget *receiver, QEvent *event);
 [[nodiscard]] int ModalPhysicalKey(const QKeyEvent &event);
 [[nodiscard]] bool AllowModalLayerKey(
 	const QKeyEvent &event,

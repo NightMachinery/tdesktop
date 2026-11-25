@@ -1864,6 +1864,7 @@ public:
 	~Keys() override;
 
 	bool handle(QObject *receiver, QEvent *event);
+	bool handleWindowHints(QWidget *receiver, QKeyEvent *event, int key);
 	bool layerKey(const QKeyEvent &event, not_null<QWidget*> layer, bool motion);
 	void scrollKey(
 		not_null<QWidget*> view,
@@ -1895,7 +1896,6 @@ private:
 		bool allowUnmapped = false) const;
 	[[nodiscard]] Target activeTarget() const;
 	[[nodiscard]] Ui::RpWidget *hintRoot() const;
-	[[nodiscard]] bool handleWindowHints(QWidget *receiver, QKeyEvent *event, int key);
 	void startWindowHints(bool menus);
 	void showHintHydra(WindowHintTarget target);
 	[[nodiscard]] Dialogs::InnerWidget *liveChatCursor(
@@ -4735,7 +4735,9 @@ void Keys::showHelpLayer(bool startOnAllBindings, const Target &target) {
 		cards.push_back(std::move(local));
 	}
 	{
-		auto hints = ModalUi::HelpSection{ .title = u"COPY & MESSAGE HINTS"_q };
+		auto hints = ModalUi::HelpSection{ .title = u"CLICK, ACTIONS & COPY"_q };
+		pushRow(hints.rows, rowFor(Action::WindowHint, u"Click or reply to a visible target"_q, 1));
+		pushRow(hints.rows, rowFor(Action::WindowHintMenu, u"Show actions for a visible target"_q, 1));
 		pushRow(hints.rows, rowFor(Action::CopyMessage, u"Copy message text"_q, 1));
 		pushRow(hints.rows, rowFor(Action::CopyMessageLink, u"Copy message link"_q, 1));
 		pushRow(hints.rows, rowFor(Action::CopyMessageUrl, u"Copy URL in message"_q, 1));
@@ -5242,6 +5244,17 @@ bool HandleModalKeys(QObject *receiver, QEvent *event) {
 		return false;
 	}
 	return EnsureKeys(window)->handle(receiver, event);
+}
+
+bool HandleModalWindowHints(QWidget *receiver, QEvent *event) {
+	if (!receiver || !Enabled() || (event->type() != QEvent::KeyPress
+		&& event->type() != QEvent::ShortcutOverride)) {
+		return false;
+	}
+	const auto window = dynamic_cast<MainWindow*>(receiver->window());
+	const auto keys = window ? FindKeys(window) : nullptr;
+	const auto press = static_cast<QKeyEvent*>(event);
+	return keys && keys->handleWindowHints(receiver, press, ModalKey(*press));
 }
 
 int ModalPhysicalKey(const QKeyEvent &event) {

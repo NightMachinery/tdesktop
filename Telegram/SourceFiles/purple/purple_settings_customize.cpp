@@ -2309,6 +2309,9 @@ std::optional<bool> FilterCustomizeSettingsInput(QObject *receiver, QEvent *even
 			return widget && (editor.data() == widget || editor->isAncestorOf(widget));
 		};
 		if (owns(target) || ((shortcut || QApplication::activePopupWidget()) && owns(focus))) {
+			if (HandleModalWindowHints(target, event)) {
+				return true;
+			}
 			if (type == QEvent::KeyPress && editor->privacyKey(focus, *static_cast<QKeyEvent*>(event))) {
 				return true;
 			}

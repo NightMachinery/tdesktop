@@ -378,6 +378,11 @@ ordered(universal, "void MessageHints::appendWindowMessages", "purpleHiddenFromV
         "alive->data().message(id)", "CanSendReply(item)", "VisibleBodyLinks", "purpleEnumerateVisible")
 ordered(hint_targets, "class HintDialogRows", "At(list, index)", "At(guard, index) == identity")
 ordered(hint_targets, "class HintMediaRows", "item->fullId()", "live.layout->getItem()->fullId() == id")
+ordered(hint_targets, "void AddItemView", "QPersistentModelIndex(view->indexAt", "index.isValid()",
+        "identity.current()", "ClickWindowHint(viewport, local)")
+ordered(read("purple/purple_hint_item_identity.h"), "bool current() const", "index.isValid()",
+        "view->viewport() == viewport", "view->indexAt(point) == index")
+ordered(customize, "FilterCustomizeSettingsInput", "owns(target)", "HandleModalWindowHints(target, event)")
 ordered(hint_targets, "void AddButton", "SendButton::Type::Record", "SendButton::Type::Round",
         "send->state() == *sendState", "clicked(Qt::NoModifier, Qt::LeftButton)")
 hydra = read("purple/purple_hint_hydra.cpp")
@@ -473,7 +478,9 @@ for action, chord in (
     ("MessageMenu", "g m"),
     ("ReplyToMessage", "g r"),
     ("EditMessage", "g e"),
-    ("OpenMessageUrl", "f"),
+    ("WindowHint", "f"),
+    ("WindowHintMenu", "F"),
+    ("OpenMessageUrl", "g o"),
     ("CopyMessage", "y y"),
     ("CopyMessageLink", "y l"),
     ("CopyMessageUrl", "y u"),

@@ -7,6 +7,14 @@
 
 namespace Purple {
 
+[[nodiscard]] inline QRect WindowHintAnchor(QRect target, QSize badge, bool leading, bool rtl) {
+	if (target.width() < badge.width() * 2) {
+		return QRect(target.center() - QPoint(badge.width() / 2, badge.height() / 2), badge);
+	}
+	const auto x = (leading != rtl) ? target.left() : target.right() - badge.width() + 1;
+	return QRect(QPoint(x, target.center().y() - badge.height() / 2), badge);
+}
+
 [[nodiscard]] inline QRect PlaceHintBadge(
 		QRect anchor,
 		QRect viewport,
