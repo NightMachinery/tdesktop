@@ -42,6 +42,7 @@ namespace Payments { struct InvoiceId; }
 
 namespace Purple {
 
+void ClosePickerOnEscape(not_null<PeerListBox*> box);
 void InstallPickerFilter(
 	not_null<PeerListBox*> box,
 	not_null<Ui::MultiSelect*> filter,

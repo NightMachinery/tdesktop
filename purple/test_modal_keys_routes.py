@@ -169,12 +169,13 @@ palette_ui = between(keys_ui, "class CommandPaletteLayer", "class UnreadBufferRo
 ordered(keys_ui, "void InstallListFilter", "ListFilter::Mark(edit)", "preeditAreaText().isEmpty()",
         "ListFilter::ProtectPreedit", "FilterResult::Cancel", "FilterResult::Continue", "handler(key)")
 ordered(palette_ui, "InstallListFilter(this, _input", "ListFilter::Submit(key)", "AllowModalLayerKey",
-        "ListFilter::Exit", "_input->setText(QString())", "setFocus()", "cancel()",
+        "ListFilter::Exit", "cancel()",
         "Qt::Key_F6", "ListStep(key, mods, false)",
         "Qt::AltModifier", "stepHistory(")
 ordered(palette_ui, "void keyPressEvent", "ListStep(key, mods, ModalKeysEnabled())",
         "AllowModalLayerKey(*event, this, true)", "moveSelection(step)",
         "ListFilter::Submit(key)", "activateRow(_selected)", "ListFilter::Exit", "cancel()")
+assert "_input->setText(QString())" not in palette_ui
 ordered(palette_ui, "void doSetInnerFocus()", "_input->setFocusFast()")
 for layer, last in (("UnreadBufferLayer", "TopicRowsWidget"), ("TopicPickerLayer", "NoticeBodyWidget")):
     body = between(keys_ui, f"class {layer}", f"class {last}")
@@ -184,7 +185,8 @@ for layer, last in (("UnreadBufferLayer", "TopicRowsWidget"), ("TopicPickerLayer
     ordered(body, "void keyPressEvent", "ClearListFilterOrClose(this, _filter)", "ListFilter::Enter(*e, key)")
 help_layer = between(keys_ui, "class ModalHelpLayer", "class DescribeLayer")
 ordered(help_layer, "InstallListFilter(this, _filter", "ListFilter::Exit", "AllowModalLayerKey",
-        "_filter->setText(QString())", "setFocus()", "closeLayer()", "FilterResult::Cancel")
+        "setFocus()", "FilterResult::Cancel")
+assert "setText(" not in between(help_layer, "InstallListFilter(this, _filter", "\n\t\t});")
 ordered(help_layer, "void keyPressEvent", "ClearListFilterOrClose(this, _filter)", "ListFilter::Enter(*e, key)")
 ordered(keys, "void Keys::showPalette", "EffectiveBindings(true, target.contextMap)",
         "ChordsForAction(cmd.action, effective)", "fromInsert", "origin->setFocus",
@@ -201,8 +203,10 @@ ordered(customize, "if (object == _filter)", "ListFilter::Exit", "_tree->setFocu
 assert "_filterBeforeEdit" not in customize
 ordered(collections, "object == _search && ListFilter::Exit", "_peerList->setFocus()", "ListFilter::Enter(*key, code, false)")
 ordered(read("boxes/peer_list_box.cpp"), "Purple::InstallPickerFilter", "void PeerListBox::keyPressEvent", "Purple::HandlePickerFilter")
-ordered(read("purple/purple_picker.cpp"), "void InstallPickerFilter", "!ModalKeysEnabled()", "preeditAreaText().isEmpty()",
-        "ListFilter::Exit", "list->setFocus()", "bool HandlePickerFilter", "ListFilter::Enter", "filter->clearQuery()")
+ordered(read("purple/purple_picker.cpp"), "void InstallPickerFilter", "ModalKeysEnabled()", "preeditAreaText().isEmpty()",
+        "ListFilter::Exit", "if (closeOnEscape)", "box->closeBox()", "list->setFocus()",
+        "bool HandlePickerFilter", "&& closeOnEscape", "box->closeBox()", "ListFilter::Enter", "filter->clearQuery()")
+ordered(read("purple/purple_chat_palette.cpp"), "void ShowChatPalette", "ClosePickerOnEscape(box)")
 ordered(keys, "void Keys::refreshStatusBar", "ListFilter::IsMarked(focus)", "case ActiveLayer::UnreadBuffer",
         "if (filterFocused)", "ModalUi::BadgeKind::Insert", 'u"INSERT"_q')
 

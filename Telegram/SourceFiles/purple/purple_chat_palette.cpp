@@ -500,6 +500,7 @@ void ShowChatPalette(not_null<Window::SessionController*> controller, bool recen
 	const auto raw = palette.get();
 	controller->show(Box<ChatPaletteBox>(std::move(palette), [=](not_null<PeerListBox*> box) {
 		raw->setBox(static_cast<ChatPaletteBox*>(box.get()));
+		ClosePickerOnEscape(box);
 		StateChanges() | rpl::on_next([=] { box->closeBox(); }, box->lifetime());
 		ModalKeysEnabledChanges() | rpl::on_next([=](bool enabled) {
 			if (!enabled) {

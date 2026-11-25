@@ -24,6 +24,15 @@
 #include <QtWidgets/QTextEdit>
 
 namespace Purple {
+namespace {
+
+constexpr auto kCloseOnEscape = "purplePickerCloseOnEscape";
+
+} // namespace
+
+void ClosePickerOnEscape(not_null<PeerListBox*> box) {
+	box->setProperty(kCloseOnEscape, true);
+}
 
 void InstallPickerFilter(
 		not_null<PeerListBox*> box,
@@ -36,7 +45,9 @@ void InstallPickerFilter(
 	ListFilter::Mark(edit);
 	base::install_event_filter(edit, [=](not_null<QEvent*> event) {
 		using Result = base::EventFilterResult;
-		if (!ModalKeysEnabled() || event->type() != QEvent::KeyPress) {
+		const auto modal = ModalKeysEnabled();
+		const auto closeOnEscape = box->property(kCloseOnEscape).toBool();
+		if ((!modal && !closeOnEscape) || event->type() != QEvent::KeyPress) {
 			return Result::Continue;
 		}
 		const auto layout = edit->textCursor().block().layout();
@@ -46,9 +57,13 @@ void InstallPickerFilter(
 		const auto press = static_cast<QKeyEvent*>(event.get());
 		const auto key = ModalPhysicalKey(*press);
 		const auto mods = press->modifiers() & ~Qt::KeypadModifier;
-		if (ListFilter::Exit(key, mods)) {
+		if (ListFilter::Exit(key, mods, modal)) {
 			if (AllowModalLayerKey(*press, box)) {
-				list->setFocus();
+				if (closeOnEscape) {
+					box->closeBox();
+				} else {
+					list->setFocus();
+				}
 			}
 			return Result::Cancel;
 		} else if (mods == ListFilter::kControl && (key == Qt::Key_N || key == Qt::Key_P)) {
@@ -66,20 +81,26 @@ bool HandlePickerFilter(
 		Ui::MultiSelect *filter,
 		not_null<PeerListContent*> list,
 		QKeyEvent *event) {
-	if (!ModalKeysEnabled() || !filter || !filter->isVisible()) {
+	const auto modal = ModalKeysEnabled();
+	const auto closeOnEscape = box->property(kCloseOnEscape).toBool();
+	if ((!modal && !closeOnEscape) || !filter || !filter->isVisible()) {
 		return false;
 	}
 	const auto key = ModalPhysicalKey(*event);
 	const auto mods = event->modifiers() & ~Qt::KeypadModifier;
 	if (const auto edit = filter->findChild<QTextEdit*>(); edit && edit->hasFocus()) {
 		const auto layout = edit->textCursor().block().layout();
-		if (ListFilter::Exit(key, mods) && layout && !layout->preeditAreaText().isEmpty()) {
+		if (ListFilter::Exit(key, mods, modal) && layout && !layout->preeditAreaText().isEmpty()) {
 			event->accept();
 			return true;
 		}
 		return false;
 	}
-	if (ListFilter::Enter(*event, key)) {
+	if (ListFilter::Exit(key, mods, modal) && closeOnEscape) {
+		if (AllowModalLayerKey(*event, box)) box->closeBox();
+	} else if (!modal) {
+		return false;
+	} else if (ListFilter::Enter(*event, key)) {
 		if (AllowModalLayerKey(*event, box)) filter->setInnerFocus();
 	} else if (ListFilter::Exit(key, mods) && !filter->getQuery().isEmpty()) {
 		if (AllowModalLayerKey(*event, box)) filter->clearQuery();

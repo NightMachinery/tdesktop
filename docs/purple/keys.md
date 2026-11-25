@@ -193,13 +193,13 @@ With modal keys on, a list's filter opens with `i`, `a`, `/`, or a click. A
 keyboard layout that types `/` with a modifier works too. Press `Esc`, `C-[`,
 or `C-g` in the filter to keep the query and return to the list. `Esc` in the
 list clears a non-empty query first and closes once the query is empty. `q`
-closes directly from the list. Command and chat palettes still open with the
-filter focused. In the Customize collection picker, use `i` or `/` to filter
-and `a` to add the selected chat.
+closes directly from the list. In the Customize collection picker, use `i`
+or `/` to filter and `a` to add the selected chat.
 
-In All Bindings, M-x and Describe Command, `Esc` in the search field clears
-the query and moves focus to the results. Press `Esc` again to close.
-`F6` switches between M-x search and results while keeping the query.
+M-x, Describe Command, and the chat palettes open with search focused.
+`C-n` / `C-p` move through results from search. `Esc` closes the palette
+and restores focus. `F6` switches between M-x search and results while
+keeping the query.
 Keypad Enter runs or describes the highlighted command, just like Return.
 
 With modal keyboard shortcuts off, **Option+X** on macOS (**Alt+X** elsewhere)

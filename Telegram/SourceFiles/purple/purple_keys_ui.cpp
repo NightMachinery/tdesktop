@@ -905,14 +905,7 @@ public:
 				return base::EventFilterResult::Cancel;
 			}
 			if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
-				if (AllowModalLayerKey(*k, this)) {
-					if (ModalKeysEnabled()) {
-						_filter->setText(QString());
-						setFocus();
-					} else {
-						closeLayer();
-					}
-				}
+				if (AllowModalLayerKey(*k, this)) setFocus();
 				return base::EventFilterResult::Cancel;
 			} else if (k->key() == Qt::Key_Tab || k->key() == Qt::Key_Backtab) {
 				if (AllowModalLayerKey(*k, this)) toggleTab();
@@ -976,7 +969,7 @@ protected:
 		if (!AllowModalLayerKey(*e, this, step != 0)) {
 			return;
 		}
-		if (modal && ListFilter::Exit(key, mods) && _showAll) {
+		if (ListFilter::Exit(key, mods, modal) && _showAll) {
 			ClearListFilterOrClose(this, _filter);
 			return;
 		} else if (ListFilter::Exit(key, mods, modal) || (modal && key == Qt::Key_Q && !mods)) {
@@ -1080,11 +1073,13 @@ protected:
 
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
-		const auto leftHint = !ModalKeysEnabled()
+		const auto leftHint = (_showAll && _filter->hasFocus())
+			? u"TAB cheatsheet · C-n/C-p scroll · Esc list"_q
+			: _showAll && !_filter->getLastText().isEmpty()
+			? u"TAB cheatsheet · ↑/↓ scroll · Esc clear"_q
+			: !ModalKeysEnabled()
 			? u"TAB switch view · ↑/↓ scroll · Esc close"_q
-			: (_showAll && _filter->hasFocus())
-			? u"TAB cheatsheet · C-n/C-p scroll · Esc clear and return"_q
-			: u"TAB switch view · j/k scroll · i or / filter · q close"_q;
+			: u"TAB switch view · j/k scroll · i or / filter · Esc close"_q;
 		const auto hintWidth = width() / 2 - 20;
 		p.drawText(
 			QRect(rtl ? (width() / 2) : 20, height() - kFooterH, hintWidth, kFooterH),
@@ -1685,14 +1680,7 @@ public:
 					? base::EventFilterResult::Continue
 					: base::EventFilterResult::Cancel;
 			} else if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
-				if (AllowModalLayerKey(*k, this)) {
-					if (ModalKeysEnabled()) {
-						_input->setText(QString());
-						setFocus();
-					} else {
-						cancel();
-					}
-				}
+				if (AllowModalLayerKey(*k, this)) cancel();
 				return base::EventFilterResult::Cancel;
 			} else if (key == Qt::Key_F6 && !mods) {
 				if (AllowModalLayerKey(*k, this)) setFocus();
@@ -1726,13 +1714,7 @@ protected:
 		} else if (ListFilter::Submit(key)) {
 			if (AllowModalLayerKey(*event, this)) activateRow(_selected);
 		} else if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
-			if (AllowModalLayerKey(*event, this)) {
-				if (ModalKeysEnabled() && !_input->getLastText().isEmpty()) {
-					_input->setText(QString());
-				} else {
-					cancel();
-				}
-			}
+			if (AllowModalLayerKey(*event, this)) cancel();
 		} else if (ModalKeysEnabled() && key == Qt::Key_Q && !mods) {
 			if (AllowModalLayerKey(*event, this)) cancel();
 		} else if ((key == Qt::Key_F6 && !mods)
@@ -1836,11 +1818,9 @@ protected:
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
 		const auto activate = _config.describeMode ? u"RET describe"_q : u"RET run"_q;
-		const auto footer = !ModalKeysEnabled()
+		const auto footer = (!ModalKeysEnabled() || _input->hasFocus())
 			? u"C-n/C-p move · %1 · F6 search/list · Esc close"_q.arg(activate)
-			: _input->hasFocus()
-			? u"C-n/C-p move · %1 · Esc clear and return"_q.arg(activate)
-			: u"j/k move · %1 · i or / filter · q close"_q.arg(activate);
+			: u"j/k move · %1 · i or / filter · Esc close"_q.arg(activate);
 		p.drawText(
 			footerRect.adjusted(14, 0, -14, 0),
 			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
