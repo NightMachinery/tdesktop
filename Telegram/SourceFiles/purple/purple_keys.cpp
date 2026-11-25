@@ -3156,10 +3156,6 @@ void Keys::stepTopic(const Target &target, int delta, bool unreadOnly) {
 	}
 	forum->preloadTopics();
 	const auto topics = OrderedForumTopics(forum);
-	if (topics.empty()) {
-		showFeedback(u"No topics loaded yet"_q);
-		return;
-	}
 	const auto activeTopic = target.chat.topic()
 		? target.chat.topic()
 		: current->activeChatCurrent().topic();
@@ -3172,15 +3168,40 @@ void Keys::stepTopic(const Target &target, int delta, bool unreadOnly) {
 	}
 	const auto n = int(topics.size());
 	if (unreadOnly) {
-		for (auto step = 1; step <= n; ++step) {
-			const auto cand = topics[((idx < 0 ? -1 : idx) + step) % n];
-			const auto u = cand->chatListUnreadState();
-			if (u.messages > u.messagesMuted || u.mentions > 0 || u.marks > u.marksMuted) {
-				current->showThread(cand);
-				return;
-			}
+		using Pages = ModalUnread::TopicPages;
+		const auto pages = forum->topicsLoadFailed()
+			? Pages::Failed
+			: forum->topicsList()->loaded() ? Pages::Complete : Pages::Partial;
+		const auto found = ModalUnread::FindNextUnreadTopic(
+			n, idx, pages, [&](int index) {
+				const auto unread = topics[index]->chatListUnreadState();
+				return unread.messages > unread.messagesMuted
+					|| unread.mentions > 0 || unread.marks > unread.marksMuted;
+			});
+		if (const auto index = std::get_if<int>(&found)) {
+			current->showThread(topics[*index]);
+			return;
 		}
-		showFeedback(u"No unread topics"_q);
+		const auto remaining = std::get<Pages>(found);
+		if (remaining == Pages::Complete) {
+			showFeedback(u"No unread topics"_q);
+			return;
+		}
+		const auto bindings = ChordsForAction(
+			Action::TopicUnreadPalette,
+			EffectiveBindings(_normal, target.contextMap));
+		const auto picker = bindings.empty()
+			? u"M-x topic-unread-palette"_q
+			: bindings.front().join(u' ');
+		const auto failed = (remaining == Pages::Failed);
+		showFeedback(failed
+			? u"Could not load more topics · %1, then g r to retry"_q.arg(picker)
+			: u"No unread topic among loaded topics · %1 for unread picker"_q.arg(picker),
+			failed);
+		return;
+	}
+	if (topics.empty()) {
+		showFeedback(u"No topics loaded yet"_q);
 		return;
 	}
 	const auto base = (idx < 0) ? (delta > 0 ? -1 : 0) : idx;

@@ -327,7 +327,9 @@ on the modal status line and cheatsheet footer.
   clears after ten seconds if no page arrives. An empty or duplicate page
   pauses automatic loading. `SPC b T` / `, T` opens it filtered to unread
   topics, `SPC b n`/`N` (`, n`/`N`,
-  `] T`/`[ T`) cycle topics, `] U` jumps to the next unread topic, `SPC b l` /
+  `] T`/`[ T`) cycle topics. `] U` jumps to the next unread topic. If more
+  topics may be available, it points to the unread picker. After a paging
+  error, open the picker and press `g r` to retry. `SPC b l` /
   `, b` toggles the last viewed topic, and `SPC b h` / `, h` / `g ^` opens or
   closes the parent topic list. `SPC b c`, `, c`, and the picker's `c` action
   open the new topic or thread composer when Telegram grants permission. For

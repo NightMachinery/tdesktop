@@ -2064,6 +2064,12 @@ worker's pending database transactions. The existing playlist menu hook in
   ID after a successful or already-applied edit. The normal topic update
   notifies the stock header and Purple topic picker.
 
+### Forum topic paging
+
+- `data/data_forum.{h,cpp}` exposes whether the last page request failed.
+  The next-unread command uses it because the stock list is marked loaded
+  on both completion and failure. Reload clears the failure flag.
+
 ### Per-chat translation exclusion
 
 - `history/view/history_view_translate_bar.cpp`: includes

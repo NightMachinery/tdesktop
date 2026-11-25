@@ -580,6 +580,14 @@ ordered(keys, "void Keys::showUnreadBuffer", "CreateUnreadBufferLayer", "MarkAsR
 ordered(keys, "void Keys::showTopicPicker", "CreateTopicPickerLayer", "onRefresh",
         "onLoadMore", "requestTopics()", "onReload", "reloadTopics()", "pageUpdates",
         "onCreateTopic", "guard->owner() != ctrl", "CreateTopic(ctrl, liveForum)")
+step_topic = between(keys, "void Keys::stepTopic", "void Keys::enterNormal")
+ordered(step_topic, "preloadTopics()", "if (unreadOnly)", "topicsLoadFailed()", "topicsList()->loaded()",
+        "FindNextUnreadTopic", "showThread(topics[*index])", "remaining == Pages::Complete",
+        "No unread topics", "ChordsForAction(", "Action::TopicUnreadPalette", "EffectiveBindings",
+        "M-x topic-unread-palette", "Could not load more topics", "No unread topic among loaded topics")
+forum = read("data/data_forum.cpp")
+ordered(forum, "void Forum::reloadTopics", "_topicsLoadFailed = false", "_topicsList.setLoaded(false)")
+ordered(forum, "void Forum::requestTopics", ".fail", "_topicsLoadFailed = true", "_topicsList.setLoaded()")
 ordered(keys, "case Action::TopicCreate:", "CreateTopic(current, forum)")
 create_topic = between(keys, "void CreateTopic(", "ModalUnread::ChatBucket BucketForPeer")
 ordered(create_topic, "Data::IsBotUserCreatesTopics", "showPeerHistory", "return;",

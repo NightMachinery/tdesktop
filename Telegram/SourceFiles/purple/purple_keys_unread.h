@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <variant>
 #include <vector>
 
 namespace Purple::ModalUnread {
@@ -235,6 +236,28 @@ inline void ApplyMarkOp(
 
 [[nodiscard]] inline bool NeedsMarkReadConfirmation(int targetCount) {
 	return targetCount > 1;
+}
+
+enum class TopicPages {
+	Partial,
+	Complete,
+	Failed,
+};
+
+using TopicSearch = std::variant<int, TopicPages>;
+
+[[nodiscard]] inline TopicSearch FindNextUnreadTopic(
+		int count,
+		int current,
+		TopicPages pages,
+		const auto &isUnread) {
+	for (auto step = 1; step <= count; ++step) {
+		const auto index = (current + step) % count;
+		if (isUnread(index)) {
+			return index;
+		}
+	}
+	return pages;
 }
 
 } // namespace Purple::ModalUnread

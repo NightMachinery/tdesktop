@@ -142,6 +142,30 @@ int main() {
 		Check(NeedsMarkReadConfirmation(5), "5 chats requires confirmation");
 	}
 
+	{
+		auto unread = std::vector<bool>{ false, false };
+		const auto search = [&](TopicPages pages, int current) {
+			return FindNextUnreadTopic(int(unread.size()), current, pages, [&](int index) {
+				return unread[index];
+			});
+		};
+		Check(search(TopicPages::Partial, 0) == TopicSearch(TopicPages::Partial),
+			"a loaded page of read topics does not rule out unread topics on the next page");
+		unread.push_back(true);
+		Check(search(TopicPages::Complete, 0) == TopicSearch(2),
+			"the next search finds the unread topic after another page loads");
+		Check(search(TopicPages::Partial, 2) == TopicSearch(2),
+			"search still wraps when a partially loaded forum has an unread topic");
+		unread.pop_back();
+		Check(search(TopicPages::Complete, -1) == TopicSearch(TopicPages::Complete),
+			"a completed list with no unread topics is conclusive");
+		Check(search(TopicPages::Failed, -1) == TopicSearch(TopicPages::Failed),
+			"a failed request does not report that every topic is read");
+		unread.clear();
+		Check(search(TopicPages::Partial, -1) == TopicSearch(TopicPages::Partial),
+			"search before the first page arrives is incomplete");
+	}
+
 	std::cout << gChecks << " checks, " << gFailures << " failures\n";
 	return gFailures ? 1 : 0;
 }
