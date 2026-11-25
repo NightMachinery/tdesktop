@@ -3800,7 +3800,7 @@ protected:
 		}
 		constexpr auto kHeaderH = 54;
 		constexpr auto kActionsH = 52;
-		const auto helpH = _showHelp ? 34 : 0;
+		const auto helpH = helpHeight();
 		const auto bodyH = _body ? _body->height() : 120;
 		const auto maxBodyH = std::max(140, int(parentSize.height() * 0.62) - kHeaderH - kActionsH - helpH);
 		const auto h = std::min(parentSize.height() - 48, kHeaderH + std::min(bodyH, maxBodyH) + helpH + kActionsH);
@@ -3809,15 +3809,18 @@ protected:
 
 	void resizeEvent(QResizeEvent *e) override {
 		LayerWidget::resizeEvent(e);
+		layoutControls();
+	}
+
+	void layoutControls() {
 		constexpr auto kHeaderH = 54;
 		constexpr auto kActionsH = 52;
-		const auto helpH = _showHelp ? 34 : 0;
 		if (IsRtl(this)) {
 			_close->move(12, (kHeaderH - _close->height()) / 2);
 		} else {
 			_close->move(width() - 12 - _close->width(), (kHeaderH - _close->height()) / 2);
 		}
-		_scroll->setGeometry(0, kHeaderH, width(), std::max(60, height() - kHeaderH - kActionsH - helpH));
+		_scroll->setGeometry(0, kHeaderH, width(), std::max(60, height() - kHeaderH - kActionsH - helpHeight()));
 		if (_body) {
 			_body->relayout(_scroll->width());
 		}
@@ -3861,7 +3864,7 @@ protected:
 		const auto modal = ModalKeysEnabled();
 		const auto key = modal ? ModalPhysicalKey(*e) : e->key();
 		if (!modal) {
-			_pendingG = false;
+			_keys.pendingG = false;
 			switch (key) {
 			case Qt::Key_Escape:
 			case Qt::Key_Tab:
@@ -3881,7 +3884,15 @@ protected:
 		const auto step = ListStep(key, mods, modal);
 		const auto horizontal = key == Qt::Key_Left || key == Qt::Key_Right
 			|| (modal && !mods && (key == Qt::Key_H || key == Qt::Key_L));
-		if (!AllowModalLayerKey(*e, this, !_pendingG && (step || horizontal))) {
+		if (!AllowModalLayerKey(*e, this, !_keys.pendingG && (step || horizontal))) {
+			return;
+		}
+		if (key == Qt::Key_Escape || (modal && ListFilter::Exit(key, mods))) {
+			switch (_keys.escape()) {
+			case ModalNotices::NoticeEscape::CancelPrefix: update(); break;
+			case ModalNotices::NoticeEscape::HideHelp: refreshHelp(); break;
+			case ModalNotices::NoticeEscape::Close: closeLayer(); break;
+			}
 			return;
 		}
 		const auto isActionKey = (key == Qt::Key_Return
@@ -3897,25 +3908,24 @@ protected:
 				return;
 			}
 		}
-		if (_pendingG) {
-			_pendingG = false;
+		if (_keys.pendingG) {
+			_keys.pendingG = false;
 			if (key == Qt::Key_G && !mods) {
 				_scroll->scrollToY(0);
-				return;
 			}
+			update();
+			return;
 		}
-		if (key == Qt::Key_Escape
-			|| (key == Qt::Key_Q && !mods)
-			|| (key == Qt::Key_G && mods == kCtrlMod)) {
+		if (key == Qt::Key_Q && !mods) {
 			closeLayer();
 			return;
 		} else if (key == Qt::Key_Question || (key == Qt::Key_Slash && mods == Qt::ShiftModifier)) {
-			_showHelp = !_showHelp;
-			parentResized();
-			update();
+			_keys.showHelp = !_keys.showHelp;
+			refreshHelp();
 			return;
 		} else if (key == Qt::Key_G && !mods) {
-			_pendingG = true;
+			_keys.pendingG = true;
+			update();
 			return;
 		} else if (key == Qt::Key_G && mods == Qt::ShiftModifier) {
 			_scroll->scrollToY(_scroll->scrollTopMax());
@@ -3965,7 +3975,7 @@ protected:
 
 		constexpr auto kHeaderH = 54;
 		constexpr auto kActionsH = 52;
-		const auto helpH = _showHelp ? 34 : 0;
+		const auto helpH = helpHeight();
 		const auto rtl = IsRtl(this);
 		const auto mono = MonoFont(10, true);
 
@@ -3999,13 +4009,13 @@ protected:
 		p.fillRect(0, kHeaderH - 1, width(), 1, st::boxDividerBg->c);
 
 		// Optional ? help strip.
-		if (_showHelp && ModalKeysEnabled()) {
+		if (helpH) {
 			const auto helpRect = QRect(0, height() - kActionsH - helpH, width(), helpH);
 			p.fillRect(helpRect, BlendColor(st::windowBg->c, st::windowBgOver->c, 0.45));
 			p.fillRect(0, helpRect.top(), width(), 1, st::boxDividerBg->c);
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
-			const auto helpText = u"j/k/gg/G scroll  ·  TAB/h/l buttons  ·  o select action  ·  RET activate  ·  y copy  ·  q/ESC close"_q;
+			const auto helpText = u"Esc hide help · j/k/gg/G scroll · Tab/h/l buttons · o select action · RET activate · y copy · q close"_q;
 			p.drawText(
 				helpRect.adjusted(16, 0, -16, 0),
 				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
@@ -4017,7 +4027,7 @@ protected:
 		p.fillRect(0, actionsTop, width(), kActionsH, BlendColor(st::windowBg->c, st::windowBgOver->c, 0.35));
 		p.fillRect(0, actionsTop, width(), 1, st::boxDividerBg->c);
 
-		if (!_copiedCue.isEmpty()) {
+		if (!_copiedCue.isEmpty() && !_keys.pendingG) {
 			p.setFont(st::semiboldFont);
 			p.setPen(BadgeColor(BadgeKind::Normal));
 			p.drawText(
@@ -4027,7 +4037,7 @@ protected:
 		} else if (ModalKeysEnabled()) {
 			p.setFont(st::normalFont);
 			p.setPen(st::windowSubTextFg);
-			const auto hint = u"? help"_q;
+			const auto hint = _keys.pendingG ? u"g … Esc"_q : u"? help"_q;
 			p.drawText(
 				QRect(rtl ? (width() - 100) : 16, actionsTop, 84, kActionsH),
 				(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
@@ -4072,6 +4082,16 @@ private:
 		ButtonKind kind = ButtonKind::Close;
 		QString label;
 	};
+
+	[[nodiscard]] int helpHeight() const {
+		return (_keys.showHelp && ModalKeysEnabled()) ? 34 : 0;
+	}
+
+	void refreshHelp() {
+		parentResized();
+		layoutControls();
+		update();
+	}
 
 	void layoutButtonRects() {
 		constexpr auto kActionsH = 52;
@@ -4148,8 +4168,7 @@ private:
 	std::vector<QRect> _buttonRects;
 	int _focusedButton = 0;
 	int _hoveredButton = -1;
-	bool _pendingG = false;
-	bool _showHelp = false;
+	ModalNotices::NoticeKeys _keys;
 	bool _closing = false;
 	qint64 _openedAtMs = 0;
 	QString _copiedCue;

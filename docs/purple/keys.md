@@ -337,7 +337,8 @@ on the modal status line and cheatsheet footer.
   warnings, errors, and notices with actions open a dialog in either keyboard
   mode. Use the mouse or `Tab`, `Enter`, and `Esc`. With modal keys enabled,
   `j`/`k`/`gg`/`G` scroll, `h`/`l` select buttons, `o` selects the
-  primary action, `y` copies logs, `?` opens help, and `q` closes. Close is
+  primary action, `y` copies logs, `?` opens help, and `q` closes. `Esc`
+  cancels a pending `g` or hides help before it closes the notice. Close is
   selected on arrival. **Copy logs** copies the visible notice and up to 60
   recent lines for that subsystem. Before/after values in the dialog
   resolve bare chat IDs in the current account. Hidden, unknown, ambiguous,

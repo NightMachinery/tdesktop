@@ -621,6 +621,10 @@ ordered(keys_ui, "class TopicPickerLayer final", "QTimer::timeout", "_config.pag
         "Qt::Key_R && !mods", "finishLoading()", "_config.onReload()")
 ordered(keys_ui, "class NoticeLayer final", "class NoticeHistoryLayer final",
         "CreateNoticeLayer", "CreateNoticeHistoryLayer")
+notice = between(keys_ui, "class NoticeLayer final", "class NoticeHistoryRowsWidget final")
+ordered(notice, "AllowModalLayerKey(*e, this", "_keys.escape()", "NoticeEscape::CancelPrefix",
+        "NoticeEscape::HideHelp", "NoticeEscape::Close", "e->isAutoRepeat() || elapsed < 180",
+        "if (_keys.pendingG)", "_scroll->scrollToY(0)", "return;", "activateButton(_focusedButton)")
 ordered(keys, "void Keys::schedulePendingNoticeFlush", "_noticeLayers.empty()",
         "&QObject::destroyed", "_noticePresentation == presentation", "MaybeFlushPendingNotices")
 ordered(keys, "PeekCountdownChanges()", "schedulePendingNoticeFlush()", "PeekCountdownPending()")

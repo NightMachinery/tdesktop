@@ -28,6 +28,20 @@ void Check(bool ok, const std::string &name) {
 
 int main() {
 	{
+		auto keys = NoticeKeys();
+		keys.pendingG = true;
+		Check(keys.escape() == NoticeEscape::CancelPrefix && !keys.pendingG,
+			"g Escape clears the prefix and keeps the notice and its buttons open");
+		keys.showHelp = true;
+		keys.pendingG = true;
+		Check(keys.escape() == NoticeEscape::CancelPrefix && keys.showHelp,
+			"Escape leaves help visible when a prefix owns the gesture");
+		Check(keys.escape() == NoticeEscape::HideHelp && !keys.showHelp,
+			"Escape dismisses expanded help and keeps the notice open");
+		Check(keys.escape() == NoticeEscape::Close,
+			"Escape only closes after the prefix and help are gone");
+	}
+	{
 		using Identity = std::pair<QString, uint64_t>;
 		const auto account = QStringLiteral("account");
 		const auto app = QStringLiteral("app");
