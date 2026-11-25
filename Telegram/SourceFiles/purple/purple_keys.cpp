@@ -70,6 +70,7 @@
 #include "test/test_purple_notices.h"
 #include "ui/abstract_button.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/controls/send_button.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/screen_reader_mode.h"
 #include "ui/toast/toast.h"
@@ -79,11 +80,15 @@
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/scroll_area.h"
+#include "ui/widgets/shadow.h"
 #include "ui/wrap/slide_wrap.h"
+#include "window/section_widget.h"
 #include "window/themes/window_theme.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 
+#include "styles/style_chat_helpers.h"
+#include "styles/style_dialogs.h"
 #include "styles/style_settings.h"
 
 #include <edn.h>
@@ -126,6 +131,29 @@ namespace Purple {
 
 class KeyboardAttachment final {
 public:
+	struct ComposerGeometry {
+		Ui::InputField *field = nullptr;
+		Ui::SendButton *send = nullptr;
+		int placeholderInset = 0;
+		int iconWidth = 0;
+	};
+
+	static ComposerGeometry Geometry(QWidget *section) {
+		if (const auto history = dynamic_cast<HistoryWidget*>(section)) {
+			return {
+				.field = history->_field.get(),
+				.send = history->_send.get(),
+				.placeholderInset = st::historyComposeField.placeholderMargins.left(),
+				.iconWidth = st::historySend.recordSize.width(),
+			};
+		} else if (const auto chat = dynamic_cast<HistoryView::ChatWidget*>(section)) {
+			return Geometry(chat->_composeControls.get());
+		} else if (const auto scheduled = dynamic_cast<HistoryView::ScheduledWidget*>(section)) {
+			return Geometry(scheduled->_composeControls.get());
+		}
+		return {};
+	}
+
 	static bool ScrollAnimating(const HistoryWidget *history) {
 		return history && (history->_scrollToAnimation.animating() || history->_itemsRevealHeight);
 	}
@@ -162,6 +190,18 @@ public:
 	}
 
 private:
+	static ComposerGeometry Geometry(HistoryView::ComposeControls *controls) {
+		if (!controls) {
+			return {};
+		}
+		return {
+			.field = controls->_field.get(),
+			.send = controls->_send.get(),
+			.placeholderInset = controls->_st.field.placeholderMargins.left(),
+			.iconWidth = controls->_st.send.recordSize.width(),
+		};
+	}
+
 	static bool ButtonAvailable(Ui::IconButton *button) {
 		return button
 			&& button->isVisible()
@@ -186,6 +226,75 @@ private:
 		return !widget->_choosingAttach && widget->_composeControls
 			&& ButtonAvailable(widget->_composeControls->_attachToggle);
 	}
+};
+
+class ModalStatusLayout {
+public:
+	[[nodiscard]] ModalUi::StatusColumns measure(
+			not_null<MainWindow*> window) {
+		const auto main = window->sessionContent();
+		const auto body = window->bodyWidget();
+		if (!main || !main->width()) {
+			_field = nullptr;
+			_send = nullptr;
+			return {};
+		}
+		const auto mapped = [&](QWidget *widget) {
+			return QRect(widget->mapTo(body, QPoint(0, 0)).x(), 0, widget->width(), 1);
+		};
+		const auto visible = [&](QWidget *widget) {
+			return (widget && !widget->isHidden()) ? mapped(widget) : QRect();
+		};
+		const auto content = mapped(main);
+		const auto rail = (content.left() > 0)
+			? QRect(0, 0, content.left(), 1)
+			: QRect(content.right() + 1, 0, body->width() - content.width(), 1);
+		const auto section = main->_mainSection
+			? static_cast<QWidget*>(main->_mainSection.data())
+			: static_cast<QWidget*>(main->_history.get());
+		const auto chat = visible(section);
+		const auto dialogs = visible(main->_dialogs.get());
+		const auto info = visible(main->_thirdSection.data());
+		const auto rtl = style::RightToLeft();
+		const auto composer = KeyboardAttachment::Geometry(section);
+		_field = composer.field;
+		_send = composer.send;
+		auto leading = std::optional<int>();
+		auto trailing = std::optional<int>();
+		if (!chat.isEmpty() && _field && _field->isVisibleTo(main)) {
+			const auto field = mapped(_field);
+			leading = (rtl ? chat.right() - field.right() : field.left() - chat.left())
+				+ composer.field->fullTextMargins().left() + composer.placeholderInset;
+		}
+		if (!chat.isEmpty() && _send && _send->isVisibleTo(main)) {
+			const auto send = mapped(_send);
+			trailing = (rtl ? send.left() - chat.left() : chat.right() - send.right())
+				+ std::max(0, (send.width() - composer.iconWidth) / 2);
+		}
+		const auto controller = main->_controller;
+		const auto &dialogStyle = controller->shownForum().current()
+			? st::forumTopicRow : st::defaultDialogRow;
+		return {
+			.rail = rail,
+			.dialogs = dialogs,
+			.chat = chat,
+			.info = info,
+			.dialogsDivider = dialogs.isEmpty() ? QRect() : visible(main->_sideShadow.get()),
+			.infoDivider = info.isEmpty() ? QRect() : visible(main->_thirdShadow.data()),
+			.dialogsLeadingInset = dialogStyle.padding.left(),
+			.chatLeadingInset = leading,
+			.chatTrailingInset = trailing,
+		};
+	}
+
+	[[nodiscard]] bool tracks(const QWidget *widget) const {
+		return widget == _field || widget == _send;
+	}
+
+private:
+	QPointer<QWidget> _field;
+	QPointer<QWidget> _send;
+
 };
 
 namespace {
@@ -1880,6 +1989,7 @@ public:
 	[[nodiscard]] bool isNormal() const { return _normal; }
 	[[nodiscard]] int statusBarHeight() const;
 	void updateLayout(QRect body);
+	void refreshColumns();
 	void raiseChrome();
 	[[nodiscard]] ModalNotices::DeliveryContext deliveryContext() const;
 	void setStatusMessage(QString text, bool isError, int durationMs, bool persistent);
@@ -1938,6 +2048,7 @@ private:
 
 	const not_null<MainWindow*> _window;
 	QPointer<ModalUi::ModalStatusBar> _statusBar;
+	ModalStatusLayout _statusLayout;
 	QPointer<ModalUi::WhichKeyOverlay> _whichKey;
 	QPointer<Ui::LayerWidget> _hintHydra;
 	QPointer<QTextEdit> _normalComposer;
@@ -2364,6 +2475,11 @@ bool Keys::eventFilter(QObject *watched, QEvent *event) {
 	}
 #endif // Q_OS_MAC
 	if (watched->isWidgetType() && static_cast<QWidget*>(watched)->window() == _window) {
+		if ((type == QEvent::Move || type == QEvent::Resize
+			|| type == QEvent::Show || type == QEvent::Hide)
+			&& _statusLayout.tracks(static_cast<QWidget*>(watched))) {
+			refreshColumns();
+		}
 		if (const auto hydra = _hintHydra.data(); hydra && type == QEvent::MouseButtonPress
 			&& watched != hydra && !hydra->isAncestorOf(static_cast<QWidget*>(watched))) {
 			hydra->closeLayer();
@@ -2464,7 +2580,13 @@ bool Keys::zenNeedsTransientBar() const {
 }
 
 int Keys::statusBarHeight() const {
-	return (chromeVisible() && !_zenMode) ? ModalUi::ModalStatusBar::kHeight : 0;
+	return (chromeVisible() && !_zenMode) ? ModalUi::ModalStatusBar::PreferredHeight() : 0;
+}
+
+void Keys::refreshColumns() {
+	if (_statusBar && chromeVisible()) {
+		_statusBar->setColumns(_statusLayout.measure(_window));
+	}
 }
 
 void Keys::updateLayout(QRect body) {
@@ -2478,8 +2600,9 @@ void Keys::updateLayout(QRect body) {
 		return;
 	}
 	const auto showBar = !_zenMode || zenNeedsTransientBar();
-	const auto h = ModalUi::ModalStatusBar::kHeight;
+	const auto h = ModalUi::ModalStatusBar::PreferredHeight();
 	_statusBar->setGeometry(body.x(), body.y() + body.height() - h, body.width(), h);
+	refreshColumns();
 	_statusBar->setVisible(showBar);
 	if (_whichKey->isVisible()) {
 		const auto above = QRect(body.x(), body.y(), body.width(), std::max(0, body.height() - h));
@@ -3295,13 +3418,14 @@ void Keys::refreshStatusBar() {
 		return;
 	}
 	if (!_lastBody.isEmpty()) {
-		const auto h = ModalUi::ModalStatusBar::kHeight;
+		const auto h = ModalUi::ModalStatusBar::PreferredHeight();
 		_statusBar->setGeometry(
 			_lastBody.x(),
 			_lastBody.y() + _lastBody.height() - h,
 			_lastBody.width(),
 			h);
 	}
+	refreshColumns();
 	_statusBar->show();
 	raiseChrome();
 	auto state = ModalUi::StatusState();
@@ -3318,81 +3442,117 @@ void Keys::refreshStatusBar() {
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"HELP"_q;
 			state.paneLabel = u"Keyboard Cheatsheet"_q;
-			state.rightCue = u"TAB all bindings · j/k scroll · i or / filter · q close"_q;
+			state.hints = {
+				{ u"TAB"_q, u"all bindings"_q },
+				{ u"j/k"_q, u"scroll"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::AllBindings:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"BINDINGS"_q;
 			state.paneLabel = u"All Active Bindings"_q;
-			state.rightCue = filterFocused
-				? u"TAB cheatsheet · C-n/C-p scroll · Esc list"_q
-				: u"TAB cheatsheet · j/k scroll · i or / filter · q close"_q;
+			state.hints = {
+				{ u"TAB"_q, u"cheatsheet"_q },
+				{ u"j/k"_q, u"scroll"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::Palette:
 			state.badge = ModalUi::BadgeKind::Palette;
 			state.badgeText = u"M-x"_q;
 			state.paneLabel = u"Command Palette"_q;
-			state.rightCue = filterFocused
-				? u"RET run · C-n/C-p move · M-p/M-n history · Esc list"_q
-				: u"j/k move · RET run · i or / filter · q close"_q;
+			state.hints = {
+				{ u"j/k"_q, u"move"_q },
+				{ u"RET"_q, u"run"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::DescribeCommandPicker:
 			state.badge = ModalUi::BadgeKind::Palette;
-			state.badgeText = u"SPC h f"_q;
+			state.badgeText = u"DESCRIBE"_q;
 			state.paneLabel = u"Describe Command"_q;
-			state.rightCue = filterFocused
-				? u"RET inspect · C-n/C-p move · Esc list"_q
-				: u"j/k move · RET inspect · i or / filter · q close"_q;
+			state.hints = {
+				{ u"j/k"_q, u"move"_q },
+				{ u"RET"_q, u"inspect"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::DescribeKey:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"HELP"_q;
 			state.paneLabel = u"Describe Key"_q;
-			state.rightCue = _describeKeyHasDetails
-				? u"RET command details  ·  q/ESC close"_q
-				: u"q/ESC close"_q;
+			if (_describeKeyHasDetails) {
+				state.hints.push_back({ u"RET"_q, u"command details"_q });
+			}
+			state.hints.push_back({ u"q/ESC"_q, u"close"_q });
 			break;
 		case ActiveLayer::DescribeCommand:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"HELP"_q;
 			state.paneLabel = u"Describe Command"_q;
-			state.rightCue = u"q/ESC close"_q;
+			state.hints = { { u"q/ESC"_q, u"close"_q } };
 			break;
 		case ActiveLayer::StockShortcuts:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"HELP"_q;
 			state.paneLabel = u"Shortcuts & Gestures"_q;
-			state.rightCue = u"ESC close"_q;
+			state.hints = { { u"ESC"_q, u"close"_q } };
 			break;
 		case ActiveLayer::UnreadBuffer:
 			state.badge = ModalUi::BadgeKind::Palette;
 			state.badgeText = u"UNREAD"_q;
 			state.paneLabel = u"Unread Unmuted Chats"_q;
-			state.rightCue = filterFocused
-				? u"RET open · C-n/C-p move · Esc list"_q
-				: u"j/k move · RET open · i or / filter · m/u/* mark · x read · q close"_q;
+			state.hints = {
+				{ u"j/k"_q, u"move"_q },
+				{ u"RET"_q, u"open"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"m/u/*"_q, u"mark"_q },
+				{ u"x"_q, u"read"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::TopicPicker:
 			state.badge = ModalUi::BadgeKind::Local;
 			state.badgeText = u"TOPICS"_q;
 			state.paneLabel = u"Forum / Bot Topics"_q;
-			state.rightCue = filterFocused
-				? u"RET open · C-n/C-p move · Esc list"_q
-				: u"j/k move · RET open · i or / filter · u unread · q close"_q;
+			state.hints = {
+				{ u"j/k"_q, u"move"_q },
+				{ u"RET"_q, u"open"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"u"_q, u"unread"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::Notice:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"NOTICE"_q;
 			state.paneLabel = u"Purple Notice"_q;
-			state.rightCue = u"j/k scroll  ·  TAB/h/l buttons  ·  o select action  ·  RET activate  ·  y copy  ·  q close"_q;
+			state.hints = {
+				{ u"j/k"_q, u"scroll"_q },
+				{ u"TAB/h/l"_q, u"buttons"_q },
+				{ u"o"_q, u"select action"_q },
+				{ u"RET"_q, u"activate"_q },
+				{ u"y"_q, u"copy"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::NoticeHistory:
 			state.badge = ModalUi::BadgeKind::Help;
 			state.badgeText = u"MESSAGES"_q;
 			state.paneLabel = u"Notice History (SPC h e)"_q;
-			state.rightCue = filterFocused
-				? u"RET open · C-n/C-p move · Esc list"_q
-				: u"j/k move · RET open · i or / filter · y copy · c clear · q close"_q;
+			state.hints = {
+				{ u"j/k"_q, u"move"_q },
+				{ u"RET"_q, u"open"_q },
+				{ u"i or /"_q, u"filter"_q },
+				{ u"y"_q, u"copy"_q },
+				{ u"c"_q, u"clear"_q },
+				{ u"q"_q, u"close"_q },
+			};
 			break;
 		case ActiveLayer::None:
 			break;
@@ -3400,6 +3560,24 @@ void Keys::refreshStatusBar() {
 		if (filterFocused) {
 			state.badge = ModalUi::BadgeKind::Insert;
 			state.badgeText = u"INSERT"_q;
+			if (layer == ActiveLayer::AllBindings) {
+				state.hints = {
+					{ u"TAB"_q, u"cheatsheet"_q },
+					{ u"C-n/C-p"_q, u"scroll"_q },
+					{ u"ESC"_q, u"clear/list"_q },
+				};
+			} else {
+				state.hints = {
+					{ u"RET"_q, (layer == ActiveLayer::Palette) ? u"run"_q
+						: (layer == ActiveLayer::DescribeCommandPicker) ? u"inspect"_q : u"open"_q },
+					{ u"C-n/C-p"_q, u"move"_q },
+					{ u"ESC"_q, (layer == ActiveLayer::Palette || layer == ActiveLayer::DescribeCommandPicker)
+						? u"clear/list"_q : u"list"_q },
+				};
+				if (layer == ActiveLayer::Palette) {
+					state.hints.insert(state.hints.begin() + 2, { u"M-p/M-n"_q, u"history"_q });
+				}
+			}
 		}
 		_statusBar->setState(std::move(state));
 		return;
@@ -3407,25 +3585,32 @@ void Keys::refreshStatusBar() {
 	if (filterFocused) {
 		state.badge = ModalUi::BadgeKind::Insert;
 		state.badgeText = u"INSERT"_q;
-		state.rightCue = u"Esc list"_q;
+		state.hints = { { u"ESC"_q, u"list"_q } };
 	} else if (_inspect) {
 		state.badge = ModalUi::BadgeKind::DescribeKey;
 		state.badgeText = u"KEY?"_q;
-		state.rightCue = u"ESC cancel"_q;
+		state.hints = { { u"ESC"_q, u"cancel"_q } };
 	} else if (_hints.active()) {
 		state.badge = ModalUi::BadgeKind::Hints;
 		state.badgeText = u"HINTS"_q;
-		state.rightCue = u"DEL back  ·  ESC cancel"_q;
+		state.hints = {
+			{ u"DEL"_q, u"back"_q },
+			{ u"ESC"_q, u"cancel"_q },
+		};
 	} else if (!_prefix.empty() && IsLocalleaderPrefix(_prefix)) {
 		state.badge = ModalUi::BadgeKind::Local;
-		state.badgeText = target.contextName.isEmpty()
-			? u"LOCAL"_q
-			: (u"LOCAL · "_q + target.contextName.toUpper());
-		state.rightCue = u"DEL back  ·  ESC cancel"_q;
+		state.badgeText = u"LOCAL"_q;
+		state.hints = {
+			{ u"DEL"_q, u"back"_q },
+			{ u"ESC"_q, u"cancel"_q },
+		};
 	} else if (!_prefix.empty() && _prefix.front() == Qt::Key_Space) {
 		state.badge = ModalUi::BadgeKind::Leader;
 		state.badgeText = u"LEADER"_q;
-		state.rightCue = u"DEL back  ·  ESC cancel"_q;
+		state.hints = {
+			{ u"DEL"_q, u"back"_q },
+			{ u"ESC"_q, u"cancel"_q },
+		};
 	} else {
 		const auto focus = windowFocusWidget();
 		const auto inForeignInput = focus
@@ -3439,13 +3624,17 @@ void Keys::refreshStatusBar() {
 			state.badgeText = u"INSERT"_q;
 		}
 		if (!_prefix.empty()) {
-			state.rightCue = u"DEL back  ·  ESC cancel"_q;
+			state.hints = {
+				{ u"DEL"_q, u"back"_q },
+				{ u"ESC"_q, u"cancel"_q },
+			};
 		}
 	}
 
 	state.paneLabel = target.paneLabel;
-	if (!target.contextName.isEmpty()) {
-		state.contextChip = FirstLocalleaderLabel() + u" "_q + target.contextName;
+	state.paneInDialogs = (target.list != nullptr);
+	if (!target.contextName.isEmpty() && state.badge != ModalUi::BadgeKind::Local) {
+		state.localleaderKey = FirstLocalleaderLabel();
 	}
 
 	auto pending = QString();
@@ -3457,9 +3646,9 @@ void Keys::refreshStatusBar() {
 			pending += u' ';
 		}
 		pending += ChordLabel(_prefix) + u" -"_q;
-		state.pendingGroup = IsLocalleaderPrefix(_prefix)
-			? (target.contextName.isEmpty() ? u"localleader"_q : target.contextName)
-			: PrefixLabel(MapKind::Normal, _prefix);
+		if (!IsLocalleaderPrefix(_prefix)) {
+			state.pendingGroup = PrefixLabel(MapKind::Normal, _prefix);
+		}
 	}
 	state.pendingText = pending;
 
@@ -3481,13 +3670,19 @@ void Keys::refreshStatusBar() {
 		state.message = _persistentCue;
 	}
 
-	if (state.rightCue.isEmpty() && target.focus && liveChatCursor(target.controller)) {
-		state.rightCue = u"RET open"_q;
-	} else if (state.rightCue.isEmpty() && _normal && target.folders
-		&& StepModalChatsFilter(target.controller, 1, false) && HasFolderKeys()) {
-		state.rightCue = u"J/K folders"_q;
+	if (state.hints.empty()) {
+		state.hints = {
+			{ u"SPC"_q, u"leader"_q },
+			{ u"M-x"_q, u"run"_q },
+			{ u"?"_q, u"help"_q },
+		};
+		if (target.focus && liveChatCursor(target.controller)) {
+			state.hints.push_back({ u"RET"_q, u"open"_q });
+		} else if (_normal && target.folders
+			&& StepModalChatsFilter(target.controller, 1, false) && HasFolderKeys()) {
+			state.hints.push_back({ u"J/K"_q, u"folders"_q });
+		}
 	}
-	state.localleaderHint = u"SPC leader  ·  "_q + FirstLocalleaderLabel() + u" local"_q;
 	_statusBar->setState(std::move(state));
 }
 
@@ -4056,7 +4251,7 @@ void Keys::showWhichKey() {
 	};
 	_whichKey->setState(std::move(wk));
 	const auto barH = (_statusBar && _statusBar->isVisible())
-		? ModalUi::ModalStatusBar::kHeight
+		? ModalUi::ModalStatusBar::PreferredHeight()
 		: statusBarHeight();
 	const auto above = QRect(
 		_lastBody.x(),
@@ -5379,6 +5574,12 @@ int ModalKeysStatusHeight(not_null<MainWindow*> window) {
 void UpdateModalKeysLayout(not_null<MainWindow*> window, QRect body) {
 	if (const auto keys = FindKeys(window.get())) {
 		keys->updateLayout(body);
+	}
+}
+
+void RefreshModalKeysColumns(not_null<MainWindow*> window) {
+	if (const auto keys = FindKeys(window.get())) {
+		keys->refreshColumns();
 	}
 }
 

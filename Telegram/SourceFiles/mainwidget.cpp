@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mainwidget.h"
 
+#include "purple/purple_keys.h"
 #include "purple/purple_music_section.h"
 #include "purple/hooks/recording.h"
 
@@ -2846,6 +2847,7 @@ void MainWidget::updateControlsGeometry() {
 	_contentScrollAddToY = 0;
 
 	floatPlayerUpdatePositions();
+	Purple::RefreshModalKeysColumns(_controller->widget());
 }
 
 void MainWidget::destroyThirdSection() {

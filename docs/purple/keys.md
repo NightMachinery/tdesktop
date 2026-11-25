@@ -2,12 +2,17 @@
 
 Enable **Modal keyboard shortcuts** under **Settings -> Purple**. When enabled,
 each main window opens in **Normal** mode with a persistent **modal status line**
-docked along the bottom edge (28 px, reserved beneath the main layout so it
-never covers messages or the composer).
+docked along the bottom edge, beneath the main layout.
 
 ## Modes and status line
 
-- **Normal** (green badge, default when enabled): keys dispatch commands.
+The status line follows the folder rail, chat list, conversation, and any info
+column. It uses their colors and continues their dividers. Text follows the
+composer and avatar insets, with shortcuts aligned to the composer icons.
+The mode sits under the rail in the folder-label font, or at the leading edge
+in windows without a rail.
+
+- **Normal** (green label, default when enabled): keys dispatch commands.
   Switching chats, folders, or panes stays in Normal mode while clearing any
   in-flight prefix or count.
 - Hold a single-key motion such as `j`, `k`, `J`, `K`, `C-d`, or `C-u`
@@ -19,26 +24,27 @@ never covers messages or the composer).
   Repeated half-page and page motions retarget the current scroll animation.
   Lists and pickers still move one row at a time. Turning off Animations
   restores discrete scroll steps.
-- **Insert** (blue badge): press `i` or `a`, start a reply or edit hint, open
+- **Insert** (blue label): press `i` or `a`, start a reply or edit hint, open
   search, or click directly inside the message composer to type. Ordinary
   typing, IME composition, and Telegram shortcuts work normally. Press `Esc`,
   `C-[`, or `C-g` to return to Normal mode.
-- **Transient capture and layer badges:** the status line updates at 0 ms to
-  `LEADER` (indigo) after `SPC`, `LOCAL` with the active context name (teal,
-  for example `LOCAL · CHAT`) after `,` or `SPC m`, `HINTS` (purple) during
+- **Transient capture and layer labels:** the status line shows
+  `LEADER` (indigo) after `SPC`, `LOCAL` (teal) after `,` or `SPC m`, and
+  `HINTS` (purple) during
   message/URL hints, `M-x` (violet) in the command palette, `KEY?` (amber)
   during `SPC h k`, and `HELP` / `FILTER` while the cheatsheet, bindings list,
   describe card, or stock shortcuts layer is open. While a prefix, which-key
   drawer, hint capture, or layer is open, the status bar replaces the
   Normal-mode hint on its right side with that surface's active keys.
 - **Pending counts and prefixes:** numeric counts (`5j`, `2C-d`) and pending
-  chords (`SPC b -`, `, -`, `y -`) echo immediately on the status line beside
-  their prefix group label (`+buffer / chat`). Pressing `DEL` inside a prefix
+  chords (`SPC b -`, `, -`, `y -`) echo immediately on the status line.
+  An idle pane shows its configured localleader as a dim cue such as
+  `, local`. Pressing `DEL` inside a prefix
   backs up one stroke; `Esc` or `C-g` cancels. Unknown endings report
   `<chord> is undefined` on the status line and never fall through to Normal
   mode. Unavailable commands report what they need.
-- **Unread unmuted chat counter:** the status line shows a live `DM N · GP M · CH K`
-  pill counting unread unmuted chats (not messages), broken down into direct
+- **Unread unmuted chat counts:** the chat list segment shows positive counts
+  of unread unmuted chats, broken down into direct
   messages and bots (`DM`), groups and forum groups (`GP`), and channels (`CH`).
   Muted chats without mentions, archived chats, Saved Messages, and chats hidden
   by the active Work Mode preset are excluded.

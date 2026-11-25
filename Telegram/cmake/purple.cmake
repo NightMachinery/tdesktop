@@ -196,6 +196,7 @@ PRIVATE
     purple/purple_keys_mx.h
     purple/purple_keys_ui.cpp
     purple/purple_keys_ui.h
+    purple/purple_status_bar.h
     purple/purple_keys_unread.h
     purple/purple_list_filter_keys.h
     purple/purple_list_selection.h

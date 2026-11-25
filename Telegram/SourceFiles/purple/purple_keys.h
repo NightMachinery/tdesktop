@@ -50,6 +50,7 @@ void ScrollModalLayer(
 void EnsureModalKeysAttached(not_null<MainWindow*> window);
 [[nodiscard]] int ModalKeysStatusHeight(not_null<MainWindow*> window);
 void UpdateModalKeysLayout(not_null<MainWindow*> window, QRect body);
+void RefreshModalKeysColumns(not_null<MainWindow*> window);
 void RaiseModalKeysChrome(not_null<MainWindow*> window);
 
 void InstallMainMenuKeys(

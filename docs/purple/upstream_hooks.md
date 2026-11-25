@@ -41,7 +41,10 @@ the numbers.
 - `mainwidget.h`, `mainwidget.cpp`, `window/window_filters_menu.h`, and
   `window/window_session_controller.*`: hides the folder strip, dialogs column,
   side shadows, and third column while Zen fullscreen chat mode is active,
-  restoring only widgets Zen itself hid.
+  restoring only widgets Zen itself hid. After each `MainWidget` layout pass,
+  Purple refreshes the modal status segments from the live widget bounds
+  and divider positions, including during dialog-width animation. The status
+  text uses the stock avatar padding and live composer field and icon positions.
 - `window/notifications_manager.cpp`, `media/view/media_view_overlay_widget.cpp`,
   `media/system_media_controls_manager.cpp`, `tray.cpp`,
   `tray_accounts_menu.cpp`, and `platform/mac/global_menu_mac.mm`: suppresses
@@ -70,7 +73,8 @@ the numbers.
 - `history/history_widget.h`, `history/view/history_view_chat_section.h`,
   `history/view/history_view_scheduled_section.h`, and
   `history/view/controls/history_view_compose_controls.h` grant the attachment
-  shortcut access to the native pickers and their attachment controls.
+  shortcut access to the native pickers and their attachment controls. That
+  access also locates the composer anchors for the status text.
 - `history/view/history_view_list_widget.*`: visible enumeration, layout
   cancellation and focus preservation for hint selection.
 - `history/view/history_view_message.*`: exposes rendered body text and its

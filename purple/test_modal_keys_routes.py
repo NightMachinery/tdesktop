@@ -46,9 +46,20 @@ ordered(mainwindow, "void MainWindow::updateControlsGeometry()",
         "Purple::ModalKeysStatusHeight(this)",
         "body.height() - modalStatusH",
         "Purple::UpdateModalKeysLayout(this, body);")
+mainwidget = read("mainwidget.cpp")
+ordered(mainwidget, "void MainWidget::updateControlsGeometry()", "_a_dialogsWidth.value",
+        "floatPlayerUpdatePositions()", "Purple::RefreshModalKeysColumns(_controller->widget())")
 
 keys = read("purple/purple_keys.cpp")
 keys_ui = read("purple/purple_keys_ui.cpp")
+ordered(keys, "class ModalStatusLayout", "widget->mapTo(body", "main->_dialogs.get()",
+        "main->_thirdSection.data()", "KeyboardAttachment::Geometry(section)",
+        "fullTextMargins().left()", "composer.placeholderInset", "composer.iconWidth",
+        "st::forumTopicRow : st::defaultDialogRow", "main->_sideShadow.get()", "main->_thirdShadow.data()")
+ordered(keys, "bool Keys::eventFilter", "type == QEvent::Move", "_statusLayout.tracks", "refreshColumns()")
+ordered(keys_ui, "void ModalStatusBar::paintEvent", "PaintModalStatusBar(",
+        "st::sideBarBg", "st::dialogsBg", "st::historyComposeAreaBg", "st::shadowFg",
+        "st::windowFiltersButton.style.font->f")
 chrome = between(keys, "void Keys::raiseChrome", "Target Keys::currentTarget")
 ordered(chrome, "topShownLayer()", "geometry().bottom()", "_statusBar->stackUnder(stack)",
         "_whichKey->stackUnder(stack)", "_statusBar->raise()")
@@ -217,8 +228,8 @@ assert "_colCapWidths" not in keys_ui
 status_fn = between(keys, "void Keys::refreshStatusBar", "KeyUse Keys::classify")
 for layer_case in ("ActiveLayer::Cheatsheet", "ActiveLayer::AllBindings",
                    "ActiveLayer::Palette", "ActiveLayer::DescribeKey",
-                   "ActiveLayer::StockShortcuts", "state.rightCue",
-                   'u"DEL back  ·  ESC cancel"_q'):
+                   "ActiveLayer::StockShortcuts", "state.hints",
+                   '{ u"DEL"_q, u"back"_q }', '{ u"ESC"_q, u"cancel"_q }'):
     assert layer_case in status_fn, layer_case
 
 # Verify cheatsheet preserves key casing, derives live-available SPC prefixes, and tags localleader rows.
@@ -389,7 +400,7 @@ ordered(stroke, "const auto opensCursor", "target.chatCursorAvailable",
 ordered(keys, "void Keys::clearPrefix", "if (!keepChatCursor)", "_chatCursor = {};")
 ordered(keys, "bool Keys::eventFilter", "type == QEvent::MouseMove", "globalPosition().toPoint()",
         "type == QEvent::MouseButtonPress", "type == QEvent::Hide", "_chatCursor = {};")
-ordered(status_fn, "target.focus && liveChatCursor(target.controller)", 'u"RET open"_q')
+ordered(status_fn, "target.focus && liveChatCursor(target.controller)", '{ u"RET"_q, u"open"_q }')
 ordered(read("dialogs/dialogs_widget.cpp"), "InnerWidget *Widget::purpleVisibleKeysList",
         "_childList->purpleVisibleKeysList()", "purpleKeysList(this)")
 ordered(read("dialogs/dialogs_inner_widget.cpp"), "InnerWidget::computeChosenRow",
@@ -453,7 +464,7 @@ ordered(keys, "std::vector<EffectiveBinding> EffectiveBindings", "contextMap == 
 ordered(keys, "void Keys::showWhichKey()", "EffectiveBindings(_normal, target.contextMap)",
         "other.sourceMap == MapKind::Chats", "!other.viaLocalleader", 'u" (%1 from list)"')
 ordered(status_fn, "_normal && target.folders", "StepModalChatsFilter(target.controller, 1, false)",
-        "HasFolderKeys()", 'u"J/K folders"')
+        "HasFolderKeys()", '{ u"J/K"_q, u"folders"_q }')
 ordered(keys, "Target FindTarget", ".folders = owner->isPrimary()",
         "!owner->openedFolder().current()", "!owner->shownForum().current()")
 ordered(dispatch, "case Action::PreviousFolder:", "StepModalChatsFilter(current, delta, true)",

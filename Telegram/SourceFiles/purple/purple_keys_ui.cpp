@@ -27,6 +27,7 @@
 #include "styles/style_keys_legend.h"
 #include "styles/style_layers.h"
 #include "styles/style_widgets.h"
+#include "styles/style_window.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
@@ -298,6 +299,12 @@ ModalStatusBar::ModalStatusBar(not_null<QWidget*> parent)
 : RpWidget(parent) {
 	setFocusPolicy(Qt::NoFocus);
 	setAttribute(Qt::WA_OpaquePaintEvent);
+	style::PaletteChanged() | rpl::on_next([this] { update(); }, lifetime());
+}
+
+int ModalStatusBar::PreferredHeight() {
+	const auto fontHeight = st::normalFont->height;
+	return fontHeight + fontHeight / 2 + 2 * st::lineWidth;
 }
 
 void ModalStatusBar::setState(StatusState state) {
@@ -305,210 +312,37 @@ void ModalStatusBar::setState(StatusState state) {
 	update();
 }
 
+void ModalStatusBar::setColumns(StatusColumns columns) {
+	if (_columns != columns) {
+		_columns = std::move(columns);
+		update();
+	}
+}
+
 void ModalStatusBar::paintEvent(QPaintEvent *) {
 	auto p = Painter(this);
-	auto hq = PainterHighQualityEnabler(p);
-	const auto r = rect();
-	const auto rtl = IsRtl(this);
-
-	const auto bg = BlendColor(st::windowBg->c, st::windowBgOver->c, 0.55);
-	p.fillRect(r, bg);
-	p.fillRect(0, 0, r.width(), 1, st::boxDividerBg->c);
-
-	const auto badgeFont = MonoFont(11, true);
-	const auto badgeFm = QFontMetrics(badgeFont);
-	const auto badgeText = _state.badgeText.isEmpty()
-		? u"NORMAL"_q
-		: _state.badgeText;
-	const auto badgeW = std::max(72, badgeFm.horizontalAdvance(badgeText) + 22);
-	const auto badgeRect = rtl
-		? QRect(r.width() - badgeW, 1, badgeW, r.height() - 1)
-		: QRect(0, 1, badgeW, r.height() - 1);
-	p.fillRect(badgeRect, BadgeColor(_state.badge));
-	p.setFont(badgeFont);
-	p.setPen(Qt::white);
-	p.drawText(badgeRect, Qt::AlignCenter, badgeText);
-
-	auto leftX = rtl ? 12 : (badgeW + 12);
-	auto rightX = rtl ? (r.width() - badgeW - 12) : (r.width() - 12);
-
-	const auto uiFont = st::normalFont;
-	const auto uiBold = st::semiboldFont;
-	const auto monoFont = MonoFont(11, false);
-	const auto monoBold = MonoFont(11, true);
-	const auto pillBg = st::windowBg->c;
-	const auto pillMuted = ReadableText(st::windowSubTextFg->c, pillBg);
-
-	// Right-side quiet discovery cue (layer-specific when a layer is open).
-	const auto cue = !_state.rightCue.isEmpty()
-		? _state.rightCue
-		: (_state.localleaderHint.isEmpty()
-			? u"SPC leader  ·  , local  ·  M-x run  ·  ? help"_q
-			: (_state.localleaderHint + u"  ·  M-x run  ·  ? help"_q));
-	const auto cueFm = QFontMetrics(uiFont);
-	const auto cueW = cueFm.horizontalAdvance(cue);
-	const auto minMiddle = _state.rightCue.isEmpty() ? 240 : 120;
-	if (rightX - leftX > cueW + minMiddle) {
-		p.setFont(uiFont);
-		p.setPen(st::windowSubTextFg);
-		const auto cueRect = rtl
-			? QRect(leftX, 1, cueW, r.height() - 1)
-			: QRect(rightX - cueW, 1, cueW, r.height() - 1);
-		p.drawText(cueRect, Qt::AlignVCenter | (rtl ? Qt::AlignRight : Qt::AlignLeft), cue);
-		if (rtl) {
-			leftX += cueW + 14;
-		} else {
-			rightX -= cueW + 14;
-		}
-	}
-
-	auto cursor = rtl ? rightX : leftX;
-	const auto advance = [&](int w, int gap = 10) {
-		if (rtl) {
-			cursor -= w + gap;
-		} else {
-			cursor += w + gap;
-		}
-	};
-	const auto slotRect = [&](int w) {
-		return rtl
-			? QRect(cursor - w, 1, w, r.height() - 1)
-			: QRect(cursor, 1, w, r.height() - 1);
-	};
-	const auto remaining = [&] {
-		return std::max(0, rtl ? (cursor - leftX) : (rightX - cursor));
-	};
-
-	// Pane label.
-	if (!_state.paneLabel.isEmpty() && remaining() > 40) {
-		const auto fm = QFontMetrics(uiBold);
-		const auto w = std::min(remaining(), fm.horizontalAdvance(_state.paneLabel));
-		p.setFont(uiBold);
-		p.setPen(st::windowFg);
-		p.drawText(slotRect(w), Qt::AlignVCenter | Qt::AlignLeft, _state.paneLabel);
-		advance(w, 8);
-	}
-
-	// Context chip (signals active localleader scope).
-	if (!_state.contextChip.isEmpty() && remaining() > 56) {
-		const auto fm = QFontMetrics(monoFont);
-		const auto textW = fm.horizontalAdvance(_state.contextChip);
-		const auto chipW = std::min(remaining(), textW + 14);
-		const auto chipRect = slotRect(chipW).adjusted(0, 4, 0, -4);
-		p.setPen(QPen(st::boxDividerBg->c, 1));
-		p.setBrush(pillBg);
-		p.drawRoundedRect(QRectF(chipRect).adjusted(.5, .5, -.5, -.5), 4, 4);
-		p.setFont(monoFont);
-		p.setPen(pillMuted);
-		p.drawText(chipRect, Qt::AlignCenter, _state.contextChip);
-		advance(chipW, 10);
-	}
-
-	// Compact ZEN mode indicator pill.
-	if (_state.zenMode && remaining() > 44) {
-		const auto zenText = u"ZEN"_q;
-		const auto zenW = MeasureTextWidth(monoBold, zenText) + 10;
-		if (zenW <= remaining()) {
-			const auto zenRect = slotRect(zenW).adjusted(0, 4, 0, -4);
-			auto fill = BadgeColor(BadgeKind::Leader);
-			fill.setAlpha(30);
-			p.setPen(Qt::NoPen);
-			p.setBrush(fill);
-			p.drawRoundedRect(zenRect, 4, 4);
-			p.setFont(monoBold);
-			p.setPen(BadgeColor(BadgeKind::Leader));
-			p.drawText(zenRect, Qt::AlignCenter, zenText);
-			advance(zenW, 8);
-		}
-	}
-
-	// Unread unmuted CHATS breakdown pill: DM / GP / CH.
-	if (_state.unreadKnown && _state.pendingText.isEmpty() && remaining() > 120) {
-		struct BucketPart {
-			QString text;
-			bool active = false;
-		};
-		const std::array<BucketPart, 3> parts = { {
-			{ u"DM "_q + QString::number(_state.unreadDm), _state.unreadDm > 0 },
-			{ u"GP "_q + QString::number(_state.unreadGp), _state.unreadGp > 0 },
-			{ u"CH "_q + QString::number(_state.unreadCh), _state.unreadCh > 0 },
-		} };
-		const auto sep = u" · "_q;
-		const auto sepW = MeasureTextWidth(monoFont, sep) - 2;
-		auto innerW = 0;
-		std::array<int, 3> partW = {};
-		for (auto i = 0; i < 3; ++i) {
-			partW[i] = MeasureTextWidth(parts[i].active ? monoBold : monoFont, parts[i].text) - 1;
-			innerW += partW[i];
-			if (i > 0) {
-				innerW += sepW;
-			}
-		}
-		const auto pillW = innerW + 14;
-		if (pillW <= remaining()) {
-			const auto pillRect = slotRect(pillW).adjusted(0, 4, 0, -4);
-			p.setPen(QPen(st::boxDividerBg->c, 1));
-			p.setBrush(pillBg);
-			p.drawRoundedRect(QRectF(pillRect).adjusted(.5, .5, -.5, -.5), 4, 4);
-			const auto pillActive = ReadableText(st::windowActiveTextFg->c, pillBg);
-			auto px = pillRect.left() + 7;
-			for (auto i = 0; i < 3; ++i) {
-				if (i > 0) {
-					p.setFont(monoFont);
-					p.setPen(pillMuted);
-					p.drawText(QRect(px, pillRect.top(), sepW, pillRect.height()), Qt::AlignCenter, sep);
-					px += sepW;
-				}
-				p.setFont(parts[i].active ? monoBold : monoFont);
-				p.setPen(parts[i].active ? pillActive : pillMuted);
-				p.drawText(
-					QRect(px, pillRect.top(), partW[i], pillRect.height()),
-					Qt::AlignCenter,
-					parts[i].text);
-				px += partW[i];
-			}
-			advance(pillW, 10);
-		}
-	}
-
-	// 0ms live pending count/chord echo chip.
-	if (!_state.pendingText.isEmpty() && remaining() > 48) {
-		const auto fm = QFontMetrics(monoBold);
-		const auto pillText = _state.pendingText;
-		const auto pillW = std::min(remaining(), fm.horizontalAdvance(pillText) + 14);
-		const auto pillRect = slotRect(pillW).adjusted(0, 4, 0, -4);
-		auto accentFill = st::windowActiveTextFg->c;
-		accentFill.setAlpha(28);
-		p.setPen(Qt::NoPen);
-		p.setBrush(accentFill);
-		p.drawRoundedRect(pillRect, 4, 4);
-		p.setFont(monoBold);
-		p.setPen(st::windowActiveTextFg);
-		p.drawText(pillRect, Qt::AlignCenter, pillText);
-		advance(pillW, 8);
-
-		if (!_state.pendingGroup.isEmpty() && remaining() > 48) {
-			const auto grp = u"+"_q + _state.pendingGroup;
-			const auto gfm = QFontMetrics(uiBold);
-			const auto gw = std::min(remaining(), gfm.horizontalAdvance(grp));
-			p.setFont(uiBold);
-			p.setPen(st::windowActiveTextFg);
-			p.drawText(slotRect(gw), Qt::AlignVCenter | Qt::AlignLeft, grp);
-			advance(gw, 10);
-		}
-	}
-
-	// Transient feedback or validation warning.
-	if (!_state.message.isEmpty() && remaining() > 40) {
-		const auto fm = QFontMetrics(uiFont);
-		const auto avail = remaining();
-		const auto elided = fm.elidedText(_state.message, Qt::ElideRight, avail);
-		p.setFont(uiFont);
-		p.setPen(_state.messageIsError
-			? QColor(0xd9, 0x3b, 0x3b)
-			: st::windowFg->c);
-		p.drawText(slotRect(avail), Qt::AlignVCenter | Qt::AlignLeft, elided);
-	}
+	PaintModalStatusBar(
+		p,
+		rect(),
+		_columns,
+		_state,
+		{
+			.window = st::windowBg->c,
+			.rail = st::sideBarBg->c,
+			.dialogs = st::dialogsBg->c,
+			.chat = st::historyComposeAreaBg->c,
+			.info = st::windowBg->c,
+			.divider = st::shadowFg->c,
+			.text = st::windowFg->c,
+			.muted = st::windowSubTextFg->c,
+			.error = st::attentionButtonFg->c,
+			.accent = st::windowActiveTextFg->c,
+		},
+		st::normalFont->f,
+		st::semiboldFont->f,
+		st::windowFiltersButton.style.font->f,
+		BadgeColor(_state.badge),
+		IsRtl(this));
 }
 
 // ---------------------------------------------------------------------------
