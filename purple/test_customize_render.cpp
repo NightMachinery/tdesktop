@@ -1,3 +1,4 @@
+#include "purple/purple_settings_confirm_gesture.h"
 #include "purple/purple_settings_customize_look.h"
 #include "purple/purple_settings_focus.h"
 #include "purple/purple_settings_review_display.h"
@@ -28,6 +29,34 @@ void Check(bool ok, const char *name) {
 		std::cerr << name << '\n';
 		std::exit(EXIT_FAILURE);
 	}
+}
+
+void ConfirmGesture() {
+	auto window = QWidget();
+	auto underneath = Action(QStringLiteral("Edit"), &window);
+	underneath.resize(120, 30);
+	auto clicks = 0;
+	QObject::connect(&underneath, &QPushButton::clicked, [&] { ++clicks; });
+	const auto global = QPointF(100, 100);
+	const auto release = QMouseEvent(QEvent::MouseButtonRelease, QPointF(10, 10), global,
+		Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+	for (const auto next : { QEvent::MouseButtonPress, QEvent::MouseButtonDblClick }) {
+		SettingsConfirmGesture::Guard(&window, release);
+		auto press = QMouseEvent(next, QPointF(10, 10), global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+		auto end = QMouseEvent(QEvent::MouseButtonRelease, QPointF(10, 10), global, Qt::LeftButton,
+			Qt::NoButton, Qt::NoModifier);
+		QApplication::sendEvent(&underneath, &press);
+		QApplication::sendEvent(&underneath, &end);
+		Check(!underneath.isDown() && clicks == 0, "confirm gesture cannot click the replaced control");
+	}
+	SettingsConfirmGesture::Guard(&window, release);
+	auto press = QMouseEvent(QEvent::MouseButtonPress, QPointF(10, 10), QPointF(200, 100),
+		Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+	auto end = QMouseEvent(QEvent::MouseButtonRelease, QPointF(10, 10), QPointF(200, 100),
+		Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+	QApplication::sendEvent(&underneath, &press);
+	QApplication::sendEvent(&underneath, &end);
+	Check(clicks == 1, "a distinct click still reaches the replacement page");
 }
 
 void Theme(QWidget *root, bool dark) {
@@ -421,6 +450,7 @@ int main(int argc, char **argv) {
 	Check(argc == 2, "pass the render directory");
 	const auto output = QDir(QString::fromLocal8Bit(argv[1]));
 	Check(output.mkpath(QStringLiteral(".")), "create render directory");
+	ConfirmGesture();
 	ReviewRenameLosses();
 	ReviewCollidingEntries();
 	for (const auto dark : { false, true }) {

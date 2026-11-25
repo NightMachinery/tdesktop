@@ -14,6 +14,7 @@
 #include "purple/purple_picker.h"
 #include "purple/purple_privacy_screen.h"
 #include "purple/purple_settings_collection_ui.h"
+#include "purple/purple_settings_confirm_gesture.h"
 #include "purple/purple_settings_customize_look.h"
 #include "purple/purple_settings_editor.h"
 #include "purple/purple_settings_focus.h"
@@ -462,6 +463,12 @@ protected:
 			_filterBeforeEdit = _filter->text();
 		} else if (event->type() == QEvent::FocusOut) {
 			_preedit.remove(object);
+		} else if (event->type() == QEvent::MouseButtonRelease && _confirm && object == _confirm) {
+			const auto mouse = static_cast<QMouseEvent*>(event);
+			if (visibleContent() && mouse->button() == Qt::LeftButton && _confirm->isDown()
+				&& _confirm->rect().contains(mouse->position().toPoint())) {
+				SettingsConfirmGesture::Guard(_window, *mouse);
+			}
 		} else if (event->type() == QEvent::ShortcutOverride && visibleContent()) {
 			event->accept();
 		} else if (event->type() == QEvent::KeyPress) {
@@ -1011,6 +1018,7 @@ private:
 		_formStatus = nullptr;
 		_record = nullptr;
 		_cancelCapture = nullptr;
+		_confirm.clear();
 		while (const auto item = _sheetLayout->takeAt(0)) {
 			if (const auto widget = item->widget()) {
 				widget->hide();
@@ -1212,6 +1220,7 @@ private:
 		_sheetBack = [this] { showReview(); };
 		const auto cancel = sheetButton(u"Cancel"_q, _sheetBack);
 		const auto apply = sheetButton(u"Confirm and apply"_q, [this, review] { submitReview(review); });
+		_confirm = apply;
 		apply->setEnabled(false);
 		QTimer::singleShot(0, apply, [apply] { apply->setEnabled(true); });
 		showSheet(cancel);
@@ -2099,6 +2108,7 @@ private:
 	QLabel *_formStatus = nullptr;
 	QPushButton *_record = nullptr;
 	QPushButton *_cancelCapture = nullptr;
+	QPointer<QPushButton> _confirm;
 	SettingsFocus _formFocus;
 	SettingsFocus _exitFocus;
 	QPointer<QWidget> _browserFocus;
