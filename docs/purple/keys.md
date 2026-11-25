@@ -269,6 +269,12 @@ on the modal status line and cheatsheet footer.
   clears its pending notices. Stock toasts remain available with modal keys
   off, subject to passcode and privacy checks.
 
+## Known limits
+
+- Desktop language packs can translate labels while the app layout stays
+  left-to-right. Modal surfaces follow the same direction as the stock
+  Desktop UI.
+
 ## Upstream hooks
 
 - `core/application.cpp` and `.h`: delegates key press, shortcut override,
