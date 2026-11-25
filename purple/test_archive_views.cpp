@@ -595,7 +595,7 @@ void WorkerExpiryAndLogout() {
 	auto ready=std::promise<std::shared_ptr<DesktopArchiveJournal>>();
 	auto readiness=ready.get_future();
 	auto worker=std::make_shared<ProbeViewWorker>(Options(temporary.path()),
-		[](DesktopArchiveStatus,QString,uint64_t) {},
+		[](DesktopArchiveStatus, QString, auto) {},
 		[&](std::shared_ptr<DesktopArchiveJournal> journal) { ready.set_value(std::move(journal)); });
 	const auto stop = gsl::finally([&] {
 		worker->Stop(false);

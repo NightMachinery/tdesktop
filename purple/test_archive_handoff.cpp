@@ -373,7 +373,7 @@ void StartupActorCases() {
 		auto reported = std::atomic<int>(0);
 		auto lastStatus = std::atomic<DesktopArchiveStatus>(DesktopArchiveStatus::Disabled);
 		auto worker = std::make_shared<NativeStartupWorker>(std::move(options),
-			[&](DesktopArchiveStatus status, QString, uint64_t) { lastStatus = status; ++reported; },
+			[&](DesktopArchiveStatus status, QString, auto) { lastStatus = status; ++reported; },
 			[&](std::shared_ptr<DesktopArchiveJournal>) { ++readyCount; });
 		CHECK(enteredFuture.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
 		const auto total = mode == 1 ? 32 : mode == 2 ? 12 : 3;

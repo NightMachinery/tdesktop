@@ -914,7 +914,7 @@ void HeldWriterWorkerRenewal() {
 		auto result = std::make_shared<std::atomic<bool>>(false);
 		auto released = false;
 		PurgeValue.worker = std::make_shared<ProbePurgeWorker>(Options(temporary.path()),
-			[&](DesktopArchiveStatus, QString reason, uint64_t) { HarnessOnMain([&, reason] { reports.push_back(reason); }); },
+			[&](DesktopArchiveStatus, QString reason, auto) { HarnessOnMain([&, reason] { reports.push_back(reason); }); },
 			[](std::shared_ptr<DesktopArchiveJournal> journal) { HarnessOnMain([journal] { PurgeValue.journal = journal; }); });
 		const auto worker = PurgeValue.worker;
 		const auto stop = gsl::finally([&] {
@@ -978,7 +978,7 @@ void HeaderIoWorkerRenewal() {
 		auto temporary = QTemporaryDir();
 		auto reports = std::vector<QString>();
 		PurgeValue.worker = std::make_shared<ProbePurgeWorker>(Options(temporary.path()),
-			[&](DesktopArchiveStatus, QString reason, uint64_t) {
+			[&](DesktopArchiveStatus, QString reason, auto) {
 				HarnessOnMain([&, reason] { reports.push_back(reason); });
 			}, [](std::shared_ptr<DesktopArchiveJournal> journal) {
 				HarnessOnMain([journal] { PurgeValue.journal = journal; });
