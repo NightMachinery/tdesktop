@@ -92,7 +92,7 @@ ordered(customize, "class CustomizeLayer final", "passcodeLockChanges()", "Priva
         "_protectedForm.restore", "setCurrentWidget(_browser)")
 ordered(customize, "bool privacyKey", "qobject_cast<QLineEdit*>", "Qt::Key_F8", "TogglePrivacyScreen")
 ordered(customize, "FilterCustomizeSettingsInput", "editor->privacyKey")
-ordered(keys, ".onPick = [guard", "Available(action, restoredTarget)", "guard->dispatch(action, restored, 1)")
+ordered(keys, ".onPick = [guard", "CommandAvailable(action, restored)", "guard->dispatch(action, restored, 1)")
 customize_look = read("purple/purple_settings_customize_look.h")
 ordered(customize_look, "class Canvas", "paintEvent", "customizeBackground")
 ordered(customize, "new CustomizeLook::Canvas(_pages)", "new CustomizeLook::Canvas(_sheetPage)",
@@ -195,8 +195,9 @@ ordered(help_fn, "b.viaLocalleader ? mapContextTag(b.sourceMap)",
 
 # Security & focus gates.
 gate = between(keys, "Window::SessionController *Keys::owner()", "bool Keys::chromeVisible")
-for protected in ("passcodeLocked()", "window.locked()", "activePopupWidget()",
-                  "activeModalWidget()"):
+for protected in ("passcodeLocked()", "screenIsLocked()", "window.locked()",
+                  "PrivacyScreenActiveAny()", "PeekCountdownPending()", "activePopupWidget()",
+                  "activeModalWidget()", "account.loggingOut()", "account.maybeSession()"):
     assert protected in gate, protected
 target_gate = between(keys, "Target Keys::currentTarget", "Target Keys::activeTarget")
 for protected in ("isLayerShown()", "receiver == focus"):
@@ -212,7 +213,11 @@ for protected in ("isSearching()", "isRecording()", "_purpleScreenTimeCover->vis
 assert "modifiers.testFlag(Qt::AltModifier)" in between(keys, "int ModalKey(", "enum class Action")
 routing = between(keys, "bool Keys::handle", "void Keys::showWhichKey")
 ordered(routing, "ModalKey(*keyEvent)", "QEvent::KeyRelease",
-        "isAutoRepeat() && _held.contains(key)", "!target.focus || !Enabled()",
+        "isAutoRepeat() && _held.contains(key)", "if (!Enabled())",
+        "StockModeShortcut", "MxShortcutInStockMode()", "receiver == _preeditInput",
+        "currentTarget(receiver, true)", "event->accept()", "QEvent::KeyPress",
+        "!keyEvent->isAutoRepeat()", "showPalette(false, target, false)",
+        "const auto target = currentTarget(receiver)", "if (!target.focus)",
         "QEvent::ShortcutOverride", "event->accept()", "return true;",
         "_held.insert(key)", "keyEvent->isAutoRepeat()",
         "case KeyUse::CountDigit:", "case KeyUse::PrefixBackspace:",
@@ -230,11 +235,40 @@ ordered(palette, "revision = _revision", "base::make_weak(current)",
         "guard = QPointer(this)", "closePalettePosted",
         "stack->topShownLayer() == raw", "anim::type::instant",
         "ModalUi::CreateCommandPaletteLayer",
-        "if (!guard)", "MxHistory().record", "QTimer::singleShot(0, guard.data()",
-        "closePalettePosted();",
-        "!Enabled()", "live != original.get()", "revision != guard->_revision",
-        "FindTarget(live, origin)", "guard->currentTarget(origin)",
-        "guard->dispatch(action, restored", "onCancel = [guard,")
+        "if (!guard)", "QTimer::singleShot(0, guard.data()",
+        "revision != guard->_revision", "closePalettePosted();",
+        "live != original.get()", "revision != guard->_revision", "origin->setFocus",
+        "guard->owner() != original.get()", "guard->currentTarget(origin, !Enabled())",
+        "CommandAvailable(action, restored)", "MxHistory().record", "guard->dispatch(action, restored",
+        "onCancel = [guard,")
+
+target_gate = between(keys, "Target Keys::currentTarget", "QWidget *Keys::windowFocusWidget")
+ordered(target_gate, "QApplication::focusWidget()", "owner()", "focus->isVisible()",
+        "focus->isEnabled()", "focus->window() == _window", "receiver == focus",
+        "isLayerShown()", "FindTarget(current, focus, allowUnmapped)")
+ordered(keys, "Target FindTarget(", "history->allowsPurpleKeys(focus)", ": Target();",
+        "return allowUnmapped ? Target")
+ordered(keys, "void SetEnabled(bool enabled)", "writePref<bool>(kEnabledPref", "EnabledChanges.fire_copy")
+mode_change = between(keys, "EnabledChanges.events() | rpl::on_next", "KeymapChanges.events() | rpl::on_next")
+ordered(mode_change, "++_revision", "_held.clear()", "enterNormal(true)", "closeKeyLayers()",
+        "clearPrefix()", "_window->updateControlsGeometry()")
+assert "hideLayer" not in mode_change and "Customize" not in mode_change
+ordered(keys, "case Action::ModalInputToggle: {", "SetEnabled(enabled)", "ShowPurpleAck",
+        "lng_purple_keys_modal_input_on", "lng_purple_keys_modal_input_off")
+assert ":modal-input-toggle" not in defaults
+ordered(keys, "bool Keys::chromeVisible() const", "return Enabled()")
+ordered(keys, "void BuildModalKeysSetting", "on_next(SetEnabled", "MxShortcutInStockModeValue()",
+        "SetMxShortcutInStockMode")
+ordered(customize, "new QCheckBox(_browser)", "MxShortcutInStockModeValue()",
+        "QSignalBlocker", "if (visibleContent())", "SetMxShortcutInStockMode")
+ordered(palette, "for (const auto &cmd : kCommands)", "cmd.action == Action::Run",
+        "CommandAvailable(cmd.action, target)", "CommandUnavailableReason(cmd)")
+needs_normal = between(keys, "bool RequiresModalInput", "QString CommandUnavailableReason")
+for action in ("SelectMessage", "DescribeChord", "UnreadBuffer", "TopicPalette"):
+    assert f"Action::{action}" in needs_normal, action
+for action in ("Help", "Cheatsheet", "DescribeCommand", "TogglePrivacyScreen",
+               "CustomizeSettings", "ModalInputToggle"):
+    assert f"Action::{action}" not in needs_normal, action
 
 describe_key = between(keys, "void Keys::showDescribeKeyResult", "void Keys::showDescribeCommandResult")
 ordered(describe_key, "guard = QPointer(this)", "origin = target.focus",
@@ -255,7 +289,7 @@ ordered(status_refresh, "activeTarget()", "windowFocusWidget()", "WA_InputMethod
 current_tgt = between(keys, "Target Keys::currentTarget", "QWidget *Keys::windowFocusWidget")
 ordered(current_tgt, "QApplication::focusWidget()", "owner()")
 owner_fn = between(keys, "Window::SessionController *Keys::owner", "bool Keys::chromeVisible")
-ordered(owner_fn, "QApplication::activeWindow() == _window")
+ordered(owner_fn, "QApplication::activeWindow() != _window", "Core::App().activeWindow() != &window")
 
 dispatch = between(keys, "void Keys::dispatch", "void Keys::showHelpLayer")
 assert "chooseRow" not in between(dispatch, "case Action::PreviousChat:", "case Action::OpenChat:")
@@ -520,7 +554,7 @@ stock_launch = between(read("core/shortcuts.cpp"),
                        "bool Launch(std::vector<Command>", "rpl::producer<not_null<Request*>>")
 ordered(stock_launch, "if (Paused)", "return false;", "RequestHandler", "handler()")
 
-available = between(keys, "bool Available", "bool IsSearchableAction")
+available = between(keys, "bool Available", "bool RequiresModalInput")
 ordered(available, "case Action::OpenCalls:", "case Action::NewGroup:",
         "case Action::NewChannel:",
         "return target.controller && !target.controller->session().supportMode();")

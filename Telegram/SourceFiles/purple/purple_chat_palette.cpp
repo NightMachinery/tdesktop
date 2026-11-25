@@ -19,6 +19,7 @@
 #include "mtproto/sender.h"
 #include "purple/purple_config.h"
 #include "purple/purple_exact_search.h"
+#include "purple/purple_keys.h"
 #include "purple/purple_picker.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -307,6 +308,11 @@ void ShowChatPalette(not_null<Window::SessionController*> controller) {
 	controller->show(Box<PeerListBox>(std::move(palette), [=](not_null<PeerListBox*> box) {
 		raw->setBox(box);
 		StateChanges() | rpl::on_next([=] { box->closeBox(); }, box->lifetime());
+		ModalKeysEnabledChanges() | rpl::on_next([=](bool enabled) {
+			if (!enabled) {
+				box->closeBox();
+			}
+		}, box->lifetime());
 		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 	}));
 }

@@ -1,5 +1,6 @@
 #include "purple/purple_settings_collection_ui.h"
 
+#include "purple/purple_keys.h"
 #include "purple/purple_keys_mx.h"
 #include "purple/purple_settings_tree.h"
 #include "purple/purple_settings_focus.h"
@@ -228,7 +229,7 @@ protected:
 			else return false;
 			return true;
 		}
-		if (object != _list && object != _peerList) return false;
+		if (!ModalKeysEnabled() || (object != _list && object != _peerList)) return false;
 		const auto list = static_cast<QListWidget*>(object);
 		if (code == Qt::Key_J || code == Qt::Key_K) {
 			const auto delta = code == Qt::Key_J ? 1 : -1;

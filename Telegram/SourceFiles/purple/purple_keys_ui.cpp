@@ -1092,21 +1092,22 @@ protected:
 	void keyPressEvent(QKeyEvent *e) override {
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
 		const auto key = e->key();
+		const auto modal = ModalKeysEnabled();
 		if (key == Qt::Key_Escape
-			|| (key == Qt::Key_Q && !mods)
+			|| (modal && key == Qt::Key_Q && !mods)
 			|| (key == Qt::Key_G && mods == kCtrlMod)) {
 			closeLayer();
 			return;
 		} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
 			toggleTab();
 			return;
-		} else if ((key == Qt::Key_J || key == Qt::Key_Down) && !mods) {
+		} else if ((key == Qt::Key_Down || (modal && key == Qt::Key_J)) && !mods) {
 			_scroll->scrollToY(_scroll->scrollTop() + 48);
 			return;
-		} else if ((key == Qt::Key_K || key == Qt::Key_Up) && !mods) {
+		} else if ((key == Qt::Key_Up || (modal && key == Qt::Key_K)) && !mods) {
 			_scroll->scrollToY(std::max(0, _scroll->scrollTop() - 48));
 			return;
-		} else if (key == Qt::Key_Slash && !mods) {
+		} else if (modal && key == Qt::Key_Slash && !mods) {
 			if (!_showAll) {
 				toggleTab();
 			}
@@ -1198,7 +1199,9 @@ protected:
 
 		p.setFont(st::normalFont);
 		p.setPen(st::windowSubTextFg);
-		const auto leftHint = u"TAB switch view  ·  j/k scroll  ·  / filter  ·  q close"_q;
+		const auto leftHint = ModalKeysEnabled()
+			? u"TAB switch view  ·  j/k scroll  ·  / filter  ·  q close"_q
+			: u"TAB switch view  ·  ↑/↓ scroll  ·  ESC close"_q;
 		p.drawText(
 			QRect(rtl ? (width() / 2) : 20, height() - kFooterH, width() / 2 - 20, kFooterH),
 			(rtl ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter,
@@ -1355,7 +1358,7 @@ protected:
 		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
 		const auto key = e->key();
 		if (key == Qt::Key_Escape
-			|| (key == Qt::Key_Q && !mods)
+			|| (ModalKeysEnabled() && key == Qt::Key_Q && !mods)
 			|| (key == Qt::Key_G && mods == kCtrlMod)) {
 			closeLayer();
 			return;

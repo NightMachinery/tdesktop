@@ -839,6 +839,12 @@ docs/purple/upstream_hooks.md.
 
 "lng_purple_keys_settings" = "Modal keyboard shortcuts";
 "lng_purple_keys_settings_hint" = "Starts in Normal mode with a bottom modal status line. Press i to type, Esc or Ctrl+[ to return to Normal, SPC for leader, , or SPC m for localleader, ? for the cheatsheet, and M-x or SPC SPC for commands. Customize bindings in keys.edn.";
+"lng_purple_keys_mx_in_stock_mode_mac" = "Option+X opens commands with modal keys off";
+"lng_purple_keys_mx_in_stock_mode_other" = "Alt+X opens commands with modal keys off";
+"lng_purple_keys_toggle_modal_input" = "Toggle modal keyboard shortcuts";
+"lng_purple_keys_modal_input_on" = "Modal keyboard shortcuts on";
+"lng_purple_keys_modal_input_off" = "Modal keyboard shortcuts off";
+"lng_purple_keys_needs_normal" = "Requires Normal mode";
 "lng_purple_keys_normal" = "Normal mode";
 "lng_purple_keys_insert" = "Insert mode";
 "lng_purple_keys_backgrounds" = "Toggle chat backgrounds";

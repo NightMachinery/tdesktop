@@ -46,6 +46,7 @@
 #include <QtWidgets/QAbstractItemView>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QButtonGroup>
+#include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QCompleter>
 #include <QtWidgets/QHBoxLayout>
@@ -542,6 +543,24 @@ private:
 		_feedback->setProperty("secondary", true);
 		layout->addWidget(_inspector);
 		layout->addWidget(_feedback);
+		const auto stockMx = new QCheckBox(_browser);
+		MxShortcutInStockModeLabel() | rpl::on_next([=](const QString &label) {
+			stockMx->setText(label);
+			stockMx->setAccessibleName(label);
+		}, lifetime());
+		MxShortcutInStockModeValue() | rpl::on_next([=](bool enabled) {
+			const auto block = QSignalBlocker(stockMx);
+			stockMx->setChecked(enabled);
+		}, lifetime());
+		connect(stockMx, &QCheckBox::toggled, this, [this, stockMx](bool enabled) {
+			if (visibleContent()) {
+				SetMxShortcutInStockMode(enabled);
+			} else {
+				const auto block = QSignalBlocker(stockMx);
+				stockMx->setChecked(MxShortcutInStockMode());
+			}
+		});
+		layout->addWidget(stockMx);
 		const auto footer = new CustomizeLook::Actions(_browser);
 		for (const auto button : { _edit, _reset, _undo, _reviewButton, _help }) {
 			footer->append(button);
@@ -905,6 +924,7 @@ private:
 		const auto key = event->key();
 		const auto enter = key == Qt::Key_Return || key == Qt::Key_Enter;
 		const auto cancel = key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod);
+		const auto modal = ModalKeysEnabled();
 		if (_capture && _pages->currentWidget() == _sheetPage && object == _record) {
 			if (key != Qt::Key_Shift && key != Qt::Key_Control && key != Qt::Key_Meta
 				&& key != Qt::Key_Alt && key != Qt::Key_AltGr && key != Qt::Key_unknown
@@ -938,7 +958,7 @@ private:
 			}
 		}
 		if (_pages->currentWidget() == _sheetPage) {
-			if (const auto list = qobject_cast<QListWidget*>(object); list && !mods
+			if (const auto list = qobject_cast<QListWidget*>(object); modal && list && !mods
 				&& (key == Qt::Key_J || key == Qt::Key_K)) {
 				list->setCurrentRow(std::clamp(list->currentRow() + (key == Qt::Key_J ? 1 : -1),
 					0, std::max(0, list->count() - 1)));
@@ -949,7 +969,7 @@ private:
 					showReviewPage(key == Qt::Key_BracketLeft ? -1 : 1);
 					return true;
 				}
-				if (key == Qt::Key_J || key == Qt::Key_K) {
+				if (modal && (key == Qt::Key_J || key == Qt::Key_K)) {
 					_reviewBody->verticalScrollBar()->triggerAction(key == Qt::Key_J
 						? QAbstractSlider::SliderSingleStepAdd : QAbstractSlider::SliderSingleStepSub);
 					return true;
@@ -971,12 +991,12 @@ private:
 			return true;
 		}
 		if (object != _tree && object != this) return false;
-		if (((key == Qt::Key_J || key == Qt::Key_Down) && !mods)
+		if (((key == Qt::Key_Down || (modal && key == Qt::Key_J)) && !mods)
 			|| (key == Qt::Key_N && mods == kCtrlMod)) selectSibling(1);
-		else if (((key == Qt::Key_K || key == Qt::Key_Up) && !mods)
+		else if (((key == Qt::Key_Up || (modal && key == Qt::Key_K)) && !mods)
 			|| (key == Qt::Key_P && mods == kCtrlMod)) selectSibling(-1);
-		else if (key == Qt::Key_H && !mods) traverse(false);
-		else if (key == Qt::Key_L && !mods) traverse(true);
+		else if (modal && key == Qt::Key_H && !mods) traverse(false);
+		else if (modal && key == Qt::Key_L && !mods) traverse(true);
 		else if ((key == Qt::Key_Left || key == Qt::Key_Right) && !mods) {
 			traverse((key == Qt::Key_Right) == (layoutDirection() != Qt::RightToLeft));
 		} else if (key == Qt::Key_Tab && !mods) {
@@ -986,6 +1006,7 @@ private:
 				_inspector->setFocus();
 			}
 		} else if (enter && !mods && !event->isAutoRepeat()) activateRow();
+		else if (!modal) return false;
 		else if (key == Qt::Key_Slash && !mods) startFilter();
 		else if (key == Qt::Key_Question) showHelp();
 		else if (key == Qt::Key_R && !mods && !event->isAutoRepeat()) resetSelected();
@@ -1685,12 +1706,17 @@ private:
 		addSheetWidget(title);
 		const auto row = selected();
 		if (row && !row->help.isEmpty()) addSheetWidget(HelpLabel(_sheet, row->help));
-		addSheetWidget(HelpLabel(_sheet, u"j / k Move · h / l Fold or enter · / Filter · Return Edit\n"
-			"t Toggle · + / − Step · r Reset · u Undo · d Review · y Copy TOML path\n"
-			"A Switch account · F6 Change panel · F8 Privacy screen outside text fields · Esc Back"_q));
-		addSheetWidget(HelpLabel(_sheet, u"Forms · Ctrl+Return Stage. Return inserts a newline in multiline fields.\n"
-			"Collections · a Add · Shift+D Duplicate · x Remove · Shift+J/K Reorder · u Undo\n"
-			"Chat picker · / Search · Space Add the selected chat"_q));
+		addSheetWidget(HelpLabel(_sheet, ModalKeysEnabled()
+			? u"j / k Move · h / l Fold or enter · / Filter · Return Edit\n"
+				"t Toggle · + / − Step · r Reset · u Undo · d Review · y Copy TOML path\n"
+				"A Switch account · F6 Change panel · F8 Privacy screen outside text fields · Esc Back"_q
+			: u"Arrows Move or fold · Return Edit · F6 Change panel · Esc Back\n"
+				"F8 Privacy screen outside text fields"_q));
+		addSheetWidget(HelpLabel(_sheet, u"Forms · Ctrl+Return Stage. Return inserts a newline in multiline fields."_q));
+		if (ModalKeysEnabled()) {
+			addSheetWidget(HelpLabel(_sheet, u"Collections · a Add · Shift+D Duplicate · x Remove · Shift+J/K Reorder · u Undo\n"
+				"Chat picker · / Search · Space Add the selected chat"_q));
+		}
 		addSheetWidget(HelpLabel(_sheet, u"Review · Effects shows what changes. Lines shows the file diff. "
 			"Use [ / ] to page through Lines while it has focus. Apply changes writes this draft to one file."_q));
 		const auto close = Button(_sheet, u"Back"_q);
