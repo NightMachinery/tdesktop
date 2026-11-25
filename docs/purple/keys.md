@@ -129,7 +129,11 @@ with at most four strokes per chord:
   - In the chat list (`:chats`): `, p` preview, `, m` chat menu, `, a` archive,
     `, f` / `, F` next/previous folder.
   - In Music (`:music`): `, p` play/pause, `, s` stop, `, n` / `, N` next/prev
-    track, `, f` / `, b` seek forward/back, `, l` playlists.
+    track, `, f` / `, b` seek forward/back, `, l` playlists. The library and
+    the chat Music dialog both apply the current `:normal`, `:music` and
+    `:localleader` bindings. The bare Music defaults for `m`, `v`, `V`,
+    `n` and `N` yield to overlapping `:normal` bindings. Set a bare key
+    to `nil` in `:normal` to disable its Music default.
 - **Window hints (`f` / `F`):** `f` labels visible chats, topics, folders,
   supported links, media, and controls. A message label starts a reply when
   replies are allowed. The topmost Purple or Telegram layer owns the hints

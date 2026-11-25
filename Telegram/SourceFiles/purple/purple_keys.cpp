@@ -124,6 +124,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <type_traits>
 
 #ifdef Q_OS_MAC
@@ -910,6 +911,7 @@ struct KeymapData {
 	std::vector<Binding> bindings;
 	std::vector<Chord> localleaders;
 	std::map<std::pair<MapKind, Chord>, QString> labels;
+	std::set<Chord> unboundNormal;
 	QSet<Action> keyless;
 	QSet<int> normalChatListOverrides;
 	QString userPath;
@@ -1341,6 +1343,9 @@ bool ParseEdnOverlay(
 				data.normalChatListOverrides.insert(chord.front());
 			}
 			if (edn_type(val) == EDN_TYPE_NIL) {
+				if (isUserOverlay && *mapKind == MapKind::Normal) {
+					data.unboundNormal.insert(chord);
+				}
 				if (current != data.bindings.end()) {
 					data.bindings.erase(current);
 				}
@@ -1525,6 +1530,7 @@ struct Target {
 	std::optional<MapKind> contextMap;
 	QString contextName;
 	Window::SessionController *controller = nullptr;
+	ChatMusicKeyTarget *musicDialog = nullptr;
 };
 
 Target FindTarget(
@@ -1901,6 +1907,22 @@ std::optional<MusicTrackAction> MusicAction(Action action) {
 bool Available(Action action, const Target &target) {
 	if (MusicAction(action)) return target.contextMap == MapKind::Music;
 	if (target.contextMap == MapKind::Music && MusicNavigation(action)) return true;
+	if (target.musicDialog) {
+		switch (action) {
+		case Action::Search:
+		case Action::EnterInsertMode:
+		case Action::MusicToggleTiles:
+		case Action::OpenPlaylists: return true;
+		case Action::TogglePlayback:
+		case Action::StopPlayback:
+		case Action::PreviousTrack:
+		case Action::NextTrack:
+		case Action::SeekBackward:
+		case Action::SeekForward:
+			return HasPlaybackInSession(&target.controller->session());
+		default: return false;
+		}
+	}
 	switch (action) {
 	case Action::MusicFirstTrack:
 	case Action::MusicMarkTrack:
@@ -2102,13 +2124,21 @@ std::vector<EffectiveBinding> EffectiveBindings(
 		}
 	}
 	if (contextMap == MapKind::Music) {
-		result.push_back({ Action::MusicMarkTrack, { Qt::Key_M }, MapKind::Music, false });
-		result.push_back({ Action::MusicRangeMark, { Qt::Key_V }, MapKind::Music, false });
-		result.push_back({ Action::MusicMarkPage,
-			{ QKeyCombination(Qt::ShiftModifier, Qt::Key_V).toCombined() }, MapKind::Music, false });
-		result.push_back({ Action::NextTrack, { Qt::Key_N }, MapKind::Music, false });
-		result.push_back({ Action::PreviousTrack,
-			{ QKeyCombination(Qt::ShiftModifier, Qt::Key_N).toCombined() }, MapKind::Music, false });
+		const auto addDefault = [&](Action action, Chord keys) {
+			if (!km.unboundNormal.contains(keys)
+				&& !ranges::any_of(result, [&](const EffectiveBinding &binding) {
+					return StartsWith(binding.keys, keys) || StartsWith(keys, binding.keys);
+				})) {
+				result.push_back({ action, std::move(keys), MapKind::Music, false });
+			}
+		};
+		addDefault(Action::MusicMarkTrack, { Qt::Key_M });
+		addDefault(Action::MusicRangeMark, { Qt::Key_V });
+		addDefault(Action::MusicMarkPage,
+			{ QKeyCombination(Qt::ShiftModifier, Qt::Key_V).toCombined() });
+		addDefault(Action::NextTrack, { Qt::Key_N });
+		addDefault(Action::PreviousTrack,
+			{ QKeyCombination(Qt::ShiftModifier, Qt::Key_N).toCombined() });
 	}
 	return result;
 }
@@ -2841,19 +2871,27 @@ void Keys::raiseChrome() {
 Target Keys::currentTarget(QObject *receiver, bool allowUnmapped) const {
 	const auto focus = QApplication::focusWidget();
 	const auto current = owner();
-	auto target = (focus
-			&& focus->isVisible()
-			&& focus->isEnabled()
-			&& focus->window() == _window
-			&& receiver == focus
-			&& current
-			&& !_window->controller().isLayerShown())
-		? FindTarget(current, focus, allowUnmapped)
-		: Target();
-	if (target.focus && !target.list) {
-		target.chatCursorAvailable = (liveChatCursor(current) != nullptr);
+	const auto eligible = focus && focus->isVisible() && focus->isEnabled()
+		&& focus->window() == _window && receiver == focus && current;
+	if (!eligible) {
+		return {};
 	}
-	return target;
+	if (!_window->controller().isLayerShown()) {
+		auto target = FindTarget(current, focus, allowUnmapped);
+		if (target.focus && !target.list) {
+			target.chatCursorAvailable = (liveChatCursor(current) != nullptr);
+		}
+		return target;
+	}
+	const auto dialog = Enabled() ? FindChatMusicKeyTarget(current, focus) : nullptr;
+	return dialog ? Target{
+		.focus = focus,
+		.paneLabel = u"Music"_q,
+		.contextMap = MapKind::Music,
+		.contextName = u"music"_q,
+		.controller = current,
+		.musicDialog = dialog,
+	} : Target();
 }
 
 Dialogs::InnerWidget *Keys::liveChatCursor(Window::SessionController *controller) const {
@@ -3899,6 +3937,7 @@ KeyUse Keys::classify(
 		const QKeyEvent &event,
 		int key,
 		const Target &target) const {
+	const auto normal = _normal || target.musicDialog;
 	const auto mods = event.modifiers() & ~Qt::KeypadModifier;
 	const auto stroke = KeyStroke(event, key);
 	const auto pending = !_prefix.empty() || _count > 0 || _inspect || _hints.active() || _swallowNext;
@@ -3907,14 +3946,14 @@ KeyUse Keys::classify(
 		return KeyUse::SwallowEmptyLocal;
 	}
 	if (((key == Qt::Key_Escape && !mods) || stroke == kCtrlG)
-		&& (_normal || pending || target.focus)) {
+		&& (normal || pending || target.focus)) {
 		if (pending) {
 			return KeyUse::Cancel;
 		}
-		if (!_normal && target.focus) {
+		if (!normal && target.focus) {
 			return KeyUse::ExitInsertOrBackOut;
 		}
-		if (key == Qt::Key_Escape && _window->isFullScreen()) {
+		if (key == Qt::Key_Escape && !target.musicDialog && _window->isFullScreen()) {
 			return KeyUse::FullscreenBack;
 		}
 		return KeyUse::Pass;
@@ -3937,7 +3976,7 @@ KeyUse Keys::classify(
 		return KeyUse::PrefixBackspace;
 	}
 	// Numeric repeat count digits in Normal mode (1-9 start count, 0 continues it).
-	if (_normal && !_inspect && _prefix.empty() && !mods
+	if (normal && !_inspect && _prefix.empty() && !mods
 			&& ((key >= Qt::Key_1 && key <= Qt::Key_9)
 				|| (_count > 0 && key == Qt::Key_0))) {
 		return KeyUse::CountDigit;
@@ -3947,7 +3986,7 @@ KeyUse Keys::classify(
 		// before falling through to Telegram stock shortcuts.
 		const auto effective = !_frozenEffective.empty()
 			? _frozenEffective
-			: EffectiveBindings(_normal, target.contextMap);
+			: EffectiveBindings(normal, target.contextMap);
 		const auto matchesModal = ranges::any_of(effective, [&](const EffectiveBinding &b) {
 			return b.keys.size() > _prefix.size()
 				&& b.keys[_prefix.size()] == stroke
@@ -3968,13 +4007,13 @@ KeyUse Keys::classify(
 
 	const auto effective = !_frozenEffective.empty()
 		? _frozenEffective
-		: EffectiveBindings(_normal, target.contextMap);
+		: EffectiveBindings(normal, target.contextMap);
 	const auto matchesEffective = ranges::any_of(effective, [&](const EffectiveBinding &b) {
 		return b.keys.size() > _prefix.size()
 			&& b.keys[_prefix.size()] == stroke
 			&& StartsWith(b.keys, _prefix);
 	});
-	const auto matchesLocalleader = _normal && ranges::any_of(Keymap().localleaders, [&](const Chord &ll) {
+	const auto matchesLocalleader = normal && ranges::any_of(Keymap().localleaders, [&](const Chord &ll) {
 		return ll.size() > _prefix.size()
 			&& ll[_prefix.size()] == stroke
 			&& StartsWith(ll, _prefix);
@@ -3982,10 +4021,10 @@ KeyUse Keys::classify(
 	const auto printable = key >= Qt::Key_Space && key < Qt::Key_Escape;
 	const auto plainOrShift = (mods == Qt::NoModifier || mods == Qt::ShiftModifier);
 	if (matchesEffective || matchesLocalleader
-			|| ((_inspect || (_normal && pending)) && plainOrShift && printable)) {
+			|| ((_inspect || (normal && pending)) && plainOrShift && printable)) {
 		return KeyUse::Capture;
 	}
-	if (!_normal) {
+	if (!normal) {
 		return KeyUse::Pass;
 	}
 	const auto normalTextMods = (mods == Qt::NoModifier
@@ -4178,12 +4217,12 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 
 void Keys::repeat(const QKeyEvent &event, QObject *receiver) {
 	const auto action = _motion.action();
-	if (!action || !Enabled() || !_normal || receiver == _preeditInput
+	if (!action || !Enabled() || receiver == _preeditInput
 		|| !_prefix.empty() || _count || _inspect || _swallowNext || _hints.active()) {
 		return;
 	}
 	const auto target = currentTarget(receiver);
-	if (!target.focus || !Available(*action, target)) {
+	if (!target.focus || !(_normal || target.musicDialog) || !Available(*action, target)) {
 		_motion.cancel();
 		cancelScroll();
 	} else if (_motion.next(HoldStroke(event), MotionContext(target, *action))) {
@@ -4343,8 +4382,13 @@ bool Keys::swallowNativeRepeat(int physical) const {
 		return !_layerMotion.action() || !focus || layer->window() != _window
 			|| (focus != layer && !layer->isAncestorOf(focus));
 	}
-	return !_normal || !Enabled() || _window->controller().isLayerShown()
-		|| !_held.contains(physical) || !_motion.action();
+	if (!Enabled() || !_held.contains(physical) || !_motion.action()) {
+		return true;
+	}
+	if (_window->controller().isLayerShown()) {
+		return !currentTarget(QApplication::focusWidget()).musicDialog;
+	}
+	return !_normal;
 }
 #endif // Q_OS_MAC
 
@@ -4356,7 +4400,7 @@ void Keys::showWhichKey() {
 	}
 	const auto &effective = !_frozenEffective.empty()
 		? _frozenEffective
-		: EffectiveBindings(_normal, target.contextMap);
+		: EffectiveBindings(_normal || target.musicDialog, target.contextMap);
 
 	auto groups = std::vector<ModalUi::WhichKeyEntry>();
 	auto leaves = std::vector<ModalUi::WhichKeyEntry>();
@@ -4484,9 +4528,10 @@ void Keys::showWhichKey() {
 }
 
 void Keys::stroke(KeyRepeat::Stroke press, const Target &target) {
+	const auto normal = _normal || target.musicDialog;
 	if (_prefix.empty()) {
 		// Freeze effective bindings at stroke 1 so mid-chord focus/state shifts cannot change meaning.
-		_frozenEffective = EffectiveBindings(_normal, target.contextMap);
+		_frozenEffective = EffectiveBindings(normal, target.contextMap);
 		if (!_feedbackError && !_feedbackText.isEmpty()) {
 			_feedbackText.clear();
 			_feedbackTimer.stop();
@@ -4497,7 +4542,7 @@ void Keys::stroke(KeyRepeat::Stroke press, const Target &target) {
 
 	// If the user hit an exact localleader chord where no context bindings exist,
 	// warn cleanly and swallow the next keystroke so no stray Normal command fires.
-	if (_normal && !_inspect && IsExactLocalleader(_prefix)) {
+	if (normal && !_inspect && IsExactLocalleader(_prefix)) {
 		const auto hasLocal = ranges::any_of(_frozenEffective, [&](const EffectiveBinding &b) {
 			return b.viaLocalleader && StartsWith(b.keys, _prefix)
 				&& Available(b.action, target);
@@ -4524,7 +4569,7 @@ void Keys::stroke(KeyRepeat::Stroke press, const Target &target) {
 		const auto captured = _prefix;
 		const auto count = std::max(1, _count);
 		const auto policy = FindCommand(action).repeat;
-		const auto arm = KeyRepeat::CanArm(policy, _normal, captured.size(), inspect);
+		const auto arm = KeyRepeat::CanArm(policy, normal, captured.size(), inspect);
 		const auto guard = QPointer(this);
 		const auto opensCursor = !inspect && target.chatCursorAvailable
 			&& (action == Action::OpenChat || action == Action::PreviewChat);
@@ -4546,7 +4591,7 @@ void Keys::stroke(KeyRepeat::Stroke press, const Target &target) {
 		}
 		return;
 	}
-	if (!more && _normal) {
+	if (!more && normal) {
 		more = ranges::any_of(Keymap().localleaders, [&](const Chord &ll) {
 			return ll.size() > _prefix.size() && StartsWith(ll, _prefix);
 		});
@@ -4577,12 +4622,22 @@ void Keys::dispatch(Action action, const Target &target, int count, ScrollPress 
 		? std::clamp(count, 1, kMaxCount)
 		: 1;
 	if (target.contextMap == MapKind::Music) {
+		const auto dialog = target.musicDialog
+			? FindChatMusicKeyTarget(current, target.focus.data())
+			: nullptr;
+		if (target.musicDialog && dialog != target.musicDialog) return;
 		if (const auto trackAction = MusicAction(action)) {
-			ActOnMusic(current, target.focus, *trackAction);
+			if (dialog) dialog->act(*trackAction);
+			else ActOnMusic(current, target.focus, *trackAction);
 			return;
 		}
 		if (const auto navigation = MusicNavigation(action)) {
-			NavigateMusic(current, target.focus, *navigation, repeat);
+			if (dialog) dialog->navigate(*navigation, repeat);
+			else NavigateMusic(current, target.focus, *navigation, repeat);
+			return;
+		}
+		if (dialog && (action == Action::Search || action == Action::EnterInsertMode)) {
+			dialog->focusFilter();
 			return;
 		}
 	}
@@ -6002,44 +6057,34 @@ bool ModalKeysEnabled() {
 	return Enabled();
 }
 
-MusicShortcutHints MusicEffectiveShortcuts(bool chat) {
-	if (!Enabled()) return {};
-	if (chat) {
-		return {
-			.previous = { u"N"_q },
-			.togglePlayback = { u","_q, u"p"_q },
-			.next = { u"n"_q },
-			.view = { u","_q, u"t"_q },
-			.play = { u"RET"_q },
-			.queue = { u","_q, u"q"_q },
-			.add = { u","_q, u"a"_q },
-			.forward = { u","_q, u"F"_q },
-			.more = { u","_q, u"."_q },
-			.clear = { u"Esc"_q },
-			.filter = { u"/"_q },
-		};
-	}
-	const auto bindings = EffectiveBindings(true, MapKind::Music);
-	const auto shortest = [&](Action action) {
-		const auto chords = ChordsForAction(action, bindings);
-		const auto best = std::ranges::min_element(chords, {}, [](const QStringList &keys) {
-			return keys.size();
-		});
-		return best == chords.end() ? QStringList() : *best;
+MusicShortcutHints MusicEffectiveShortcuts() {
+	const auto caps = [](std::optional<Action> action) -> MusicKeyHint {
+		return rpl::single(rpl::empty) | rpl::then(rpl::merge(
+			KeymapChanges.events(),
+			EnabledChanges.events() | rpl::to_empty
+		)) | rpl::map([=] {
+			if (!Enabled()) return QStringList();
+			if (!action) return QStringList{ u"Esc"_q };
+			const auto chords = ChordsForAction(*action, EffectiveBindings(true, MapKind::Music));
+			const auto best = std::ranges::min_element(chords, {}, [](const QStringList &keys) {
+				return keys.size();
+			});
+			return best == chords.end() ? QStringList() : *best;
+		}) | rpl::distinct_until_changed();
 	};
 	return {
-		.previous = shortest(Action::PreviousTrack),
-		.togglePlayback = shortest(Action::TogglePlayback),
-		.next = shortest(Action::NextTrack),
-		.view = shortest(Action::MusicToggleTiles),
-		.playlists = shortest(Action::OpenPlaylists),
-		.play = shortest(Action::OpenChat),
-		.queue = shortest(Action::MusicQueueTracks),
-		.add = shortest(Action::MusicAddToPlaylist),
-		.forward = shortest(Action::MusicForwardTracks),
-		.more = shortest(Action::MusicTrackMenu),
-		.clear = { u"Esc"_q },
-		.filter = shortest(Action::Search),
+		.previous = caps(Action::PreviousTrack),
+		.togglePlayback = caps(Action::TogglePlayback),
+		.next = caps(Action::NextTrack),
+		.view = caps(Action::MusicToggleTiles),
+		.playlists = caps(Action::OpenPlaylists),
+		.play = caps(Action::OpenChat),
+		.queue = caps(Action::MusicQueueTracks),
+		.add = caps(Action::MusicAddToPlaylist),
+		.forward = caps(Action::MusicForwardTracks),
+		.more = caps(Action::MusicTrackMenu),
+		.clear = caps(std::nullopt),
+		.filter = caps(Action::Search),
 	};
 }
 

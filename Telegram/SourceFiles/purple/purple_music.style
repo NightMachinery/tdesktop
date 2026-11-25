@@ -22,6 +22,9 @@ purpleMusicCoverRadius: 6px;
 purpleMusicTrackInset: 8px;
 purpleMusicTrackGap: 16px;
 purpleMusicBadgeSize: 18px;
+purpleMusicTileCursor: 2px;
+purpleMusicButtonInset: 10px;
+purpleMusicSkipGlyphSize: 18px;
 purpleMusicTileMin: 150px;
 purpleMusicTileMax: 180px;
 purpleMusicTileNarrowMax: 224px;
@@ -31,6 +34,7 @@ purpleMusicNowCover: 120px;
 purpleMusicNowCoverCompact: 72px;
 purpleMusicNowCompactWidth: 530px;
 purpleMusicNowPadding: 16px;
+purpleMusicNowTransportGap: 8px;
 purpleMusicNowMargin: margins(24px, 0px, 24px, 12px);
 purpleMusicNowTitle: font(27px semibold);
 purpleMusicNowEyebrow: font(12px semibold);
@@ -38,7 +42,7 @@ purpleMusicNowEyebrow: font(12px semibold);
 purpleMusicPlayButton: MediaPlayerPlayButton(mediaPlayerPlayButton) {
 	size: size(36px, 36px);
 	iconPosition: point(6px, 6px);
-	color: windowFg;
+	color: activeButtonFg;
 	rippleAreaPosition: point(0px, 0px);
 	rippleAreaSize: 36px;
 	ripple: RippleAnimation(defaultRippleAnimation) {
@@ -46,14 +50,30 @@ purpleMusicPlayButton: MediaPlayerPlayButton(mediaPlayerPlayButton) {
 	}
 }
 
+purpleMusicSkipButton: IconButton(mediaPlayerNextButton) {
+	icon: icon {};
+	iconOver: icon {};
+}
+
 purpleMusicProgress: MediaSlider(mediaPlayerPanelPlayback) {
 	activeFg: windowActiveTextFg;
 	activeFgOver: windowActiveTextFg;
+	inactiveFgDisabled: windowFg;
 }
 
 purpleMusicTitle: FlatLabel(boxTitle) {
 	style: TextStyle(semiboldTextStyle) {
 		font: font(22px semibold);
+	}
+}
+
+purpleMusicViewOption: RoundButton(defaultLightButton) {
+	width: -20px;
+	textBg: windowBgOver;
+	textBgOver: windowBgOver;
+	radius: purpleMusicCoverRadius;
+	ripple: RippleAnimation(defaultRippleAnimation) {
+		color: windowBgRipple;
 	}
 }
 
@@ -86,4 +106,9 @@ purpleMusicBack: IconButton(defaultIconButton) {
 	height: 36px;
 	rippleAreaSize: 32px;
 	rippleAreaPosition: point(2px, 2px);
+}
+
+purpleMusicBackRtl: IconButton(purpleMusicBack) {
+	icon: icon {{ "box_button_back-flip_horizontal", boxTitleCloseFg }};
+	iconOver: icon {{ "box_button_back-flip_horizontal", boxTitleCloseFgOver }};
 }

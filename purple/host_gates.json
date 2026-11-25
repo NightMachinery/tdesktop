@@ -55,6 +55,7 @@
       "sync-auto-service": "Telegram/SourceFiles/purple/tests/sync_auto_service_cases.cpp",
       "music-listening": "Telegram/SourceFiles/purple/tests/music_listening_cases.cpp",
       "music-diagnostics": "Telegram/SourceFiles/purple/tests/music_diagnostics_cases.cpp",
+      "music-progress": "Telegram/SourceFiles/purple/tests/music_progress_cases.cpp",
       "translation-exclusion": "Telegram/SourceFiles/purple/tests/translation_exclusion_cases.cpp",
       "playlists-store": "Telegram/SourceFiles/purple/tests/playlists_store_cases.cpp",
       "playlists-service": "Telegram/SourceFiles/purple/tests/playlists_service_cases.cpp",
@@ -1139,6 +1140,23 @@
       "fixtures": [
         "Telegram/SourceFiles/purple/tests/music_listening_cases.cpp"
       ]
+    },
+    {
+      "name": "cases-music-progress",
+      "driver": "purple/test_cases.py",
+      "compiles": true,
+      "args": [
+        "--build-dir",
+        "{build}",
+        "--output-dir",
+        "{out}",
+        "--case",
+        "music-progress"
+      ],
+      "fixtures": [
+        "Telegram/SourceFiles/purple/tests/music_progress_cases.cpp"
+      ],
+      "coverage": "Native Music rail paint and click mapping at both ends in LTR and RTL."
     },
     {
       "name": "cases-music-diagnostics",

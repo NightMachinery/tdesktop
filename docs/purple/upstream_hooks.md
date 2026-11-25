@@ -2045,6 +2045,9 @@ worker's pending database transactions. The existing playlist menu hook in
   closes. The regular layout keeps its saved sidebar preferences.
 - `mainwidget.cpp` and `mainwidget.h` let Purple's Music section take over the
   song toolbar and its layout space when its own transport is active.
+- `ui/widgets/continuous_sliders.cpp` and `.h` expose an opt-in reversed
+  horizontal direction for painting and seeking. The Music progress slider
+  selects it when the interface is right to left.
 - `boxes/peer_list_box.cpp` compares raw queries for Purple's chat palette so
   punctuation, handles and international phone numbers reach its exact matcher.
   The palette opens at the compact picker height.

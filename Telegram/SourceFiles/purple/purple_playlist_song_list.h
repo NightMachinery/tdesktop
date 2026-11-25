@@ -103,6 +103,7 @@ public:
 	void setKeyHandler(Fn<bool(QKeyEvent*)> handler);
 	void setContextActions(Fn<void(not_null<Ui::PopupMenu*>, uint64_t)> actions);
 	void setArtworkSession(not_null<Main::Session*> session);
+	void reserveTileScrollbarSpace();
 	void setTiles(bool tiles);
 	bool cancelRangeMark();
 	void showActions();

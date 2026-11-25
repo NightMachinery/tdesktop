@@ -22,11 +22,47 @@
 #include "styles/style_purple_music.h"
 
 #include <QtGui/QFontMetrics>
+#include <QtGui/QIcon>
+#include <QtWidgets/QStyle>
+
+#include <cmath>
 
 namespace Purple {
 namespace {
 
 using Type = AudioMsgId::Type;
+
+class SkipButton final : public Ui::IconButton {
+public:
+	SkipButton(QWidget *parent, QStyle::StandardPixmap glyph);
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
+
+private:
+	const QIcon _glyph;
+};
+
+SkipButton::SkipButton(QWidget *parent, QStyle::StandardPixmap glyph)
+: Ui::IconButton(parent, st::purpleMusicSkipButton)
+, _glyph(style()->standardIcon(glyph)) {
+}
+
+void SkipButton::paintEvent(QPaintEvent *e) {
+	Ui::IconButton::paintEvent(e);
+	const auto side = st::purpleMusicSkipGlyphSize;
+	auto mask = _glyph.pixmap(QSize(side, side), devicePixelRatioF());
+	if (mask.isNull()) return;
+	{
+		auto p = QPainter(&mask);
+		p.setCompositionMode(QPainter::CompositionMode_SourceIn);
+		p.fillRect(QRectF(QPointF(), mask.deviceIndependentSize()),
+			isEnabled() ? st::windowActiveTextFg->c : st::windowSubTextFg->c);
+	}
+	auto p = QPainter(this);
+	const auto size = mask.deviceIndependentSize();
+	p.drawPixmap(QPointF((width() - size.width()) / 2, (height() - size.height()) / 2), mask);
+}
 
 class NowPlaying final : public Ui::RpWidget {
 public:
@@ -46,6 +82,7 @@ private:
 	[[nodiscard]] int transportWidth() const;
 	[[nodiscard]] int transportHeight() const;
 	void placeTransport(int left, int top, int width);
+	void updateProgressContrast();
 
 	const not_null<Ui::MediaSliderWheelless*> _progress;
 	const not_null<Ui::FlatLabel*> _time;
@@ -67,6 +104,9 @@ NowPlaying::NowPlaying(
 , _progress(Ui::CreateChild<Ui::MediaSliderWheelless>(
 	this, st::purpleMusicProgress))
 , _time(Ui::CreateChild<Ui::FlatLabel>(this, QString(), st::boxLabel)) {
+	using Direction = Ui::ContinuousSlider::Direction;
+	_progress->setDirection(style::RightToLeft()
+		? Direction::HorizontalReversed : Direction::Horizontal);
 	_progress->setAccessibleName(tr::lng_purple_music_playback_position(tr::now));
 	_progress->setChangeProgressCallback([=, seek = std::move(actions.startSeeking)](double) {
 		if (seek && _state.active && !_state.seeking) seek();
@@ -74,24 +114,28 @@ NowPlaying::NowPlaying(
 	_progress->setChangeFinishedCallback([=, seek = std::move(actions.finishSeeking)](double progress) {
 		if (seek && _state.active) seek(progress);
 	});
+	style::PaletteChanged() | rpl::on_next([=] { updateProgressContrast(); }, lifetime());
+	updateProgressContrast();
 	if (actions.toggle) {
-		_previous = Ui::CreateChild<Ui::IconButton>(this, st::mediaPlayerPreviousButton);
+		_previous = Ui::CreateChild<SkipButton>(this, QStyle::SP_MediaSkipBackward);
 		_play = Ui::CreateChild<Media::Player::PlayButton>(this, st::purpleMusicPlayButton);
-		_next = Ui::CreateChild<Ui::IconButton>(this, st::mediaPlayerNextButton);
+		_next = Ui::CreateChild<SkipButton>(this, QStyle::SP_MediaSkipForward);
 		_previous->setAccessibleName(tr::lng_shortcuts_media_previous(tr::now));
 		_play->setAccessibleName(tr::lng_keys_legend_media_play(tr::now));
 		_next->setAccessibleName(tr::lng_shortcuts_media_next(tr::now));
-		_previous->setAccessibleDescription(keys.previous.join(u' '));
-		_play->setAccessibleDescription(keys.togglePlayback.join(u' '));
-		_next->setAccessibleDescription(keys.next.join(u' '));
 		_previous->setClickedCallback(std::move(actions.previous));
 		_play->setClickedCallback(std::move(actions.toggle));
 		_next->setClickedCallback(std::move(actions.next));
 		_hints = {
-			MakeMusicKeyHint(this, keys.previous).release(),
-			MakeMusicKeyHint(this, keys.togglePlayback).release(),
-			MakeMusicKeyHint(this, keys.next).release(),
+			MakeMusicKeyHint(this, keys.previous, _previous).release(),
+			MakeMusicKeyHint(this, keys.togglePlayback, _play).release(),
+			MakeMusicKeyHint(this, keys.next, _next).release(),
 		};
+		for (const auto hint : _hints) {
+			hint->widthValue() | rpl::skip(1) | rpl::on_next([=] {
+				resizeToWidth(width());
+			}, lifetime());
+		}
 	}
 }
 
@@ -144,20 +188,50 @@ int NowPlaying::resizeGetHeight(int width) {
 	const auto compactMode = compact(width);
 	const auto metadataHeight = st::purpleMusicNowEyebrow->height
 		+ st::purpleMusicNowTitle->height + st::normalFont->height;
+	const auto transportTop = metadataHeight + (_play ? st::purpleMusicNowTransportGap : 0);
 	const auto progressTop = compactMode
-		? 2 * padding + std::max(side, metadataHeight + transportHeight())
+		? 2 * padding + std::max(side, transportTop + transportHeight())
 		: padding + side - st::normalFont->height;
 	_time->resizeToNaturalWidth(width);
 	const auto progressHeight = std::max(_time->height(), st::normalFont->height);
 	_time->moveToRight(padding, progressTop, width);
 	_progress->setGeometryToLeft(compactMode ? padding : left, progressTop,
 		std::max(1, width - (compactMode ? padding : left) - _time->width() - 2 * padding),
-		progressHeight);
+		progressHeight, width);
 	if (_play) {
 		placeTransport(compactMode ? left : width - padding - transportWidth(),
-			compactMode ? padding + metadataHeight : padding + st::purpleMusicActionGap, width);
+			compactMode ? padding + transportTop : padding + st::purpleMusicActionGap, width);
 	}
 	return std::max(side + 2 * padding, progressTop + progressHeight + padding);
+}
+
+void NowPlaying::updateProgressContrast() {
+	const auto surface = st::windowBgOver->c;
+	auto tinted = surface;
+	if (_tint.isValid()) {
+		auto ink = _tint;
+		ink.setAlpha(255);
+		tinted = anim::color(surface, ink, _tint.alphaF());
+	}
+	const auto preferred = anim::color(st::windowSubTextFg, st::windowFg, .15);
+	const auto base = MusicRelativeLuminance(surface);
+	const auto lightSurface = base > .18;
+	const auto rail = [&] {
+		if (!lightSurface) {
+			return MusicReadableColor(MusicReadableColor(preferred, surface, 3.), tinted, 3.);
+		}
+		const auto darkest = std::min(base, MusicRelativeLuminance(tinted));
+		const auto luminance = (darkest + .05) / 3. - .05;
+		const auto gray = 1.055 * std::pow(luminance, 1. / 2.4) - .055;
+		const auto tone = int(gray * 255.);
+		return QColor(tone, tone, tone);
+	}();
+	_progress->setColorOverrides({
+		.activeFg = lightSurface
+			? std::optional(anim::color(st::windowActiveTextFg, st::windowFg, .12))
+			: std::nullopt,
+		.inactiveFg = rail,
+	});
 }
 
 void NowPlaying::setState(MusicNowPlayingState state) {
@@ -172,6 +246,7 @@ void NowPlaying::setState(MusicNowPlayingState state) {
 				1, 1, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).pixelColor(0, 0);
 			_tint = QColor(sample.red() & 0xe0, sample.green() & 0xe0, sample.blue() & 0xe0, 26);
 		}
+		updateProgressContrast();
 	}
 	_state = std::move(state);
 	if (changed) {
@@ -237,19 +312,20 @@ void NowPlaying::paintEvent(QPaintEvent *) {
 	const auto left = 2 * padding + side;
 	const auto controls = compact(width()) ? 0 : transportWidth() + padding;
 	const auto available = std::max(0, width() - left - padding - controls);
+	const auto align = style::RightToLeft() ? Qt::AlignRight : Qt::AlignLeft;
 	auto y = padding;
 	p.setPen(st::windowFg);
 	p.setFont(st::purpleMusicNowEyebrow);
 	PaintMusicText(p, style::rtlrect(left, y, available, st::purpleMusicNowEyebrow->height, width()),
-		tr::lng_purple_music_now_playing(tr::now));
+		tr::lng_purple_music_now_playing(tr::now), 1, align);
 	y += st::purpleMusicNowEyebrow->height;
 	p.setFont(st::purpleMusicNowTitle);
 	PaintMusicText(p, style::rtlrect(left, y, available, st::purpleMusicNowTitle->height, width()),
-		_state.title);
+		_state.title, 1, align);
 	y += st::purpleMusicNowTitle->height;
 	p.setFont(st::normalFont);
 	PaintMusicText(p, style::rtlrect(left, y, available, st::normalFont->height, width()),
-		ArtistAndAlbum(_state, QFontMetrics(p.font()), available));
+		ArtistAndAlbum(_state, QFontMetrics(p.font()), available), 1, align);
 }
 
 struct PlaybackPresentation {

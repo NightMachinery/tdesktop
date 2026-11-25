@@ -198,7 +198,7 @@ private:
 	void updateStatus();
 	void pollConnection();
 	void requestMissingDialogs();
-	void showMenu(not_null<Ui::IconButton*> button);
+	void showMenu(not_null<Ui::IconButton*> button, std::optional<QString> playlistShortcut);
 	void toggleTrack(quint64 documentId);
 	void markTracks(std::vector<uint64_t> ids);
 	void updateSelection();
@@ -300,7 +300,7 @@ MusicSection::MusicSection(
 	not_null<Window::SessionController*> controller)
 : Window::SectionWidget(parent, controller)
 , _content(Ui::CreateChild<Ui::VerticalLayout>(this))
-, _search(_content->add(MakeMusicFilter(_content, MusicEffectiveShortcuts(false).filter),
+, _search(_content->add(MakeMusicFilter(_content, MusicEffectiveShortcuts().filter),
 	st::purpleMusicSearchMargin))
 , _status(_content->add(object_ptr<Ui::SlideWrap<Ui::FlatLabel>>(
 	_content,
@@ -316,13 +316,15 @@ MusicSection::MusicSection(
 , _connectionTimer([=] { pollConnection(); })
 , _scanTimer([=] { scan(); }) {
 	setFocusPolicy(Qt::StrongFocus);
-	const auto keys = MusicEffectiveShortcuts(false);
+	const auto keys = MusicEffectiveShortcuts();
 	_content->insert(0, MakeMusicHeader(
 		_content,
 		keys.playlists,
 		[=] { controller->showBackFromStack(); },
 		[=] { if (current()) ShowPlaylistsBox(controller); },
-		[=](not_null<Ui::IconButton*> button) { showMenu(button); }
+		[=](not_null<Ui::IconButton*> button, std::optional<QString> playlistShortcut) {
+			showMenu(button, std::move(playlistShortcut));
+		}
 	), st::purpleMusicListMargin);
 	_content->insert(1, MakeMusicNowPlaying(_content, &session(), true, keys), st::purpleMusicNowMargin);
 	_content->insert(2, MakeMusicViewControl(_content, MusicTilesValue(), [](bool tiles) {
@@ -544,9 +546,16 @@ void MusicSection::paintEvent(QPaintEvent *event) {
 	painter.fillRect(event->rect(), st::boxBg->c);
 }
 
-void MusicSection::showMenu(not_null<Ui::IconButton*> button) {
+void MusicSection::showMenu(
+		not_null<Ui::IconButton*> button,
+		std::optional<QString> playlistShortcut) {
 	if (!current()) return;
 	_menu = base::make_unique_q<Ui::PopupMenu>(this, st::defaultPopupMenu);
+	if (playlistShortcut) {
+		auto label = tr::lng_purple_playlists_title(tr::now);
+		if (!playlistShortcut->isEmpty()) label += u'\t' + *playlistShortcut;
+		_menu->addAction(label, [=] { ShowPlaylistsBox(controller()); });
+	}
 	_menu->addAction(tr::lng_purple_music_source(tr::now), [=] {
 		ChooseMusicSourceFolder(controller());
 	});

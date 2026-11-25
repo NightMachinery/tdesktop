@@ -37,7 +37,7 @@ namespace Purple {
 void ToggleZenChatList(not_null<Window::SessionController*> controller);
 
 struct MusicShortcutHints;
-[[nodiscard]] MusicShortcutHints MusicEffectiveShortcuts(bool chat);
+[[nodiscard]] MusicShortcutHints MusicEffectiveShortcuts();
 
 [[nodiscard]] bool HandleModalKeys(QObject *receiver, QEvent *event);
 [[nodiscard]] bool HandleModalWindowHints(QWidget *receiver, QEvent *event);
