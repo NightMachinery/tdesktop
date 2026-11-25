@@ -22,7 +22,13 @@ void Adaptive::setWindowLayout(WindowLayout value) {
 }
 
 void Adaptive::setChatLayout(ChatLayout value) {
-	_chatLayout = value;
+	_measuredChatLayout = value;
+	_chatLayout = _purpleFullscreen ? ChatLayout::Normal : value;
+}
+
+void Adaptive::setPurpleFullscreen(bool fullscreen) {
+	_purpleFullscreen = fullscreen;
+	_chatLayout = fullscreen ? ChatLayout::Normal : _measuredChatLayout.current();
 }
 
 rpl::producer<> Adaptive::value() const {
@@ -47,7 +53,7 @@ rpl::producer<bool> Adaptive::oneColumnValue() const {
 }
 
 rpl::producer<Adaptive::ChatLayout> Adaptive::chatLayoutValue() const {
-	return _chatLayout.value();
+	return _measuredChatLayout.value();
 }
 
 bool Adaptive::isOneColumn() const {

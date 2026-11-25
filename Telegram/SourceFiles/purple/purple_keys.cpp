@@ -282,6 +282,7 @@ enum class Action {
 	ChatPalette,
 	UnreadBuffer,
 	ToggleZenMode,
+	ToggleZenChats,
 	TogglePrivacyScreen,
 	TopicPalette,
 	TopicUnreadPalette,
@@ -402,6 +403,8 @@ const Command kCommands[] = {
 		[] { return u"Unread unmuted chats (iBuffer)"_q; } },
 	{ Action::ToggleZenMode, "toggle-chat-zen-mode", "window", "Needs an open chat",
 		[] { return u"Toggle Zen fullscreen chat"_q; } },
+	{ Action::ToggleZenChats, "toggle-zen-chat-list", "window", "Needs Zen fullscreen chat",
+		[] { return u"Toggle Zen chat list"_q; } },
 	{ Action::TogglePrivacyScreen, "toggle-privacy-screen", "toggle", "",
 		[] { return u"Toggle privacy screen"_q; } },
 	{ Action::TopicPalette, "topic-palette", "topics", "Needs a forum group or threaded bot",
@@ -1611,6 +1614,9 @@ bool Available(Action action, const Target &target) {
 	case Action::UnreadBuffer:
 	case Action::TogglePrivacyScreen:
 		return target.controller != nullptr;
+	case Action::ToggleZenChats:
+		return target.controller
+			&& !ZenChatListToggleLabel(target.controller).isEmpty();
 	case Action::ToggleZenMode:
 		return target.controller != nullptr
 			&& (target.controller->purpleZenHidden()
@@ -1755,6 +1761,7 @@ QString FirstLocalleaderLabel() {
 enum class KeyUse {
 	Pass,
 	ExitInsertOrBackOut,
+	FullscreenBack,
 	Cancel,
 	CountDigit,
 	PrefixBackspace,
@@ -1775,6 +1782,7 @@ public:
 	[[nodiscard]] bool swallowNativeRepeat(int physical) const;
 #endif // Q_OS_MAC
 	[[nodiscard]] bool ownsChatListFocus() const;
+	void fullscreenChanged(bool fullscreen);
 	[[nodiscard]] bool isNormal() const { return _normal; }
 	[[nodiscard]] int statusBarHeight() const;
 	void updateLayout(QRect body);
@@ -1795,7 +1803,6 @@ private:
 		bool allowUnmapped = false) const;
 	[[nodiscard]] Target activeTarget() const;
 	[[nodiscard]] bool chromeVisible() const;
-	[[nodiscard]] bool zenNeedsTransientBar() const;
 	[[nodiscard]] KeyUse classify(
 		const QKeyEvent &event,
 		int key,
@@ -2128,7 +2135,7 @@ Keys::Keys(not_null<MainWindow*> window)
 			++_revision;
 			recordActiveTopic();
 			if (_zenMode && !owner->activeChatCurrent().thread()) {
-				setZenMode(false);
+				owner->setPurpleZenHidden(true);
 			}
 			clearPrefix(keepChatNavigation);
 		};
@@ -2272,17 +2279,8 @@ bool Keys::chromeVisible() const {
 		&& _window->controller().sessionController() != nullptr;
 }
 
-bool Keys::zenNeedsTransientBar() const {
-	return !_prefix.empty()
-		|| _count > 0
-		|| _inspect
-		|| _hints.active()
-		|| visibleLayer() != ActiveLayer::None
-		|| !_feedbackText.isEmpty();
-}
-
 int Keys::statusBarHeight() const {
-	return (chromeVisible() && !_zenMode) ? ModalUi::ModalStatusBar::kHeight : 0;
+	return chromeVisible() ? ModalUi::ModalStatusBar::kHeight : 0;
 }
 
 void Keys::updateLayout(QRect body) {
@@ -2295,10 +2293,9 @@ void Keys::updateLayout(QRect body) {
 		_whichKey->hide();
 		return;
 	}
-	const auto showBar = !_zenMode || zenNeedsTransientBar();
 	const auto h = ModalUi::ModalStatusBar::kHeight;
 	_statusBar->setGeometry(body.x(), body.y() + body.height() - h, body.width(), h);
-	_statusBar->setVisible(showBar);
+	_statusBar->show();
 	if (_whichKey->isVisible()) {
 		const auto above = QRect(body.x(), body.y(), body.width(), std::max(0, body.height() - h));
 		_whichKey->updateBounds(above);
@@ -2432,7 +2429,7 @@ ModalNotices::DeliveryContext Keys::deliveryContext() const {
 		.hasPendingPrefix = !_prefix.empty() || _count > 0 || _inspect || _hints.active(),
 		.hasBlockingLayerOrBox = hasBox,
 		.inZenMode = _zenMode,
-		.statusBarVisible = chromeVisible() && !_zenMode && !hasBox,
+		.statusBarVisible = chromeVisible() && !hasBox,
 		.canInterruptWindow = _window->isActiveWindow() && _held.isEmpty(),
 	};
 }
@@ -2444,11 +2441,7 @@ void Keys::setStatusMessage(
 		bool persistent) {
 	if (persistent) {
 		_persistentCue = text;
-		if (_zenMode) {
-			showFeedback(std::move(text), false, ModalNotices::kAckDurationInfoMs);
-		} else {
-			refreshStatusBar();
-		}
+		refreshStatusBar();
 		return;
 	}
 	showFeedback(std::move(text), isError, durationMs);
@@ -2516,6 +2509,12 @@ void Keys::refreshUnreadSummary() {
 	_unreadSummary = next;
 	if (changed) {
 		refreshStatusBar();
+	}
+}
+
+void Keys::fullscreenChanged(bool fullscreen) {
+	if (!fullscreen && _zenMode) {
+		setZenMode(false);
 	}
 }
 
@@ -2883,12 +2882,6 @@ void Keys::refreshStatusBar() {
 		hideWhichKey();
 		return;
 	}
-	const auto showBar = !_zenMode || zenNeedsTransientBar();
-	if (!showBar) {
-		_statusBar->hide();
-		hideWhichKey();
-		return;
-	}
 	if (!_lastBody.isEmpty()) {
 		const auto h = ModalUi::ModalStatusBar::kHeight;
 		_statusBar->setGeometry(
@@ -3074,8 +3067,13 @@ KeyUse Keys::classify(
 		if (pending) {
 			return KeyUse::Cancel;
 		}
-		// In Insert mode on an eligible surface, Escape returns to Normal mode!
-		return (!_normal && target.focus) ? KeyUse::ExitInsertOrBackOut : KeyUse::Pass;
+		if (!_normal && target.focus) {
+			return KeyUse::ExitInsertOrBackOut;
+		}
+		if (key == Qt::Key_Escape && _window->isFullScreen()) {
+			return KeyUse::FullscreenBack;
+		}
+		return KeyUse::Pass;
 	}
 	if (_hints.active()) {
 		const auto printable = key >= Qt::Key_Space && key < Qt::Key_Escape;
@@ -3267,6 +3265,13 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 	switch (use) {
 	case KeyUse::ExitInsertOrBackOut:
 		enterNormal(true);
+		break;
+	case KeyUse::FullscreenBack:
+		if (target.history) {
+			target.history->escape();
+		} else if (target.messages) {
+			target.controller->showBackFromStack();
+		}
 		break;
 	case KeyUse::Cancel:
 		clearPrefix();
@@ -3701,6 +3706,10 @@ void Keys::dispatch(Action action, const Target &target, int count) {
 	case Action::UnreadBuffer:
 		clearPrefix();
 		showUnreadBuffer(target);
+		break;
+	case Action::ToggleZenChats:
+		clearPrefix();
+		ToggleZenChatList(current);
 		break;
 	case Action::ToggleZenMode:
 		clearPrefix();
@@ -4706,6 +4715,44 @@ int CalendarDayKeyOffset(const QKeyEvent &event) {
 	case Qt::Key_Up: return -7;
 	case Qt::Key_Down: return 7;
 	default: return 0;
+	}
+}
+
+QString ZenChatListToggleLabel(
+		not_null<Window::SessionController*> controller) {
+	if (!controller->purpleZenHidden()
+		|| !controller->window().id().hasChatsList()
+		|| !controller->activeChatCurrent().thread()) {
+		return {};
+	}
+	return (controller->adaptive().isOneColumn()
+		|| controller->purpleZenChatsHidden())
+		? u"Show chat list"_q
+		: u"Hide chat list"_q;
+}
+
+void ToggleZenChatList(not_null<Window::SessionController*> controller) {
+	if (ZenChatListToggleLabel(controller).isEmpty()) {
+		return;
+	} else if (controller->adaptive().isOneColumn()) {
+		controller->clearSectionStack();
+		return;
+	}
+	const auto hide = !controller->purpleZenChatsHidden();
+	const auto focus = QApplication::focusWidget();
+	const auto list = ChatsPane(controller);
+	const auto focusConversation = hide && list && focus
+		&& (list == focus || list->isAncestorOf(focus));
+	controller->setPurpleZenHidden(true, hide);
+	if (focusConversation) {
+		controller->content()->setInnerFocus();
+	}
+}
+
+void ModalFullscreenChanged(not_null<MainWindow*> window, bool fullscreen) {
+	window->controller().adaptive().setPurpleFullscreen(fullscreen);
+	if (const auto keys = FindKeys(window.get())) {
+		keys->fullscreenChanged(fullscreen);
 	}
 }
 

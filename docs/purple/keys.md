@@ -90,7 +90,7 @@ with at most four strokes per chord:
   - `SPC t`: toggles (`t b` chat background artwork visibility, `t n` Night Mode,
     `t z` Zen fullscreen chat, `t p` privacy screen).
   - `SPC w`: panes (`w h` chats, `w l` conversation, `w w` toggle, `w m` Zen
-    fullscreen chat).
+    fullscreen chat, `w z` toggle the chat list in Zen).
   - `SPC a 1` through `SPC a 6`: switch signed-in accounts.
   - `SPC h`: help (`h c` or `?` cheatsheet, `h b` or `SPC ?` all active
     bindings, `h k` describe key, `h f` describe command, `h s` Telegram stock
@@ -227,12 +227,15 @@ on the modal status line and cheatsheet footer.
   people, groups, channels, and accounts in the unread buffer (`SPC u`), chat
   palette (`SPC ,`), topic picker header (`SPC b t`), and peer-scoped commands
   in `M-x`.
-- **Zen fullscreen chat (`SPC t z`, `SPC w m`):** puts the window into real OS
-  fullscreen and hides the folder rail, chat list, info sidebar, and modal
-  status bar so only the current conversation is visible. The status bar appears
-  transiently only while a prefix, count, hints, key capture, modal layer, or
-  error/feedback message is active. `Esc` does not exit Zen mode; toggle `SPC t z`
-  or `SPC w m` again to restore the exact prior window state and layout.
+- **Zen fullscreen chat (`SPC t z`, `SPC w m`):** enters OS fullscreen with the
+  chat list, folder rail, and modal status bar visible. The info sidebar is
+  hidden. `SPC w z` or the chat header menu toggles the chat list and folder
+  rail while a conversation is open. On narrow displays it opens the full
+  chat list. Resizing the list in Zen keeps the ordinary window's width
+  preference. Fullscreen uses normal bubble alignment and centers dates in
+  the conversation. `Esc` cancels a pending chord or layer first, returns from
+  Insert to Normal next, then goes back from the chat within fullscreen.
+  Toggle Zen again to restore the prior window state.
 - **Privacy screen (`SPC t p`, `SPC z`):** immediately covers all open Purple
   windows (primary and separate chat windows) with a neutral clock and date
   backdrop, closes media viewers and PiP windows, hides tooltips, popups,
@@ -321,7 +324,9 @@ on the modal status line and cheatsheet footer.
   The window title is `Clock` while the privacy screen is active.
 - `mainwidget.cpp`, `window/window_filters_menu.h`, and
   `window/window_session_controller.*`: hides the folder rail, chat list, side
-  shadows, and third column while Zen fullscreen chat mode is active.
+  shadows when the Zen chat list is toggled off, and hides the third column
+  throughout Zen. `window/window_adaptive.*` selects normal chat layout in
+  fullscreen.
 - `window/notifications_manager.cpp` and `media/view/media_view_overlay_widget.cpp`:
   hides notification details and blocks notification-click chat opening while the
   privacy screen is active, and closes active PiP windows when it activates.

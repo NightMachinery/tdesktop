@@ -159,6 +159,7 @@
   "SPC w l" :focus-conversation
   "SPC w w" :focus-other-pane
   "SPC w m" :toggle-chat-zen-mode
+  "SPC w z" :toggle-zen-chat-list
   "C-w h"   :focus-chat-list
   "C-w l"   :focus-conversation
   "C-w w"   :focus-other-pane

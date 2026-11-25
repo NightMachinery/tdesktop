@@ -30,8 +30,8 @@ the numbers.
   panels.
 - `mainwindow.cpp` and `window/main_window.cpp`: attaches Purple's modal status
   line and docked which-key drawer in `finishFirstShow()`, reserves the
-  status-bar height beneath `_main` in `updateControlsGeometry()`, and gives
-  full-height layers precedence over the modal chrome. It raises the
+  status-bar height beneath `_main` in `updateControlsGeometry()`, forwards OS
+  fullscreen changes, and gives full-height layers precedence over the modal chrome. It raises the
   privacy overlay last when active and unlocked (covering layers and media
   preview while keeping passcode/setup-email locks and their boxes on top),
   blocks `handleStartFiles()` while active, and replaces the window title with
@@ -39,9 +39,15 @@ the numbers.
 - `platform/mac/main_window_mac.mm`: consumes already claimed single-shot
   repeats before Cocoa can reinterpret them as text after a focus or mode change.
 - `mainwidget.h`, `mainwidget.cpp`, `window/window_filters_menu.h`, and
-  `window/window_session_controller.*`: hides the folder strip, dialogs column,
-  side shadows, and third column while Zen fullscreen chat mode is active,
-  restoring only widgets Zen itself hid.
+  `window/window_session_controller.*`: keeps the chat list and folder strip
+  available in Zen fullscreen and hides the third column. The Zen chat-list
+  toggle also hides the folder strip and its side shadow. Its resized width
+  is temporary.
+- `history/view/history_view_top_bar_widget.cpp`: adds the Zen chat list action
+  to the chat header menu.
+- `window/window_adaptive.*`: uses normal bubble and date alignment in
+  fullscreen. The measured layout still controls the availability of the
+  saved adaptive setting.
 - `window/notifications_manager.cpp`, `media/view/media_view_overlay_widget.cpp`,
   `media/system_media_controls_manager.cpp`, `tray.cpp`,
   `tray_accounts_menu.cpp`, and `platform/mac/global_menu_mac.mm`: suppresses

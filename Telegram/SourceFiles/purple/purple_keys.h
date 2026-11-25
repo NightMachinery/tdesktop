@@ -25,7 +25,15 @@ namespace Settings::Builder {
 class SectionBuilder;
 } // namespace Settings::Builder
 
+namespace Window {
+class SessionController;
+} // namespace Window
+
 namespace Purple {
+
+[[nodiscard]] QString ZenChatListToggleLabel(
+	not_null<Window::SessionController*> controller);
+void ToggleZenChatList(not_null<Window::SessionController*> controller);
 
 [[nodiscard]] bool HandleModalKeys(QObject *receiver, QEvent *event);
 [[nodiscard]] int ModalPhysicalKey(const QKeyEvent &event);
@@ -40,6 +48,7 @@ namespace Purple {
 [[nodiscard]] bool CalendarDayKeysEnabled();
 [[nodiscard]] int CalendarDayKeyOffset(const QKeyEvent &event);
 
+void ModalFullscreenChanged(not_null<MainWindow*> window, bool fullscreen);
 void EnsureModalKeysAttached(not_null<MainWindow*> window);
 [[nodiscard]] int ModalKeysStatusHeight(not_null<MainWindow*> window);
 void UpdateModalKeysLayout(not_null<MainWindow*> window, QRect body);

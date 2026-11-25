@@ -380,6 +380,7 @@ for action, chord in (
     ("UnreadBuffer", "SPC b I"),
     ("ToggleZenMode", "SPC t z"),
     ("ToggleZenMode", "SPC w m"),
+    ("ToggleZenChats", "SPC w z"),
     ("TogglePrivacyScreen", "SPC t p"),
     ("TogglePrivacyScreen", "SPC z"),
     ("TopicPalette", "SPC b t"),
@@ -429,11 +430,19 @@ for action, key in (
     bound(action, key, chat_body)
 
 # Phase 2 routes: unread status counts, avatars, iBuffer read-receipt confirm,
-# real fullscreen Zen mode with transient status bar, app-wide privacy screen, and topics.
+# fullscreen with a persistent status bar, app-wide privacy screen, and topics.
 ordered(keys, "ComputeUnreadSummary", "HasUnmutedUnreadNotification", "BucketForPeer")
 ordered(keys, "void Keys::setZenMode", "setPurpleZenHidden(true)", "showFullScreen()",
         "setPurpleZenHidden(false)", "PlanWindowRestore", "showNormal()")
-ordered(keys, "bool Keys::zenNeedsTransientBar", "int Keys::statusBarHeight", "!_zenMode")
+ordered(keys, "int Keys::statusBarHeight", "chromeVisible() ?", "ModalStatusBar::kHeight")
+ordered(classify, "KeyUse::Cancel", "KeyUse::ExitInsertOrBackOut",
+        "_window->isFullScreen()", "KeyUse::FullscreenBack")
+ordered(keys, "case KeyUse::FullscreenBack:", "target.history->escape()",
+        "target.controller->showBackFromStack()")
+ordered(read("window/window_adaptive.cpp"), "void Adaptive::setPurpleFullscreen",
+        "fullscreen ? ChatLayout::Normal : _measuredChatLayout.current()")
+ordered(keys, "case Action::ToggleZenChats:", "ToggleZenChatList(current)")
+ordered(keys, "void ToggleZenChatList(", "clearSectionStack()", "setPurpleZenHidden(true, hide)")
 ordered(keys, "void Keys::showUnreadBuffer", "CreateUnreadBufferLayer", "MarkAsReadMenu::MarkAsReadThread")
 ordered(keys, "void Keys::showTopicPicker", "CreateTopicPickerLayer", "onRefresh",
         "onLoadMore", "requestTopics()", "onReload", "reloadTopics()", "pageUpdates",

@@ -2056,7 +2056,7 @@ void SessionController::toggleFiltersMenu(bool enabled) {
 		_filters = std::make_unique<FiltersMenu>(
 			widget()->bodyWidget(),
 			this);
-		if (_purpleZenHidden) {
+		if (_purpleZenChatsHidden) {
 			_filters->setHiddenForZen(true);
 		}
 	} else {
@@ -2715,7 +2715,7 @@ int SessionController::countDialogsWidthFromRatio(int bodyWidth) const {
 	}
 	const auto nochat = !mainSectionShown();
 	const auto width = bodyWidth
-		* Core::App().settings().dialogsWidthRatio(nochat);
+		* _purpleZenDialogsRatio.value_or(Core::App().settings().dialogsWidthRatio(nochat));
 	auto result = int(base::SafeRound(width));
 	accumulate_max(result, st::columnMinimalWidthLeft);
 //	accumulate_min(result, st::columnMaximalWidthLeft);
@@ -3324,16 +3324,29 @@ not_null<MainWidget*> SessionController::content() const {
 }
 
 int SessionController::filtersWidth() const {
-	return (_filters && !_purpleZenHidden) ? st::windowFiltersWidth : 0;
+	return (_filters && !_purpleZenChatsHidden) ? st::windowFiltersWidth : 0;
 }
 
-void SessionController::setPurpleZenHidden(bool hidden) {
-	if (_purpleZenHidden == hidden) {
+std::optional<float64> SessionController::purpleZenDialogsRatio() const {
+	return _purpleZenDialogsRatio;
+}
+
+void SessionController::setPurpleZenDialogsRatio(float64 ratio) {
+	_purpleZenDialogsRatio = ratio;
+	widget()->updateControlsGeometry();
+}
+
+void SessionController::setPurpleZenHidden(bool hidden, bool hideChats) {
+	if (_purpleZenHidden == hidden && _purpleZenChatsHidden == hideChats) {
 		return;
 	}
 	_purpleZenHidden = hidden;
+	if (!hidden) {
+		_purpleZenDialogsRatio.reset();
+	}
+	_purpleZenChatsHidden = hideChats;
 	if (_filters) {
-		_filters->setHiddenForZen(hidden);
+		_filters->setHiddenForZen(hideChats);
 	}
 	_filtersMenuChanged.fire({});
 	widget()->updateControlsGeometry();
