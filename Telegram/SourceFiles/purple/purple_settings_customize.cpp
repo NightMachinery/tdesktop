@@ -829,6 +829,10 @@ private:
 
 	void refreshInspector() {
 		const auto row = selected();
+		const auto editLabel = (row && row->listCaseFix) ? u"Fix list spelling"_q : u"Edit"_q;
+		_edit->setText(editLabel);
+		_edit->setAccessibleName(editLabel);
+		_edit->setToolTip(editLabel);
 		_edit->setEnabled(row && (row->editable || isCollection(*row)));
 		_reset->setEnabled(row && row->editable && SettingsTree::CanReset(*row->descriptor));
 		_undo->setEnabled(_frames.canUndo());
@@ -845,7 +849,7 @@ private:
 		}
 		auto lines = QStringList();
 		if (!row->address.empty()) lines.push_back(Isolate(SettingsTree::Address(row->address)));
-		if (row->descriptor && SettingsTree::IsScalar(row->descriptor->codec)) {
+		if (!row->listCaseFix && row->descriptor && SettingsTree::IsScalar(row->descriptor->codec)) {
 			lines.push_back(u"%1 · %2 · Destination %3"_q.arg(row->source,
 				SettingsTree::ScopeText(row->scope), row->destination));
 			lines.push_back(u"Effective %1 · Default %2"_q.arg(Isolate(SettingsTree::ValueText(*row)),
@@ -1057,7 +1061,11 @@ private:
 	void activateRow() {
 		const auto row = selected();
 		if (!row || !visibleContent()) return;
-		if (isCollection(*row)) {
+		if (row->listCaseFix) {
+			auto fixed = *row;
+			fixed.key = SettingsTree::Address(row->address);
+			stage(std::move(fixed), SettingScalar(*row->listCaseFix));
+		} else if (isCollection(*row)) {
 			showCollection(*row);
 		} else if (row->editable) {
 			showForm(*row);
