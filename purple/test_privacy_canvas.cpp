@@ -105,6 +105,9 @@ void Render(const QDir &output, const QString &name, QSize size, Frame frame, in
 		Check(desc.contains(QStringLiteral("0%")), "real zero precipitation is present in widget data");
 		Check(desc.contains(QStringLiteral("Open-Meteo")), "weather attribution is visible to assistive technology");
 	}
+	if (name == QStringLiteral("privacy-day-rain")) {
+		Check(desc.contains(QStringLiteral("low \u221210°")), "negative temperatures use a minus sign");
+	}
 }
 
 } // namespace
@@ -122,8 +125,8 @@ int main(int argc, char **argv) {
 		"12-hour sample locale");
 	auto night = Fixture(true, false, british);
 	auto day = Fixture(false, true, british);
-	Render(output, QStringLiteral("privacy-night-clear"), { 1280, 806 }, night, 14);
-	Render(output, QStringLiteral("privacy-day-rain"), { 1280, 806 }, day, 14);
+	Render(output, QStringLiteral("privacy-night-clear"), { 1300, 820 }, night, 14);
+	Render(output, QStringLiteral("privacy-day-rain"), { 1300, 820 }, day, 14);
 	Render(output, QStringLiteral("privacy-narrow"), { 430, 820 }, night, 14);
 	Render(output, QStringLiteral("privacy-compact"), { 360, 360 }, night, 14);
 	auto offline = day;
@@ -133,7 +136,7 @@ int main(int argc, char **argv) {
 	Render(output, QStringLiteral("privacy-rain-large-text"), { 800, 500 }, day, 17);
 	night.weather.reset();
 	night.update.clear();
-	Render(output, QStringLiteral("privacy-clocks-only"), { 1280, 806 }, night, 14);
+	Render(output, QStringLiteral("privacy-clocks-only"), { 1300, 820 }, night, 14);
 	auto twelveHour = Fixture(true, false, american);
 	twelveHour.flat = true;
 	twelveHour.fahrenheit = true;
