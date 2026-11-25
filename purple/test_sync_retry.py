@@ -135,6 +135,17 @@ for path in root.glob('*.cpp'):
             assert 'state->requests.erase(*requestId)' in media
             assert 'FailureReason(error)' in media
             assert 'SyncRequestSender' not in media
+        elif path.name == 'purple_music_section.cpp':
+            music = path.read_text()
+            scan = member(music, 'void MusicSection::scan()')
+            reset = member(music, 'void MusicSection::reset(')
+            assert music.count('.handleAllErrors()') == 1
+            assert 'MTPmessages_Search(' in scan and 'MTP_inputMessagesFilterMusic()' in scan
+            assert scan.count('if (_route != route) return;') == 2
+            assert scan.index('_schedule->pacer.delay(now)') < scan.index('_api.request(')
+            assert '_schedule->pacer.retry(' in scan and '_pending.push_front(next);' in scan
+            assert 'writePref<QString>(kScanRetryPref,' in scan
+            assert '_scanTimer.cancel();' in reset and '_api.request(base::take(_request)).cancel();' in reset
         else:
             assert path.name in expected, 'Uninventoried bypass: ' + path.name
 guards = {
