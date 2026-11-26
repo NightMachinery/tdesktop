@@ -777,8 +777,17 @@ last_seen_cpp = read("purple/purple_last_seen.cpp")
 ordered(last_seen_cpp, "ShowPurpleNotice", "lastseen:empty:", ".background = true")
 
 privacy = read("purple/purple_privacy_screen.cpp")
-ordered(privacy, "void ensureFresh()", "PrivacyScreenActiveAny()", "WeatherPermitted()",
-        'source != "off"', "resolveLocation(false)", "Accept-Language")
+ordered(privacy, "NetworkProxy(proxy.isSystem(), proxy.isEnabled(),",
+        "MTP::ToNetworkProxy(proxy.selected())")
+ordered(privacy, "void ensureFresh()", "PrivacyScreenActiveAny()",
+        'source != "off"', "resolveLocation(false)")
+ordered(privacy, "connectionTypeChanges(", "const auto proxy = WeatherProxy()",
+        "_proxy = proxy", "base::take(_nam)", "base::take(_forecast)",
+        "reply->abort()", "old->deleteLater()", "ensureFresh()")
+ordered(privacy, "void findPlaces(", "if (!wanted())", "get(*url)",
+        "if (reply->manager() != _nam)", "findPlaces(query, wanted, done)")
+ordered(privacy, "QNetworkReply *get(", "_nam->setProxy(_proxy)", "Accept-Language",
+        "return _nam->get(request)")
 ordered(privacy, 'u"Use approximate location"_q', 'ChangeWeatherSource("current")', "resolveLocation(true)")
 ordered(privacy, "Lock with passcode", "hasLocalPasscode()", "lockByPasscode()", "DismissPrivacyScreen()")
 ordered(privacy, "QEvent::WindowActivate", "QEvent::FocusIn", "QEvent::InputMethod", "QEvent::Drop")

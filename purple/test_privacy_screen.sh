@@ -15,6 +15,7 @@ if [[ ! -d "${QtInclude}/QtCore" && -d "${QtLib}/QtCore.framework/Headers" ]]; t
     -Wl,-rpath,"${QtLib}"
   )
   QtWidgetsFlags=(-framework QtWidgets -framework QtGui)
+  QtNetworkFlags=(-framework QtNetwork)
 else
   QtFlags=(
     -I "${QtInclude}"
@@ -24,6 +25,7 @@ else
     -Wl,-rpath,"${QtLib}"
   )
   QtWidgetsFlags=(-I "${QtInclude}/QtWidgets" -I "${QtInclude}/QtGui" -lQt6Widgets -lQt6Gui)
+  QtNetworkFlags=(-I "${QtInclude}/QtNetwork" -lQt6Network)
 fi
 
 Bin="$(mktemp "${TMPDIR:-/tmp}/test_privacy_screen.XXXXXX")"
@@ -44,7 +46,7 @@ clang++ -std=c++20 -Wall -Wextra -Werror \
   -I "${Root}/Telegram/SourceFiles" \
   -I "${Root}/Telegram/ThirdParty/purple_core" \
   "${Root}/purple/test_privacy_screen.cpp" \
-  "${QtFlags[@]}" \
+  "${QtFlags[@]}" "${QtNetworkFlags[@]}" \
   -o "${Bin}"
 
 "${Bin}"

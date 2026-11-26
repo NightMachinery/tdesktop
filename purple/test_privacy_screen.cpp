@@ -1,6 +1,7 @@
 #include "purple/purple_privacy_clocks.h"
 #include "purple/purple_privacy_state.h"
 #include "purple/purple_privacy_weather.h"
+#include "purple/purple_privacy_weather_proxy.h"
 
 #include <iostream>
 #include <string>
@@ -66,18 +67,37 @@ int main() {
 	Check(!badSnap.has_value(), "rejects malformed forecast JSON");
 
 	{
+		const auto socks = QNetworkProxy(QNetworkProxy::Socks5Proxy,
+			QStringLiteral("socks.invalid"), 1080, QStringLiteral("fixture"),
+			QStringLiteral("socks password"));
+		const auto http = QNetworkProxy(QNetworkProxy::HttpProxy,
+			QStringLiteral("http.invalid"), 8080, QStringLiteral("fixture"),
+			QStringLiteral("http password"));
+		Check(NetworkProxy(false, true, socks) == socks,
+			"SOCKS5 uses the selected endpoint and credentials");
+		Check(NetworkProxy(false, true, http) == http,
+			"HTTP uses the selected endpoint and credentials");
+		Check(NetworkProxy(true, false, socks).type() == QNetworkProxy::DefaultProxy,
+			"system mode delegates to Qt even with a saved SOCKS5 selection");
+		Check(NetworkProxy(false, false, socks).type() == QNetworkProxy::NoProxy,
+			"disabled app proxy goes direct");
+		Check(NetworkProxy(false, true, QNetworkProxy::NoProxy).type()
+			== QNetworkProxy::NoProxy, "MTProto and web proxies go direct");
+		Check(NetworkProxy(false, true, QNetworkProxy::DefaultProxy).type()
+			== QNetworkProxy::NoProxy, "empty selection stays direct");
+	}
+
+	{
 		const auto now = qint64(1'000'000'000);
-		Check(!CanFetchForecast(true, true, false, false, 0, now),
+		Check(!CanFetchForecast(true, false, false, 0, now),
 			"off never fetches even with the cover shown");
-		Check(!CanFetchForecast(false, true, true, false, 0, now),
+		Check(!CanFetchForecast(false, true, false, 0, now),
 			"hidden cover never fetches");
-		Check(!CanFetchForecast(true, false, true, false, 0, now),
-			"app proxy blocks direct queries");
-		Check(!CanFetchForecast(true, true, true, true, 0, now),
+		Check(!CanFetchForecast(true, true, true, 0, now),
 			"one in-flight request across covers");
-		Check(!CanFetchForecast(true, true, true, false, now + 1, now),
+		Check(!CanFetchForecast(true, true, false, now + 1, now),
 			"waits for backoff or refresh deadline");
-		Check(CanFetchForecast(true, true, true, false, now, now),
+		Check(CanFetchForecast(true, true, false, now, now),
 			"deadline is inclusive");
 	}
 

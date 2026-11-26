@@ -13,6 +13,7 @@
 #include "purple/purple_privacy_clocks.h"
 #include "purple/purple_privacy_state.h"
 #include "purple/purple_privacy_weather.h"
+#include "purple/purple_privacy_weather_proxy.h"
 #include "settings/settings_builder.h"
 #include "storage/storage_domain.h"
 #include "tray.h"
@@ -170,8 +171,10 @@ bool Fahrenheit(const QLocale &locale) {
 		&& locale.measurementSystem() == QLocale::ImperialUSSystem);
 }
 
-bool WeatherPermitted() {
-	return !Core::App().settings().proxy().isEnabled();
+QNetworkProxy WeatherProxy() {
+	const auto &proxy = Core::App().settings().proxy();
+	return PrivacyWeather::NetworkProxy(proxy.isSystem(), proxy.isEnabled(),
+		MTP::ToNetworkProxy(proxy.selected()));
 }
 
 bool WeatherSettingsVisible() {
@@ -186,7 +189,7 @@ public:
 	}
 
 	[[nodiscard]] const WeatherSnapshot *snapshot(qint64 now) const {
-		return WeatherPermitted() && _snapshot && now - _updated < kExpireForecast
+		return _snapshot && now - _updated < kExpireForecast
 			? &*_snapshot
 			: nullptr;
 	}
@@ -200,7 +203,7 @@ public:
 	}
 
 	[[nodiscard]] QString status(const QDateTime &now) const {
-		if (!WeatherPermitted() || WeatherSource() == "off") {
+		if (WeatherSource() == "off") {
 			return {};
 		}
 		const auto ms = now.toMSecsSinceEpoch();
@@ -222,7 +225,6 @@ public:
 		const auto now = QDateTime::currentMSecsSinceEpoch();
 		if (!PrivacyWeather::CanFetchForecast(
 				PrivacyScreenActiveAny(),
-				WeatherPermitted(),
 				source != "off",
 				_forecast != nullptr,
 				_nextAttempt,
@@ -249,8 +251,9 @@ public:
 
 	void sourceChanged() {
 		++_generation;
-		_forecast = nullptr;
-		cancelRequests();
+		if (const auto reply = base::take(_forecast)) {
+			reply->abort();
+		}
 		_currentCell.reset();
 		_legacyCell.reset();
 		_snapshot.reset();
@@ -263,7 +266,7 @@ public:
 	}
 
 	void resolveLocation(bool fromSettings) {
-		if (!WeatherPermitted() || _locating) {
+		if (_locating) {
 			return;
 		}
 		_locating = true;
@@ -297,18 +300,30 @@ public:
 		}
 	}
 
-	void findPlaces(const QString &query, Fn<void(std::vector<GeoPoint>)> done) {
+	void findPlaces(
+			const QString &query,
+			Fn<bool()> wanted,
+			Fn<void(std::vector<GeoPoint>)> done) {
+		if (!wanted()) {
+			return;
+		}
 		const auto url = PrivacyWeather::BuildGeocodeUrl(query, 5);
-		if (!url || !WeatherPermitted()) {
+		if (!url) {
 			done({});
 			return;
 		}
 		const auto reply = get(*url);
 		connect(reply, &QNetworkReply::finished, this, [=] {
 			reply->deleteLater();
-			done(reply->error() == QNetworkReply::NoError && WeatherPermitted()
-				? PrivacyWeather::ParsePlaces(reply->readAll())
-				: std::vector<GeoPoint>());
+			if (reply->manager() != _nam) {
+				findPlaces(query, wanted, done);
+				return;
+			}
+			if (wanted()) {
+				done(reply->error() == QNetworkReply::NoError
+					? PrivacyWeather::ParsePlaces(reply->readAll())
+					: std::vector<GeoPoint>());
+			}
 		});
 	}
 
@@ -316,26 +331,32 @@ private:
 	WeatherStore() {
 		Core::App().settings().proxy().connectionTypeChanges(
 		) | rpl::on_next([=] {
-			if (!WeatherPermitted()) {
-				cancelRequests();
+			const auto proxy = WeatherProxy();
+			if (_proxy == proxy) {
+				return;
 			}
-			WeatherChanges.fire({});
-		}, _lifetime);
-	}
-
-	void cancelRequests() {
-		if (_nam) {
-			for (const auto reply : _nam->findChildren<QNetworkReply*>()) {
-				if (reply->isRunning()) {
-					reply->abort();
+			_proxy = proxy;
+			const auto old = base::take(_nam);
+			const auto interrupted = (base::take(_forecast) != nullptr);
+			if (old) {
+				for (const auto reply : old->findChildren<QNetworkReply*>()) {
+					if (reply->isRunning()) {
+						reply->abort();
+					}
 				}
+				old->deleteLater();
 			}
-		}
+			if (interrupted || _failed) {
+				_nextAttempt = 0;
+			}
+			ensureFresh();
+		}, _lifetime);
 	}
 
 	QNetworkReply *get(const QUrl &url) {
 		if (!_nam) {
 			_nam = new QNetworkAccessManager(this);
+			_nam->setProxy(_proxy);
 		}
 		auto request = QNetworkRequest(url);
 		request.setRawHeader("User-Agent", PrivacyWeather::kGenericUserAgent);
@@ -365,7 +386,7 @@ private:
 				return;
 			}
 			_forecast = nullptr;
-			if (reply->error() != QNetworkReply::NoError || !WeatherPermitted()) {
+			if (reply->error() != QNetworkReply::NoError) {
 				fail(reply);
 				return;
 			}
@@ -388,7 +409,7 @@ private:
 				return;
 			}
 			_forecast = nullptr;
-			if (reply->error() != QNetworkReply::NoError || !WeatherPermitted()) {
+			if (reply->error() != QNetworkReply::NoError) {
 				fail(reply);
 				return;
 			}
@@ -422,6 +443,7 @@ private:
 		WeatherChanges.fire({});
 	}
 
+	QNetworkProxy _proxy = WeatherProxy();
 	QNetworkAccessManager *_nam = nullptr;
 	QNetworkReply *_forecast = nullptr;
 	std::optional<GeoPoint> _currentCell;
@@ -961,12 +983,13 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setTitle(rpl::single(u"Privacy screen weather"_q));
 		box->addRow(object_ptr<Ui::FlatLabel>(box, rpl::single(
-			u"Weather uses a rounded area sent to Open-Meteo. It stays off unless "
-			"you choose a place or enable approximate location. An in-app proxy "
-			"suspends these requests."_q), st::boxLabel));
+			u"Open-Meteo receives the rounded area for forecasts and the text you "
+			"submit for town searches. Requests use your SOCKS5 or HTTP app proxy "
+			"when enabled, follow Qt in system proxy mode, and go direct otherwise."_q), st::boxLabel));
 #ifdef Q_OS_MAC
 		box->addRow(object_ptr<Ui::FlatLabel>(box, rpl::single(
-			u"Street address lookup sends the submitted address to Apple."_q),
+			u"Street address lookup uses Apple’s system service and sends the "
+			"submitted address to Apple outside the app proxy."_q),
 			st::boxLabel));
 		const auto placeholder = u"Town, postal code or street address"_q;
 #else
@@ -984,7 +1007,7 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 		const auto weak = QPointer(box.get());
 		const auto generation = box->lifetime().make_state<int>(0);
 		const auto accept = [=](const GeoPoint &cell) {
-			if (weak && WeatherPermitted() && WeatherSettingsVisible()) {
+			if (weak && WeatherSettingsVisible()) {
 				ChangeWeatherSource("place", cell);
 				box->closeBox();
 			}
@@ -998,10 +1021,6 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 			if (!WeatherSettingsVisible()) {
 				return;
 			}
-			if (!WeatherPermitted()) {
-				status->setText(u"Weather search is paused while the app proxy is on."_q);
-				return;
-			}
 			const auto query = field->getLastText().trimmed();
 			if (query.isEmpty()) {
 				return;
@@ -1009,10 +1028,9 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 			const auto serial = ++*generation;
 			results->clear();
 			status->setText(u"Looking up places…"_q);
-			WeatherStore::Instance().findPlaces(query, [=](std::vector<GeoPoint> places) {
-				if (!weak || serial != *generation || !WeatherSettingsVisible()) {
-					return;
-				}
+			WeatherStore::Instance().findPlaces(query, [=] {
+				return weak && serial == *generation && WeatherSettingsVisible();
+			}, [=](std::vector<GeoPoint> places) {
 				status->setText(places.empty()
 					? u"No places found. Try adding a country or region."_q
 					: u"Choose a place to use its rounded area."_q);
@@ -1033,15 +1051,14 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 			st::defaultLightButton));
 		address->setClickedCallback([=] {
 			const auto query = field->getLastText().trimmed();
-			if (query.isEmpty() || !WeatherPermitted() || !WeatherSettingsVisible()) {
+			if (query.isEmpty() || !WeatherSettingsVisible()) {
 				return;
 			}
 			const auto serial = ++*generation;
 			results->clear();
 			status->setText(u"Apple receives the address you submit. Looking it up…"_q);
 			Platform::ResolveWeatherAddress(query, [=](Core::GeoLocation location) {
-				if (!weak || serial != *generation || !WeatherPermitted()
-					|| !WeatherSettingsVisible()) {
+				if (!weak || serial != *generation || !WeatherSettingsVisible()) {
 					return;
 				}
 				const auto cell = location.exact()
@@ -1076,10 +1093,6 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 		});
 		box->addButton(rpl::single(u"Use approximate location"_q), [=] {
 			if (!WeatherSettingsVisible()) {
-				return;
-			}
-			if (!WeatherPermitted()) {
-				status->setText(u"Disable the app proxy before requesting location."_q);
 				return;
 			}
 			ChangeWeatherSource("current");

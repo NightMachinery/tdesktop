@@ -342,10 +342,12 @@ on the modal status line and cheatsheet footer.
     weather**, choose a town or postal code, resolve a street address with
     Apple on macOS, or enable approximate current location. The default is
     off. Weather source and temperature units are device settings. The cover
-    displays a generic location label and suspends weather while an app proxy
-    is enabled. The forecast request sends the rounded area and your IP to
-    Open-Meteo. Town searches send the entered text to Open-Meteo only when
-    submitted. macOS address search sends the submitted address to Apple.
+    displays a generic location label. Forecasts send the rounded area to
+    Open-Meteo. Town searches send the text you submit. Both requests use an
+    enabled SOCKS5 or HTTP app proxy, follow Qt's system proxy settings in
+    system mode, and go direct when the app proxy is off or uses MTProto or
+    Web. On macOS, address lookup sends the submitted address to Apple through
+    its system service, outside the app proxy.
 - **Forum groups and threaded bots:** `SPC b t` / `, t` opens the live-updating
   topic picker for the current forum group or threaded bot. It loads more as
   you approach the end of the results or filter them. `L` loads a page and

@@ -279,12 +279,11 @@ struct WeatherSnapshot {
 
 [[nodiscard]] inline bool CanFetchForecast(
 		bool coverVisible,
-		bool allowed,
 		bool enabled,
 		bool requestActive,
 		qint64 nextAttempt,
 		qint64 now) {
-	return coverVisible && allowed && enabled && !requestActive
+	return coverVisible && enabled && !requestActive
 		&& now >= nextAttempt;
 }
 

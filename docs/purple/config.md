@@ -36,7 +36,11 @@ weather**. At full size the cover shows current conditions, the next six
 hours, and the next three days. Narrow covers show three hourly forecasts.
 Short covers reserve space for the controls, local time, first world clock,
 and current conditions. The forecast credits Open-Meteo alongside the last
-update time.
+update time. Forecasts and town searches use an enabled SOCKS5 or HTTP app
+proxy, with its configured credentials. In-flight weather requests switch
+routes when the app proxy changes. System proxy mode follows Qt's system proxy
+handling. Requests go direct with MTProto, Web, or a disabled app proxy.
+macOS street address lookup uses Apple's system service outside the app proxy.
 
 ## Why a separate file
 
