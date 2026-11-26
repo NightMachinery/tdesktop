@@ -4,10 +4,12 @@
 #include "data/data_document.h"
 #include "data/data_document_media.h"
 #include "lang/lang_keys.h"
+#include "main/main_account.h"
 #include "main/main_session.h"
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_button.h"
 #include "media/player/media_player_instance.h"
+#include "purple/purple_music_artwork.h"
 #include "purple/purple_music_widgets.h"
 #include "purple/purple_playlist_song_list.h"
 #include "ui/image/image.h"
@@ -346,8 +348,7 @@ MusicNowPlayingState PlaybackState(
 		return {};
 	}
 	const auto media = document->activeMediaView();
-	const auto image = media ? (media->goodThumbnail()
-		? media->goodThumbnail() : media->thumbnail()) : nullptr;
+	const auto image = media ? MusicArtworkThumbnail(*media) : nullptr;
 	const auto raw = image ? image->original() : QImage();
 	if (cache.artRevision != raw.cacheKey()) {
 		cache.artRevision = raw.cacheKey();
@@ -398,10 +399,21 @@ object_ptr<Ui::RpWidget> MakeMusicNowPlaying(
 		bool transport,
 		const MusicShortcutHints &keys) {
 	const auto player = Media::Player::instance();
+	const auto alive = base::make_weak(session.get());
 	auto state = rpl::make_producer<MusicNowPlayingState>([=](const auto &consumer) {
+		const auto session = alive.get();
+		if (!session || session->account().maybeSession() != session) {
+			consumer.put_next(MusicNowPlayingState());
+			return rpl::lifetime();
+		}
 		auto lifetime = rpl::lifetime();
 		const auto cache = lifetime.make_state<PlaybackPresentation>();
-		const auto update = [=] { consumer.put_next(PlaybackState(session, *cache)); };
+		const auto update = [=] {
+			const auto current = alive.get();
+			consumer.put_next((current && current->account().maybeSession() == current)
+				? PlaybackState(current, *cache)
+				: MusicNowPlayingState());
+		};
 		rpl::merge(
 			rpl::single(rpl::empty),
 			player->updatedNotifier() | rpl::filter([](const Media::Player::TrackState &state) {
@@ -410,6 +422,7 @@ object_ptr<Ui::RpWidget> MakeMusicNowPlaying(
 			player->stops(Type::Song),
 			player->playlistChanges(Type::Song),
 			session->downloaderTaskFinished(),
+			session->account().sessionChanges() | rpl::to_empty,
 			Core::App().passcodeLockChanges() | rpl::to_empty
 		) | rpl::on_next(update, lifetime);
 		return lifetime;

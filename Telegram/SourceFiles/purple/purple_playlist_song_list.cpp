@@ -1,4 +1,5 @@
 #include "purple/purple_playlist_song_list.h"
+#include "purple/purple_music_artwork.h"
 #include "purple/purple_music_widgets.h"
 
 #include "base/timer.h"
@@ -10,6 +11,7 @@
 #include "data/data_file_origin.h"
 #include "data/data_session.h"
 #include "lang/lang_keys.h"
+#include "main/main_account.h"
 #include "main/main_session.h"
 #include "ui/effects/animation_value.h"
 #include "ui/image/image.h"
@@ -289,11 +291,12 @@ private:
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
 	std::set<uint64_t> _chosen;
 	std::map<uint64_t, Cover> _cover;
-	Main::Session *_artworkSession = nullptr;
+	base::weak_ptr<Main::Session> _artworkSession;
 	Mode _mode = Mode::Playlist;
 	int _tileTrailingInset = 0;
 	base::Timer _autoscroll;
 	base::Timer _artworkUpdate;
+	rpl::lifetime _artworkLifetime;
 	base::Timer _playbackBadge;
 	QString _checkedState;
 	std::set<uint64_t> _verifiedDownloads;
@@ -474,16 +477,30 @@ QString PlaylistSongList::Rows::sourceState(int index) const {
 }
 
 void PlaylistSongList::Rows::setArtworkSession(not_null<Main::Session*> session) {
-	_artworkSession = session;
+	_artworkLifetime.destroy();
+	_artworkUpdate.cancel();
+	_cover.clear();
+	_artworkSession = base::make_weak(session.get());
+	session->account().sessionChanges() | rpl::on_next([=] {
+		_artworkLifetime.destroy();
+		_artworkUpdate.cancel();
+		_artworkSession = {};
+		_cover.clear();
+		update();
+	}, _artworkLifetime);
 	rpl::merge(
 		_scroll->scrollTopChanges() | rpl::to_empty,
 		session->downloaderTaskFinished(),
 		sizeValue() | rpl::to_empty
-	) | rpl::on_next([=] { _artworkUpdate.callOnce(0); }, lifetime());
+	) | rpl::on_next([=] { _artworkUpdate.callOnce(0); }, _artworkLifetime);
 }
 
 void PlaylistSongList::Rows::refreshArtwork() {
-	if (!_artworkSession || Core::App().passcodeLocked() || _data.empty()) return;
+	const auto session = _artworkSession.get();
+	if (!session || session->account().maybeSession() != session
+		|| Core::App().passcodeLocked() || _data.empty()) {
+		return;
+	}
 	const auto count = columns(width());
 	const auto firstRow = std::max(0, _scroll->scrollTop() / rowHeight() - 1);
 	const auto lastRow = (_scroll->scrollTop() + _scroll->viewport()->height())
@@ -494,7 +511,7 @@ void PlaylistSongList::Rows::refreshArtwork() {
 		const auto &row = _data[i];
 		const auto doc = row.audioDocument;
 		if (!doc || !wanted.insert(doc).second) continue;
-		const auto document = _artworkSession->data().document(doc);
+		const auto document = session->data().document(doc);
 		auto active = document->activeMediaView();
 		if (!active && !document->hasThumbnail()) continue;
 		auto &cover = _cover[doc];
@@ -504,10 +521,7 @@ void PlaylistSongList::Rows::refreshArtwork() {
 				cover.media->thumbnailWanted(Data::FileOrigin(row.message));
 			}
 		}
-		const auto thumbnail = cover.media->goodThumbnail()
-			? cover.media->goodThumbnail()
-			: cover.media->thumbnail() ? cover.media->thumbnail()
-			: cover.media->thumbnailInline();
+		const auto thumbnail = MusicArtworkThumbnail(*cover.media);
 		if (!thumbnail) continue;
 		const auto image = thumbnail->original();
 		const auto pixels = int(std::ceil(coverRect(itemRect(i)).width() * devicePixelRatioF()));

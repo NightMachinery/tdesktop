@@ -1,4 +1,5 @@
 #include "base/timer.h"
+#include "purple/purple_music_artwork.h"
 #include "ui/integration.h"
 #include "ui/style/style_core.h"
 #include "ui/widgets/continuous_sliders.h"
@@ -30,6 +31,25 @@ public:
 	void touchCounterIncrement() override {}
 	int touchCounterNow() override { return 0; }
 };
+
+bool CheckArtwork() {
+	struct AudioMedia {
+		const int *regular = nullptr;
+		const int *preview = nullptr;
+		const int *thumbnail() const { return regular; }
+		const int *thumbnailInline() const { return preview; }
+	};
+	const auto cover = 1;
+	const auto preview = 2;
+	if (Purple::MusicArtworkThumbnail(AudioMedia{ &cover, &preview }) != &cover
+		|| Purple::MusicArtworkThumbnail(AudioMedia{ nullptr, &preview }) != &preview
+		|| Purple::MusicArtworkThumbnail(AudioMedia{}) != nullptr) {
+		std::fprintf(stderr, "Audio cover selection failed.\n");
+		return false;
+	}
+	std::puts("Audio artwork uses the ordinary cover, inline preview, or placeholder.");
+	return true;
+}
 
 bool CheckProgress(bool rtl) {
 	using Direction = Ui::ContinuousSlider::Direction;
@@ -78,5 +98,5 @@ int main(int argc, char **argv) {
 	auto animations = Ui::Animations::Manager();
 	anim::SetDisabled(true);
 	style::StartManager(100);
-	return (CheckProgress(false) && CheckProgress(true)) ? 0 : 1;
+	return (CheckArtwork() && CheckProgress(false) && CheckProgress(true)) ? 0 : 1;
 }
