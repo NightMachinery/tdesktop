@@ -3,6 +3,7 @@
 #include "base/basic_types.h"
 #include "base/unique_qptr.h"
 #include "data/data_msg_id.h"
+#include "purple/purple_window_hint_geometry.h"
 
 #include <QtCore/QPointer>
 #include <QtCore/QRect>
@@ -46,8 +47,6 @@ public:
 		std::vector<WindowHintTarget> &out) = 0;
 };
 
-[[nodiscard]] QRect WindowHintClip(QWidget *widget);
-[[nodiscard]] bool WindowHintExposed(QWidget *widget, QPoint globalPoint);
 [[nodiscard]] std::vector<WindowHintTarget> CollectWindowHintTargets(QWidget *root);
 void ClickWindowHint(QWidget *widget, QPoint localPoint);
 void RegisterFolderHintMenu(QWidget *button, WindowHintTarget::MenuBuilder builder);

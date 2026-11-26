@@ -2751,8 +2751,7 @@ bool Keys::eventFilter(QObject *watched, QEvent *event) {
 			hydra->closeLayer();
 		}
 		if (_hints.windowActive() && (type == QEvent::Wheel || type == QEvent::TouchBegin
-			|| type == QEvent::MouseButtonPress || ((type == QEvent::Show || type == QEvent::Hide
-				|| type == QEvent::Move || type == QEvent::Resize || type == QEvent::LayoutRequest)
+			|| type == QEvent::MouseButtonPress || (WindowHintGeometryEvent(type)
 				&& _hints.affectedBy(static_cast<QWidget*>(watched))))) {
 			_hints.clear();
 			refreshStatusBar();
@@ -3701,7 +3700,7 @@ void Keys::refreshStatusBar() {
 	state.zenMode = _zenMode;
 	const auto focus = QApplication::focusWidget();
 	const auto filterFocused = focus && focus->window() == _window && ListFilter::IsMarked(focus);
-	if (const auto layer = visibleLayer(); layer != ActiveLayer::None) {
+	if (const auto layer = visibleLayer(); layer != ActiveLayer::None && !_hints.windowActive()) {
 		switch (layer) {
 		case ActiveLayer::Cheatsheet:
 			state.badge = ModalUi::BadgeKind::Help;

@@ -270,29 +270,6 @@ void RegisterFolderHintMenu(QWidget *button, WindowHintTarget::MenuBuilder build
 	new FolderHintMenu(button, std::move(builder));
 }
 
-QRect WindowHintClip(QWidget *widget) {
-	if (!widget || !widget->isVisible() || !widget->isEnabled()) {
-		return {};
-	}
-	auto clip = QRect(widget->mapToGlobal(QPoint()), widget->size());
-	for (auto parent = widget->parentWidget(); parent; parent = parent->parentWidget()) {
-		clip &= QRect(parent->mapToGlobal(QPoint()), parent->size());
-		if (parent->isWindow() || clip.isEmpty()) {
-			break;
-		}
-	}
-	return clip;
-}
-
-bool WindowHintExposed(QWidget *widget, QPoint globalPoint) {
-	if (!WindowHintClip(widget).contains(globalPoint)) {
-		return false;
-	}
-	const auto window = widget->window();
-	const auto hit = window->childAt(window->mapFromGlobal(globalPoint));
-	return hit && (hit == widget || widget->isAncestorOf(hit));
-}
-
 void ClickWindowHint(QWidget *widget, QPoint localPoint) {
 	const auto global = widget->mapToGlobal(localPoint);
 	const auto guard = QPointer(widget);

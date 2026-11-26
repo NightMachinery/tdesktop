@@ -433,7 +433,12 @@ universal = read("purple/purple_message_hints.cpp")
 hint_targets = read("purple/purple_hint_targets.cpp")
 ordered(keys, "Ui::RpWidget *Keys::hintRoot()", "if (!owner())", "stack->topShownLayer()")
 ordered(keys, "bool Keys::handleWindowHints", "receiver == _preeditInput", "_hints.windowActive()",
-        "event->isAutoRepeat()", "_hints.typeWindow(key, hintRoot(), &current->session(),")
+        "EffectiveBindings(true, target.contextMap)", "Action::WindowHint || binding.action == Action::WindowHintMenu",
+        "event->isAutoRepeat()", "startWindowHints(menus)", "_hints.typeWindow(key, hintRoot(), &current->session(),")
+ordered(keys, "bool Keys::eventFilter", "_hints.windowActive()", "WindowHintGeometryEvent(type)",
+        "_hints.affectedBy(", "_hints.clear()")
+ordered(keys, "void Keys::refreshStatusBar", "visibleLayer()", "&& !_hints.windowActive()",
+        "else if (_hints.active())", 'u"HINTS"_q')
 ordered(universal, "bool MessageHints::startWindow", "CollectWindowHintTargets(root)",
         "appendWindowMessages", "HintLabels(targets.size())", "WindowHintExposed", "PlaceHintBadge")
 ordered(universal, "MessageHints::Input MessageHints::typeWindow", "session != _session.get()",
