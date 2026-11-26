@@ -337,12 +337,15 @@ on the modal status line and cheatsheet footer.
     or in app-wide `settings.toml`. Clocks use IANA time zones. The cover
     hides clocks with the same current UTC offset and marks differences in
     calendar date. A label is visible on the cover.
-  - **Optional weather.** The cover can show current conditions, the next six
-    hours, and the next three days. Under **Settings → Purple → Privacy screen
-    weather**, choose a town or postal code, resolve a street address with
-    Apple on macOS, or enable approximate current location. The default is
-    off. Weather source and temperature units are device settings. The cover
-    displays a generic location label. Forecasts send the rounded area to
+  - **Weather.** The cover can show current conditions, the next six hours,
+    and the next three days. It uses approximate current location by default
+    and waits until the cover is shown to request it. When system location
+    is denied, restricted, or unavailable, the cover shows only its
+    non-weather content. **Settings → Purple → Privacy screen weather** shows
+    the reason and lets you choose a town or postal code, look up a street
+    address with Apple on macOS, or turn weather off. Weather source and
+    temperature units are device settings. The cover uses a generic location
+    label. Forecasts send the rounded area to
     Open-Meteo. Town searches send the text you submit. Both requests use an
     enabled SOCKS5 or HTTP app proxy, follow Qt's system proxy settings in
     system mode, and go direct when the app proxy is off or uses MTProto or

@@ -779,8 +779,22 @@ ordered(last_seen_cpp, "ShowPurpleNotice", "lastseen:empty:", ".background = tru
 privacy = read("purple/purple_privacy_screen.cpp")
 ordered(privacy, "NetworkProxy(proxy.isSystem(), proxy.isEnabled(),",
         "MTP::ToNetworkProxy(proxy.selected())")
-ordered(privacy, "void ensureFresh()", "PrivacyScreenActiveAny()",
-        'source != "off"', "resolveLocation(false)")
+ordered(privacy, "void ensureFresh()", "PrivacyScreenActiveAny()", "!Core::App().passcodeLocked()",
+        'source != "off"', "resolveLocation()")
+ordered(privacy, "void resolveLocation()", "CurrentWeatherLocationAccess()",
+        "CanRequestLocation(access, _locationPrompted)", "_locationPrompted |= allowPrompt",
+        "ResolveCurrentWeatherLocation(allowPrompt, done)")
+ordered(privacy, "void PrivacyBackdropWidget::showEvent(", "refreshWeatherIfConfigured()")
+assert "refreshWeatherIfConfigured();" not in between(
+    privacy, "style::PaletteChanged()", "PrivacyBackdropWidget::~PrivacyBackdropWidget()")
+assert "resolveLocation" not in between(privacy, 'u"Use approximate location"_q', 'u"Turn off"_q')
+mac_location = read("platform/mac/current_geo_location_mac.mm")
+ordered(mac_location, "case kCLAuthorizationStatusNotDetermined:", "if (!_allowPrompt)",
+        "if (_requestedAuthorization)", "_requestedAuthorization = YES",
+        "requestWhenInUseAuthorization")
+ordered(mac_location, "CurrentWeatherLocationAccess()", "locationServicesEnabled",
+        "LocationAccess::Disabled", "LocationAccess::NotDetermined", "LocationAccess::Denied",
+        "LocationAccess::Restricted")
 ordered(privacy, "connectionTypeChanges(", "const auto proxy = WeatherProxy()",
         "_proxy = proxy", "base::take(_nam)", "base::take(_forecast)",
         "reply->abort()", "old->deleteLater()", "ensureFresh()")
@@ -788,7 +802,7 @@ ordered(privacy, "void findPlaces(", "if (!wanted())", "get(*url)",
         "if (reply->manager() != _nam)", "findPlaces(query, wanted, done)")
 ordered(privacy, "QNetworkReply *get(", "_nam->setProxy(_proxy)", "Accept-Language",
         "return _nam->get(request)")
-ordered(privacy, 'u"Use approximate location"_q', 'ChangeWeatherSource("current")', "resolveLocation(true)")
+ordered(privacy, 'u"Use approximate location"_q', 'ChangeWeatherSource("current")', "box->closeBox()")
 ordered(privacy, "Lock with passcode", "hasLocalPasscode()", "lockByPasscode()", "DismissPrivacyScreen()")
 ordered(privacy, "QEvent::WindowActivate", "QEvent::FocusIn", "QEvent::InputMethod", "QEvent::Drop")
 ordered(privacy, "class PrivacyAppFilter final", "passcodeLockValue()", "QEvent::Show",

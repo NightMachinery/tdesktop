@@ -9,13 +9,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/platform/mac/base_utilities_mac.h"
 #include "core/current_geo_location.h"
+#include "purple/purple_privacy_weather_location.h"
 
 #include <CoreLocation/CoreLocation.h>
 
 @interface LocationDelegate : NSObject<CLLocationManagerDelegate>
 
 - (id) initWithCallback:(Fn<void(Core::GeoLocation)>)callback
-	allowPrompt:(BOOL)allowPrompt;
+	allowPrompt:(BOOL)allowPrompt once:(BOOL)once;
 - (void) locationManager:(CLLocationManager *)manager didUpdateLocations:(NSArray<CLLocation *> *)locations;
 - (void) locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error;
 - (void) locationManager:(CLLocationManager *) manager didChangeAuthorizationStatus:(CLAuthorizationStatus) status;
@@ -27,6 +28,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 CLLocationManager *_manager;
 Fn<void(Core::GeoLocation)> _callback;
 BOOL _allowPrompt;
+BOOL _once;
+BOOL _requestedAuthorization;
+BOOL _requestedLocation;
 }
 
 - (void) fail {
@@ -45,6 +49,10 @@ BOOL _allowPrompt;
 			[self fail];
 			return;
 		}
+		if (_requestedAuthorization) {
+			return;
+		}
+		_requestedAuthorization = YES;
 		if (@available(macOS 10.15, *)) {
 			[_manager requestWhenInUseAuthorization];
 		} else {
@@ -52,7 +60,14 @@ BOOL _allowPrompt;
 		}
 		break;
 	case kCLAuthorizationStatusAuthorizedAlways:
-		[_manager startUpdatingLocation];
+		if (_once) {
+			if (!_requestedLocation) {
+				_requestedLocation = YES;
+				[_manager requestLocation];
+			}
+		} else {
+			[_manager startUpdatingLocation];
+		}
 		return;
 	case kCLAuthorizationStatusRestricted:
 	case kCLAuthorizationStatusDenied:
@@ -63,9 +78,10 @@ BOOL _allowPrompt;
 }
 
 - (id) initWithCallback:(Fn<void(Core::GeoLocation)>)callback
-		allowPrompt:(BOOL)allowPrompt {
+		allowPrompt:(BOOL)allowPrompt once:(BOOL)once {
 	if (self = [super init]) {
 		_allowPrompt = allowPrompt;
+		_once = once;
 		_callback = std::move(callback);
 		_manager = [[CLLocationManager alloc] init];
 		_manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers;
@@ -100,7 +116,7 @@ BOOL _allowPrompt;
 }
 
 - (void) locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error {
-	if (error.code != kCLErrorLocationUnknown) {
+	if (_once || error.code != kCLErrorLocationUnknown) {
 		[self fail];
 	}
 }
@@ -122,11 +138,38 @@ BOOL _allowPrompt;
 namespace Platform {
 
 void ResolveCurrentExactLocation(Fn<void(Core::GeoLocation)> callback) {
-	[[LocationDelegate alloc] initWithCallback:std::move(callback) allowPrompt:YES];
+	[[LocationDelegate alloc] initWithCallback:std::move(callback)
+		allowPrompt:YES once:NO];
 }
 
-void ResolveCurrentAuthorizedLocation(Fn<void(Core::GeoLocation)> callback) {
-	[[LocationDelegate alloc] initWithCallback:std::move(callback) allowPrompt:NO];
+Purple::PrivacyWeather::LocationAccess CurrentWeatherLocationAccess() {
+	using Purple::PrivacyWeather::LocationAccess;
+	if (![CLLocationManager locationServicesEnabled]) {
+		return LocationAccess::Disabled;
+	}
+	const auto status = [] {
+		if (@available(macOS 11, *)) {
+			auto manager = [[CLLocationManager alloc] init];
+			const auto result = [manager authorizationStatus];
+			[manager release];
+			return result;
+		}
+		return [CLLocationManager authorizationStatus];
+	}();
+	switch (status) {
+	case kCLAuthorizationStatusAuthorizedAlways: return LocationAccess::Authorized;
+	case kCLAuthorizationStatusNotDetermined: return LocationAccess::NotDetermined;
+	case kCLAuthorizationStatusDenied: return LocationAccess::Denied;
+	case kCLAuthorizationStatusRestricted: return LocationAccess::Restricted;
+	default: return LocationAccess::Unavailable;
+	}
+}
+
+void ResolveCurrentWeatherLocation(
+		bool allowPrompt,
+		Fn<void(Core::GeoLocation)> callback) {
+	[[LocationDelegate alloc] initWithCallback:std::move(callback)
+		allowPrompt:allowPrompt once:YES];
 }
 
 void ResolveWeatherAddress(

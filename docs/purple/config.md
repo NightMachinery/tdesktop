@@ -32,7 +32,11 @@ UTC offset, with the system clock first. The clocks follow the system's
 12- or 24-hour time format and show day offsets relative to the device date.
 
 The weather source and units are set on this device in **Privacy screen
-weather**. At full size the cover shows current conditions, the next six
+weather**. With no saved choice, the source is approximate current location.
+An explicit Off or a previously configured town is preserved. Purple requests
+system location when the cover is visible and needs a forecast. If location
+is denied, restricted, or unavailable, the cover omits the forecast and the
+settings show the reason and offer town or postal-code search. At full size the cover shows current conditions, the next six
 hours, and the next three days. Narrow covers show three hourly forecasts.
 Short covers reserve space for the controls, local time, first world clock,
 and current conditions. The forecast credits Open-Meteo alongside the last

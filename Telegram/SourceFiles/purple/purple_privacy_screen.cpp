@@ -13,6 +13,7 @@
 #include "purple/purple_privacy_clocks.h"
 #include "purple/purple_privacy_state.h"
 #include "purple/purple_privacy_weather.h"
+#include "purple/purple_privacy_weather_location.h"
 #include "purple/purple_privacy_weather_proxy.h"
 #include "settings/settings_builder.h"
 #include "storage/storage_domain.h"
@@ -128,6 +129,7 @@ void SuppressTopLevelWidget(QWidget *widget, PrivacyState::TopLevelAction action
 }
 
 using PrivacyWeather::GeoPoint;
+using PrivacyWeather::LocationAccess;
 using PrivacyWeather::WeatherSnapshot;
 
 constexpr auto kWeatherSourcePref = "privacy_weather_source";
@@ -142,10 +144,8 @@ QByteArray WeatherPref(std::string_view name) {
 }
 
 QByteArray WeatherSource() {
-	const auto source = WeatherPref(kWeatherSourcePref);
-	return source.isEmpty()
-		? QByteArray(WeatherPref(PrivacyWeather::kLocationPref).isEmpty() ? "off" : "place")
-		: source;
+	return PrivacyWeather::EffectiveSource(WeatherPref(kWeatherSourcePref),
+		!WeatherPref(PrivacyWeather::kLocationPref).isEmpty());
 }
 
 std::optional<GeoPoint> ConfiguredWeatherCell() {
@@ -194,8 +194,20 @@ public:
 			: nullptr;
 	}
 
-	[[nodiscard]] bool locationFailed() const {
-		return _locationFailed;
+	[[nodiscard]] QString locationStatusText() const {
+		if (WeatherSource() != "current" || !_locationIssue) {
+			return {};
+		}
+		const auto reason = [&] {
+			switch (*_locationIssue) {
+			case LocationAccess::Denied: return u"Location permission was denied."_q;
+			case LocationAccess::Restricted: return u"Location access is restricted."_q;
+			case LocationAccess::Disabled: return u"Location Services is off."_q;
+			case LocationAccess::NotDetermined: return u"Location permission is still needed."_q;
+			default: return u"System location is unavailable."_q;
+			}
+		}();
+		return reason + u" You can search for a town or postal code below."_q;
 	}
 
 	[[nodiscard]] bool fresh(qint64 now) const {
@@ -208,7 +220,7 @@ public:
 		}
 		const auto ms = now.toMSecsSinceEpoch();
 		if (!snapshot(ms)) {
-			return (_failed || _locationFailed) ? u"Weather unavailable"_q : QString();
+			return _failed ? u"Weather unavailable"_q : QString();
 		}
 		const auto updated = QLocale::system().toString(
 			QDateTime::fromMSecsSinceEpoch(_updated, now.timeZone()).time(),
@@ -224,7 +236,7 @@ public:
 		const auto source = WeatherSource();
 		const auto now = QDateTime::currentMSecsSinceEpoch();
 		if (!PrivacyWeather::CanFetchForecast(
-				PrivacyScreenActiveAny(),
+				PrivacyScreenActiveAny() && !Core::App().passcodeLocked(),
 				source != "off",
 				_forecast != nullptr,
 				_nextAttempt,
@@ -232,11 +244,10 @@ public:
 			return;
 		}
 		if (source == "current") {
-#ifdef Q_OS_MAC
 			if (!_locating && now - _lastLocationAttempt >= kCurrentLocationInterval) {
-				resolveLocation(false);
+				resolveLocation();
+				return;
 			}
-#endif // Q_OS_MAC
 			if (_currentCell && !_locating) {
 				fetch(*_currentCell);
 			}
@@ -261,16 +272,32 @@ public:
 		_nextAttempt = 0;
 		_lastLocationAttempt = 0;
 		_locating = false;
-		_failed = _locationFailed = false;
+		_failed = false;
+		_locationIssue.reset();
 		WeatherChanges.fire({});
 	}
 
-	void resolveLocation(bool fromSettings) {
-		if (_locating) {
+	void locationUnavailable(LocationAccess issue) {
+		_currentCell.reset();
+		_snapshot.reset();
+		_nextAttempt = 0;
+		_failed = false;
+		_locationIssue = issue;
+		WeatherChanges.fire({});
+	}
+
+	void resolveLocation() {
+		_lastLocationAttempt = QDateTime::currentMSecsSinceEpoch();
+#ifdef Q_OS_MAC
+		const auto access = Platform::CurrentWeatherLocationAccess();
+		if (!PrivacyWeather::CanRequestLocation(access, _locationPrompted)) {
+			locationUnavailable(access);
 			return;
 		}
+		const auto allowPrompt = (access == LocationAccess::NotDetermined);
+		_locationPrompted |= allowPrompt;
+#endif // Q_OS_MAC
 		_locating = true;
-		_lastLocationAttempt = QDateTime::currentMSecsSinceEpoch();
 		const auto generation = _generation;
 		const auto done = [=](Core::GeoLocation location) {
 			if (generation != _generation) {
@@ -280,24 +307,31 @@ public:
 			const auto cell = location.exact()
 				? PrivacyWeather::RoundedCell(location.point.x(), location.point.y())
 				: std::nullopt;
-			if (!cell || !_currentCell || CellKey(*cell) != CellKey(*_currentCell)) {
+			if (!cell) {
+#ifdef Q_OS_MAC
+				const auto access = Platform::CurrentWeatherLocationAccess();
+				locationUnavailable(access == LocationAccess::Authorized
+					? LocationAccess::Unavailable
+					: access);
+#else // Q_OS_MAC
+				locationUnavailable(LocationAccess::Unavailable);
+#endif // Q_OS_MAC
+				return;
+			}
+			if (!_currentCell || CellKey(*cell) != CellKey(*_currentCell)) {
 				_snapshot.reset();
 				_nextAttempt = 0;
 			}
 			_currentCell = cell;
-			_locationFailed = !cell;
+			_locationIssue.reset();
 			WeatherChanges.fire({});
 			ensureFresh();
 		};
 #ifdef Q_OS_MAC
-		if (!fromSettings) {
-			Platform::ResolveCurrentAuthorizedLocation(done);
-			return;
-		}
+		Platform::ResolveCurrentWeatherLocation(allowPrompt, done);
+#else // Q_OS_MAC
+		Platform::ResolveCurrentExactLocation(done);
 #endif // Q_OS_MAC
-		if (fromSettings) {
-			Platform::ResolveCurrentExactLocation(done);
-		}
 	}
 
 	void findPlaces(
@@ -454,8 +488,11 @@ private:
 	qint64 _updated = 0;
 	uint64 _generation = 0;
 	bool _failed = false;
-	bool _locationFailed = false;
+	std::optional<LocationAccess> _locationIssue;
 	bool _locating = false;
+#ifdef Q_OS_MAC
+	bool _locationPrompted = false;
+#endif // Q_OS_MAC
 	rpl::lifetime _lifetime;
 };
 
@@ -823,8 +860,6 @@ PrivacyBackdropWidget::PrivacyBackdropWidget(not_null<QWidget*> parent)
 	style::PaletteChanged() | rpl::on_next([this] {
 		refreshCanvas();
 	}, _weatherLifetime);
-
-	refreshWeatherIfConfigured();
 }
 
 PrivacyBackdropWidget::~PrivacyBackdropWidget() = default;
@@ -854,7 +889,9 @@ void PrivacyBackdropWidget::showEvent(QShowEvent *event) {
 }
 
 void PrivacyBackdropWidget::refreshWeatherIfConfigured() {
-	WeatherStore::Instance().ensureFresh();
+	if (isVisible()) {
+		WeatherStore::Instance().ensureFresh();
+	}
 }
 
 void PrivacyBackdropWidget::refreshCanvas() {
@@ -983,7 +1020,8 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 		box->setTitle(rpl::single(u"Privacy screen weather"_q));
 		box->addRow(object_ptr<Ui::FlatLabel>(box, rpl::single(
-			u"Open-Meteo receives the rounded area for forecasts and the text you "
+			u"Weather uses approximate current location by default. Open-Meteo "
+			"receives the rounded area for forecasts and the text you "
 			"submit for town searches. Requests use your SOCKS5 or HTTP app proxy "
 			"when enabled, follow Qt in system proxy mode, and go direct otherwise."_q), st::boxLabel));
 #ifdef Q_OS_MAC
@@ -997,12 +1035,9 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 #endif // Q_OS_MAC
 		const auto field = box->addRow(object_ptr<Ui::InputField>(
 			box, st::defaultInputField, rpl::single(placeholder)));
-		const auto initial = (WeatherSource() == "current"
-			&& WeatherStore::Instance().locationFailed())
-			? u"Location is unavailable. Choose a place or permit location in system settings."_q
-			: QString();
 		const auto status = box->addRow(object_ptr<Ui::FlatLabel>(
-			box, rpl::single(initial), st::boxLabel));
+			box, rpl::single(WeatherStore::Instance().locationStatusText()),
+			st::boxLabel));
 		const auto results = box->addRow(object_ptr<Ui::VerticalLayout>(box));
 		const auto weak = QPointer(box.get());
 		const auto generation = box->lifetime().make_state<int>(0);
@@ -1096,7 +1131,6 @@ void ShowPrivacyWeatherSettings(not_null<Window::SessionController*> controller)
 				return;
 			}
 			ChangeWeatherSource("current");
-			WeatherStore::Instance().resolveLocation(true);
 			box->closeBox();
 		});
 		box->addButton(rpl::single(u"Turn off"_q), [=] {

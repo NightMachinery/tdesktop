@@ -12,11 +12,21 @@ struct GeoLocation;
 struct GeoAddress;
 } // namespace Core
 
+#ifdef Q_OS_MAC
+namespace Purple::PrivacyWeather {
+enum class LocationAccess;
+} // namespace Purple::PrivacyWeather
+#endif // Q_OS_MAC
+
 namespace Platform {
 
 void ResolveCurrentExactLocation(Fn<void(Core::GeoLocation)> callback);
 #ifdef Q_OS_MAC
-void ResolveCurrentAuthorizedLocation(Fn<void(Core::GeoLocation)> callback);
+[[nodiscard]] auto CurrentWeatherLocationAccess()
+-> Purple::PrivacyWeather::LocationAccess;
+void ResolveCurrentWeatherLocation(
+	bool allowPrompt,
+	Fn<void(Core::GeoLocation)> callback);
 void ResolveWeatherAddress(
 	const QString &address,
 	Fn<void(Core::GeoLocation)> callback);

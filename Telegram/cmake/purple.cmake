@@ -195,6 +195,7 @@ PRIVATE
     purple/purple_privacy_canvas.h
     purple/purple_privacy_state.h
     purple/purple_privacy_weather.h
+    purple/purple_privacy_weather_location.h
     purple/purple_privacy_weather_proxy.h
     purple/purple_privacy_clocks.h
     purple/purple_message_hint_placement.h

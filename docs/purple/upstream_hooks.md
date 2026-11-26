@@ -58,8 +58,8 @@ the numbers.
   is active.
 - `platform/platform_current_geo_location.h`,
   `platform/mac/current_geo_location_mac.mm`, and `Telegram.plist`: expose
-  a current-location lookup that cannot prompt, a separate explicit address
-  lookup, and the macOS location-use explanation.
+  the macOS location permission status and one-shot lookup for the privacy
+  cover, a separate explicit address lookup, and the location-use explanation.
 - `window/window_session_controller.cpp`: records chat visits for the local
   recency palette. `boxes/peer_list_box.*` allows the palette to sort search
   results while preserving the selected row.

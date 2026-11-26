@@ -1,6 +1,7 @@
 #include "purple/purple_privacy_clocks.h"
 #include "purple/purple_privacy_state.h"
 #include "purple/purple_privacy_weather.h"
+#include "purple/purple_privacy_weather_location.h"
 #include "purple/purple_privacy_weather_proxy.h"
 
 #include <iostream>
@@ -65,6 +66,32 @@ int main() {
 
 	const auto badSnap = ParseForecastResponse(R"(not-json)", QStringLiteral("London"));
 	Check(!badSnap.has_value(), "rejects malformed forecast JSON");
+
+	{
+		Check(EffectiveSource({}, false) == "current",
+			"untouched settings use approximate location");
+		Check(EffectiveSource({}, true) == "place",
+			"legacy town stays selected");
+		Check(EffectiveSource("off", true) == "off",
+			"explicit off wins even with a legacy town");
+		Check(EffectiveSource("off", false) == "off",
+			"explicit off survives without a saved location");
+		Check(EffectiveSource("place", false) == "place",
+			"explicit town stays selected");
+		Check(EffectiveSource("current", true) == "current",
+			"explicit approximate location wins over legacy town");
+		Check(CanRequestLocation(LocationAccess::NotDetermined, false),
+			"undetermined permission may prompt on the first due cover");
+		Check(!CanRequestLocation(LocationAccess::NotDetermined, true),
+			"undetermined permission cannot prompt again in this session");
+		Check(CanRequestLocation(LocationAccess::Authorized, true),
+			"once authorized, location refresh remains available");
+		for (const auto access : { LocationAccess::Denied, LocationAccess::Restricted,
+				LocationAccess::Disabled, LocationAccess::Unavailable }) {
+			Check(!CanRequestLocation(access, false),
+				"blocked access cannot start location or request permission");
+		}
+	}
 
 	{
 		const auto socks = QNetworkProxy(QNetworkProxy::Socks5Proxy,
