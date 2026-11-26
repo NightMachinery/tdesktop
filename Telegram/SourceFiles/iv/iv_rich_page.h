@@ -365,8 +365,9 @@ inline constexpr auto kTextDiffDeletedColorIndex = 11;
 	uint64 webpageId);
 [[nodiscard]] std::optional<RichPageLinkUrl> DecodeRichPageLinkUrl(
 	const QString &data);
+// A null session parses text and wire metadata without resolving peers or media.
 [[nodiscard]] std::shared_ptr<const RichPage> ParseRichPage(
-	not_null<Main::Session*> session,
+	Main::Session *session,
 	const MTPRichMessage &message,
 	RichParseMode mode = RichParseMode::Normal);
 [[nodiscard]] std::shared_ptr<const RichPage> ParseRichPage(

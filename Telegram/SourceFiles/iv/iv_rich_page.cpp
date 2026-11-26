@@ -219,13 +219,13 @@ enum class ParseSource {
 
 struct ParseContext {
 	ParseContext(
-		not_null<Main::Session*> session,
+		Main::Session *session,
 		ParseSource source = ParseSource::InstantViewPage)
 	: session(session)
 	, source(source) {
 	}
 
-	not_null<Main::Session*> session;
+	Main::Session *session;
 	ParseSource source = ParseSource::InstantViewPage;
 	base::flat_map<uint64, PhotoData*> photos;
 	base::flat_map<uint64, DocumentData*> documents;
@@ -724,7 +724,9 @@ void RememberPhoto(ParseContext *context, const MTPPhoto &photo) {
 	if (!id) {
 		return;
 	}
-	context->photos[id] = context->session->data().processPhoto(photo).get();
+	if (context->session) {
+		context->photos[id] = context->session->data().processPhoto(photo).get();
+	}
 	const auto size = PhotoSizeFromMtp(photo);
 	const auto existing = context->photoSizes.find(id);
 	if (!size.isEmpty() || existing == end(context->photoSizes)) {
@@ -737,8 +739,9 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 	if (!id) {
 		return;
 	}
-	const auto processed = context->session->data().processDocument(document).get();
-	context->documents[id] = processed;
+	if (context->session) {
+		context->documents[id] = context->session->data().processDocument(document).get();
+	}
 	auto info = DocumentInfoFromMtp(document);
 	const auto existing = context->documentInfos.find(id);
 	if (existing != end(context->documentInfos)) {
@@ -1086,7 +1089,7 @@ bool AppendRichText(
 		if (!AppendRichText(data.vtext(), result, context, anchorId, anchorIds)) {
 			return false;
 		}
-		if (context->dropRichTextClickHandlers) {
+		if (context->dropRichTextClickHandlers || !context->session) {
 			return true;
 		}
 		const auto entityData = MentionNameEntityData(
@@ -1882,7 +1885,9 @@ void AppendBlock(
 			context);
 	}, [&](const MTPDpageBlockChannel &data) {
 		auto parsed = MakeBlock(BlockKind::Channel);
-		parsed.peer = context->session->data().processChat(data.vchannel()).get();
+		if (context->session) {
+			parsed.peer = context->session->data().processChat(data.vchannel()).get();
+		}
 		data.vchannel().match([&](const MTPDchannel &row) {
 			parsed.channelId = row.vid().v;
 			parsed.channelTitle = qs(row.vtitle());
@@ -3077,7 +3082,7 @@ std::optional<RichPageLinkUrl> DecodeRichPageLinkUrl(const QString &data) {
 }
 
 std::shared_ptr<const RichPage> ParseRichPage(
-		not_null<Main::Session*> session,
+		Main::Session *session,
 		const MTPRichMessage &message,
 		RichParseMode mode) {
 	auto result = std::make_shared<RichPage>();

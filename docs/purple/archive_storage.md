@@ -10,7 +10,9 @@ export any saved file, including files from expired or consumed messages.
 In modal mode, use **j/k** to move, **Return** to open the focused row and
 **/** to filter the loaded rows. **Escape** clears the filter and restores
 row focus. **Older messages** appends to the list. The records reflect
-observations delivered to this Desktop profile.
+observations delivered to this Desktop profile. For structured Telegram messages,
+History retains Telegram's text summary, including paragraphs, supported inline
+formatting and emoji.
 
 ## Policy
 
