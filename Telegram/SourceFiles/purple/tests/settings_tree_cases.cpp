@@ -68,9 +68,14 @@ int main() {
 		&& timed->source == QStringLiteral("Inherited · Chat class"), "chat inherits its class in the preview");
 	Check(timed != archiveRows.end() && timed->physical.size() == 1 && timed->physical.front().inactive
 		&& timed->destination == QStringLiteral("Account"), "other account chat policy cannot leak into the preview");
-	const auto &descriptor = DescribeSetting(SettingId::ArchiveTimedDownload);
-	Check(!Decode(descriptor, QStringLiteral("on_arrival"))
-		&& Decode(descriptor, QStringLiteral("on_open")).has_value(), "Customize enforces the receipt gate");
+	for (const auto id : { SettingId::ArchiveTimedDownload, SettingId::ArchiveDirectTimed,
+			SettingId::ArchiveBotTimed, SettingId::ArchiveGroupTimed, SettingId::ArchiveChannelTimed }) {
+		const auto &descriptor = DescribeSetting(id);
+		for (const auto value : { QStringLiteral("off"), QStringLiteral("on_open") }) {
+			Check(Decode(descriptor, value) == SettingScalar(value), "Customize stages a supported timed policy");
+		}
+		Check(!Decode(descriptor, QStringLiteral("on_arrival")), "Customize enforces the receipt gate");
+	}
 	const auto reply = QByteArray("[media_reply]\ntext = \"staged line one\\nstaged line two\"\n");
 	const auto preview = LayerSettings(QString::fromUtf8(reply), QStringLiteral("fixture.toml"),
 		QString::fromUtf8(reply), QStringLiteral("fixture.toml"), { .traceReads = true });

@@ -101,6 +101,10 @@ void ArchivePolicyCases() {
 	f.routing.refreshSettings();
 	CHECK(f.routing.settings(A).archive.days == 15);
 	CHECK(f.routing.settings(B).archive.timedMiB == 30);
+	for (const auto value : { u"off"_q, u"on_open"_q }) {
+		const auto allowed = f.scalar(A, { u"archive"_q, u"timed_download"_q }, value);
+		CHECK(allowed.status == SettingsEditorStatus::Ready && allowed.review);
+	}
 	const auto gate = f.scalar(A, { u"archive"_q, u"timed_download"_q }, u"on_arrival"_q);
 	CHECK(gate.status == SettingsEditorStatus::InvalidValue && gate.error.contains(u"two-account"_q));
 	const auto oversized = f.scalar(A, { u"archive"_q, u"ordinary_file_mib"_q }, int64(17));
