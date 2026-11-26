@@ -4,12 +4,14 @@
 
 class HistoryItem;
 struct TextForMimeData;
+namespace Purple::ArchiveV2 { struct CapturedEvent; }
 namespace Main {
 class Session;
 }
 
 namespace Purple {
 
+void CaptureArchiveBody(Main::Session *session, const MTPDmessage &data, ArchiveV2::CapturedEvent &event);
 [[nodiscard]] TextForMimeData ArchivedText(const QByteArray &body);
 void CancelArchiveDownloads(Main::Session *session);
 void CancelArchiveAttachment(not_null<HistoryItem*> item);

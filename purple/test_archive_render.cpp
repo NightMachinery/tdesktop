@@ -1,20 +1,27 @@
 #include "base/integration.h"
 #include "lang/lang_keys.h"
+#include "purple/purple_archive_capture.h"
 #include "purple/purple_archive_v2_ui.h"
+#include "data/data_peer.h"
+#include "data/data_session.h"
+#include "main/main_session.h"
 #include "ui/abstract_button.h"
 #include "ui/effects/animations.h"
+#include "ui/emoji_config.h"
 #include "ui/integration.h"
 #include "ui/layers/generic_box.h"
 #include "ui/layers/layer_widget.h"
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_direction.h"
 #include "ui/style/style_core_palette.h"
+#include "ui/widgets/labels.h"
 #include "styles/style_layers.h"
 #include <QtCore/QFile>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QLocale>
 #include <QtCore/QRegularExpression>
+#include <QtCore/QResource>
 #include <QtCore/QTimer>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QKeyEvent>
@@ -23,6 +30,7 @@
 #include <QtGui/QPainter>
 #include <QtWidgets/QApplication>
 #include <cstdio>
+#include <cstdlib>
 
 namespace crl {
 rpl::producer<> on_main_update_requests() { return rpl::never<>(); }
@@ -79,6 +87,17 @@ QString Current(ushort key) {
 }
 rpl::producer<QString> Value(ushort key) { return rpl::single(Current(key)); }
 }
+namespace Data {
+UserData *Session::userLoaded(UserId) const { std::abort(); }
+// The fixture uses the real rich-message parser without a Telegram session.
+not_null<PeerData*> Session::processChat(const MTPChat &) { std::abort(); }
+not_null<PhotoData*> Session::processPhoto(const MTPPhoto &) { std::abort(); }
+not_null<DocumentData*> Session::processDocument(const MTPDocument &, const MTPVector<MTPDocument> *) { std::abort(); }
+}
+namespace Main {
+UserId Session::userId() const { std::abort(); }
+}
+const QString &PeerData::name() const { std::abort(); }
 namespace Purple {
 bool ModalKeysEnabled() { return true; }
 QString CopyTextAsMarkdown(const TextForMimeData &text) { return text.rich.text; }
@@ -94,6 +113,9 @@ public:
 	bool logSkipDebug() override { return true; }
 	void logMessageDebug(const QString &) override {}
 	void logMessage(const QString &) override {}
+	void logAssertionViolation(const QString &message) override {
+		std::fprintf(stderr, "archive render assertion: %s\n", qPrintable(message));
+	}
 };
 
 class Integration final : public Ui::Integration {
@@ -103,7 +125,7 @@ public:
 	}
 	void registerLeaveSubscription(not_null<QWidget*>) override {}
 	void unregisterLeaveSubscription(not_null<QWidget*>) override {}
-	QString emojiCacheFolder() override { return {}; }
+	QString emojiCacheFolder() override { return qEnvironmentVariable("XDG_CACHE_HOME") + u"/emoji"_q; }
 	QString fontsCacheFolder() override { return {}; }
 	QString openglCheckFilePath() override { return {}; }
 	QString angleBackendFilePath() override { return {}; }
@@ -227,6 +249,10 @@ int main(int argc, char **argv) {
 	style::SetScale(100);
 	style::StartManager(100);
 	style::main_palette::reset();
+	if (!Check(QResource::registerResource(qEnvironmentVariable("PURPLE_ARCHIVE_RENDER_RESOURCES")),
+			"load Telegram fixture resources")) return 1;
+	Ui::Emoji::Init();
+	const auto clearEmoji = gsl::finally([] { Ui::Emoji::Clear(); });
 	if (*argv[2]) ApplyNightPalette(QString::fromLocal8Bit(argv[2]));
 	const auto directory = QString::fromLocal8Bit(argv[1]);
 	const auto current = [] { return true; };
@@ -250,9 +276,74 @@ int main(int argc, char **argv) {
 	for (auto seq = 8; seq >= 6; --seq) {
 		history.rows.push_back({ seq, { before + seq * 18, (words + u" "_q + words).toUtf8() }, {} });
 	}
+	using Flags = MTPDmessage::Flag;
+	const auto bot = MTP_peerUser(MTP_long(17));
+	const auto lead = u"Fixture echo."_q;
+	const auto tail = u"Marker returned. 🟣"_q;
+	const auto paragraph = [](const auto &text) { return MTP_pageBlockParagraph(text); };
+	const MTPRichMessage rich = MTP_richMessage(MTP_flags(MTPDrichMessage::Flags()), MTP_vector<MTPPageBlock>({
+		paragraph(MTP_textConcat(MTP_vector<MTPRichText>({
+			MTP_textBold(MTP_textPlain(MTP_string(lead))), MTP_textPlain(MTP_string(u" "_q)),
+			MTP_textCustomEmoji(MTP_long(321), MTP_string(u"✅"_q)),
+		}))),
+		paragraph(MTP_textPlain(MTP_string(tail))),
+	}), MTP_vector<MTPPhoto>(), MTP_vector<MTPDocument>());
+	const auto makeWire = [=](const QString &text, const MTPVector<MTPMessageEntity> &entities,
+			const MTPRichMessage *blocks) {
+		const auto flags = Flags::f_from_id | (blocks ? Flags::f_rich_message : Flags::f_entities);
+		return MTP_message(MTP_flags(flags), MTP_int(290), bot, {}, {}, bot, {}, {}, {}, {}, {}, {},
+			MTP_int(int(before)), MTP_string(text), {}, {}, entities, // media, reply markup, entities
+			{}, {}, {}, {}, {}, {}, {}, {}, // views through restrictions
+			{}, {}, {}, {}, {}, {}, {}, {}, {}, blocks ? *blocks : MTPRichMessage());
+	};
+	const auto wire = makeWire({}, {}, &rich);
+	auto captured = CapturedEvent{ .identity = { { Purple::PeerTokenKind::User, 17 }, 290 }, .kind = ChatClass::Bot };
+	Purple::CaptureArchiveBody(nullptr, wire.c_message(), captured);
+	const auto echo = Purple::ArchivedText(captured.body).rich;
+	const auto expected = lead + u" ✅\n"_q + tail;
+	auto success = Check(!wire.c_message().is_out() && qs(wire.c_message().vmessage()).isEmpty()
+		&& captured.attachments.empty() && echo.text == expected
+		&& echo.entities == EntitiesInText{
+			{ EntityType::Bold, 0, int(lead.size()) },
+			{ EntityType::CustomEmoji, int(lead.size()) + 1, 1, u"321"_q },
+		}, "incoming rich bot reply retains both text paragraphs, bold and custom emoji");
+	const auto echoPage = TimelinePage{ { {
+		.identity = captured.identity, .status = MessageStatus::Live,
+		.observedAt = before, .latest = StoredBody{ before, captured.body }, .kind = ChatClass::Bot,
+	} }, {} };
+	success &= Render(directory, width, "rich-echo", [&](not_null<Ui::GenericBox*> box) {
+		FillTimelineBox(box, echoPage, false, Purple::ArchivedText, current, {});
+	}, [&](not_null<Ui::GenericBox*> box) {
+		return Check(Button(box, expected) && !Button(box, tr::lng_purple_archive_v2_media_preview(tr::now)),
+			"the native timeline uses the rich bot reply instead of Attachment");
+	});
+	success &= Render(directory, width, "rich-echo-history", [&](not_null<Ui::GenericBox*> box) {
+		const auto page = HistoryPage{ .rows = { { 1, { before, captured.body } } } };
+		FillHistoryBox(box, page, Purple::ArchivedText, current, {});
+	}, [&](not_null<Ui::GenericBox*> box) {
+		for (const auto child : box->findChildren<QWidget*>()) {
+			if (const auto label = dynamic_cast<Ui::FlatLabel*>(child); label && label->isVisible()
+				&& label->accessibilityName().contains(lead) && label->accessibilityName().contains(tail)) return true;
+		}
+		return Check(false, "native single-message History displays both paragraphs of the rich bot reply");
+	});
+	const auto ordinary = makeWire(lead + u" ✅"_q, MTP_vector<MTPMessageEntity>({
+		MTP_messageEntityBold(MTP_int(0), MTP_int(int(lead.size()))),
+		MTP_messageEntityCustomEmoji(MTP_int(int(lead.size()) + 1), MTP_int(1), MTP_long(321)),
+	}), nullptr);
+	auto ordinaryBody = CapturedEvent();
+	Purple::CaptureArchiveBody(nullptr, ordinary.c_message(), ordinaryBody);
+	success &= Check(Purple::ArchivedText(ordinaryBody.body).rich == TextWithEntities{ lead + u" ✅"_q, echo.entities },
+		"ordinary wire text and emoji entities are unchanged");
+	const MTPRichMessage empty = MTP_richMessage(MTP_flags(MTPDrichMessage::Flags()), MTP_vector<MTPPageBlock>(),
+		MTP_vector<MTPPhoto>(), MTP_vector<MTPDocument>());
+	const auto fallback = makeWire(lead, {}, &empty);
+	auto fallbackBody = CapturedEvent();
+	Purple::CaptureArchiveBody(nullptr, fallback.c_message(), fallbackBody);
+	success &= Check(Purple::ArchivedText(fallbackBody.body).rich.text == lead, "empty rich blocks retain wire text");
 	auto exports = 0;
 	auto loads = 0;
-	auto success = Check(ArchiveFileName(photo, before).startsWith(u"photo-")
+	success &= Check(ArchiveFileName(photo, before).startsWith(u"photo-")
 		&& ArchiveFileName(photo, before).endsWith(u".jpg")
 		&& ArchiveFileName(video, before).endsWith(u".webm")
 		&& ArchiveFileName({ 0, descriptor }, before) == filename, "original, MIME and kind filename rules");

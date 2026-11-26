@@ -31,8 +31,26 @@ if not exe.exists() or args.build_only:
     subprocess.run([*flags, "-c", str(repo / "purple/test_archive_render.cpp"), "-o", str(obj)], cwd=build, check=True)
     ui = products / "CMakeFiles/td_ui.dir"
     styles = sorted((ui / "gen/styles").glob("*.cpp.o"))
+    source = products / "CMakeFiles/Telegram.dir/SourceFiles"
+    iv = products / "CMakeFiles/td_iv.dir/SourceFiles/iv"
+    capture = [
+        source / "purple/purple_archive_capture.cpp.o",
+        source / "api/api_text_entities.cpp.o",
+        source / "data/data_peer_id.cpp.o",
+        source / "data/stickers/data_custom_emoji.cpp.o",
+        source / "history/history_item_reply_markup.cpp.o",
+        source / "iv/iv_rich_page.cpp.o",
+        source / "iv/iv_rich_page_quote.cpp.o",
+        iv / "markdown/iv_markdown_prepare_native_blocks.cpp.o",
+        iv / "markdown/iv_markdown_prepare_serialize.cpp.o",
+        iv / "markdown/iv_markdown_prepare_links.cpp.o",
+    ]
+    crl = products / "lib_crl/CMakeFiles/lib_crl.dir/crl"
     subprocess.run([
-        recipe[0], str(obj), str(build / target), *map(str, styles),
+        recipe[0], str(obj), str(build / target), *map(str, styles), *map(str, capture),
+        str(crl / "dispatch/crl_dispatch_async.cpp.o"),
+        str(products / "CMakeFiles/td_scheme.dir/gen/scheme.cpp.o"),
+        str(products / "lib_tl/CMakeFiles/lib_tl.dir/tl/tl_basic_types.cpp.o"),
         str(products / "CMakeFiles/td_lang.dir/gen/lang_auto.cpp.o"),
         str(products / "CMakeFiles/td_lang.dir/SourceFiles/lang/lang_tag.cpp.o"),
         str(products / "CMakeFiles/td_lang.dir/SourceFiles/lang/lang_keys.cpp.o"),
@@ -50,6 +68,8 @@ theme = out / "night.colors"
 with zipfile.ZipFile(repo / "Telegram/Resources/night.tdesktop-theme") as z:
     theme.write_bytes(z.read("colors.tdesktop-theme"))
 env = dict(os.environ, QT_QPA_PLATFORM="offscreen",
+           PURPLE_ARCHIVE_RENDER_RESOURCES=str(build / "Telegram.rcc"),
+           QT_PLUGIN_PATH=str(args.qt / "share/qt/plugins"),
            QT_QPA_PLATFORM_PLUGIN_PATH=str(args.qt / "share/qt/plugins/platforms"),
            XDG_CONFIG_HOME=str(out / "config"), XDG_CACHE_HOME=str(out / "cache"),
            XDG_DATA_HOME=str(out / "data"))
@@ -60,4 +80,4 @@ for scheme, colors in [("light", ""), ("dark", str(theme))]:
             directory.mkdir(exist_ok=True)
             subprocess.run([str(exe), str(directory), colors, str(width), direction], cwd=repo,
                            env=env, check=True)
-print("Rendered five native archive boxes at 500, 800 and 1300 px in light/dark and LTR/RTL.")
+print("Rendered seven native archive boxes at 500, 800 and 1300 px in light/dark and LTR/RTL.")

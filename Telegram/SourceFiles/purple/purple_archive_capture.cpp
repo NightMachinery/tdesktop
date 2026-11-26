@@ -7,6 +7,7 @@
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "iv/iv_rich_page.h"
 #include "main/main_session.h"
 #include "purple/purple_archive_v2_service.h"
 #include "purple/purple_archive_lifecycle_capture.h"
@@ -82,11 +83,7 @@ void Accept(not_null<Main::Session*> session, const MTPDmessage &data, Observati
 	const auto peer = peerFromMTP(data.vpeer_id());
 	const auto msg = MsgId(data.vid().v);
 	auto captured = Event(peer, msg, event, std::move(token), session->data().peerLoaded(peer));
-	Attach(data.vmedia(), captured);
-	const auto sender = data.vfrom_id() ? peerFromMTP(*data.vfrom_id()) : peer;
-	const auto entities = data.ventities();
-	captured.body = Pack({ qs(data.vmessage()), entities ? Api::EntitiesFromMTP(session.get(), entities->v)
-		: EntitiesInText() }, sender, captured.attachments);
+	CaptureArchiveBody(session.get(), data, captured);
 	if (event == Observation::Edit) captured.preimage = Preimage(session->data().message(peer, msg));
 	const auto request = arrival && !captured.attachments.empty() && !captured.attachments.front().timed;
 	if (Queue(session, std::move(captured)) && request) {
@@ -100,6 +97,18 @@ void Accept(not_null<Main::Session*> session, const MTPDmessage &data, Observati
 	}
 }
 
+}
+
+void CaptureArchiveBody(Main::Session *session, const MTPDmessage &data, ArchiveV2::CapturedEvent &event) {
+	Attach(data.vmedia(), event);
+	const auto sender = data.vfrom_id() ? peerFromMTP(*data.vfrom_id()) : peerFromMTP(data.vpeer_id());
+	// Rich messages carry their displayed body in the blocks, even when message is empty.
+	const auto rich = data.vrich_message();
+	auto text = rich ? Iv::FlattenRichPageSummary(Iv::ParseRichPage(session, *rich), false) : TextWithEntities();
+	if (text.empty()) {
+		text = { qs(data.vmessage()), Api::EntitiesFromMTP(session, data.ventities().value_or_empty()) };
+	}
+	event.body = Pack(text, sender, event.attachments);
 }
 
 TextForMimeData ArchivedText(const QByteArray &body) {
