@@ -62,8 +62,9 @@ QString PhoneDigits(const QString &query) {
 	return digits;
 }
 
-bool Searchable(not_null<PeerData*> peer) {
-	return !peer->migrateTo() && PickerVisible(peer);
+bool Searchable(not_null<PeerData*> peer, bool recent) {
+	return !peer->migrateTo() && PickerVisible(peer)
+		&& (!recent || !peer->owner().history(peer)->purpleHiddenFromView());
 }
 
 constexpr auto kRecentChatsPref = "purple-chat-palette-visits";
@@ -170,6 +171,7 @@ public:
 
 void ForEachChat(
 		not_null<Main::Session*> session,
+		bool recent,
 		Fn<void(not_null<PeerData*>)> add) {
 	auto &data = session->data();
 	auto seen = base::flat_set<PeerId>();
@@ -177,7 +179,7 @@ void ForEachChat(
 		for (const auto &row : chats->all()) {
 			const auto history = row->history();
 			if (history && seen.insert(history->peer->id).second
-				&& Searchable(history->peer)) {
+				&& Searchable(history->peer, recent)) {
 				add(history->peer);
 			}
 		}
@@ -187,7 +189,7 @@ void ForEachChat(
 		append(folder->chatsList()->indexed());
 	}
 	append(data.contactsList());
-	if (!seen.contains(session->user()->id) && Searchable(session->user())) {
+	if (!seen.contains(session->user()->id) && Searchable(session->user(), recent)) {
 		add(session->user());
 	}
 }
@@ -196,9 +198,11 @@ class ChatSearch final : public PeerListSearchController {
 public:
 	ChatSearch(
 		not_null<Window::SessionController*> window,
-		std::shared_ptr<SearchState> state)
+		std::shared_ptr<SearchState> state,
+			bool recent)
 	: _state(std::move(state))
 	, _window(base::make_weak(window.get()))
+	, _recent(recent)
 	, _api(&window->session().mtp())
 	, _timer([=] { resolve(); })
 	, _noteTimer([=] { loadNextNote(); }) {
@@ -217,7 +221,7 @@ public:
 		const auto phone = PhoneDigits(_query);
 		const auto searchNotes = phone.isEmpty() && !_query.startsWith(u'@');
 		auto foundPhone = false;
-		ForEachChat(&window->session(), [&](not_null<PeerData*> peer) {
+		ForEachChat(&window->session(), _recent, [&](not_null<PeerData*> peer) {
 			const auto user = peer->asUser();
 			if (const auto rank = Rank(peer, _state->terms, phone)) {
 				addResult(peer, *rank);
@@ -263,14 +267,14 @@ private:
 			_pendingNotes.pop_front();
 			const auto user = data.userLoaded(peerToUser(id));
 			if (!user || !user->isContact() || user->wasFullUpdated()
-				|| !Searchable(user)) continue;
+				|| !Searchable(user, _recent)) continue;
 			_notesAttempted.insert(id);
 			_noteRequest = _api.request(MTPusers_GetFullUser(user->inputUser()))
 			.done([=](const MTPusers_UserFull &result) {
 				_noteRequest = 0;
 				const auto live = _window.get();
 				if (!live || !Current(live)) return;
-				if (user->isContact() && Searchable(user) && !user->wasFullUpdated()) {
+				if (user->isContact() && Searchable(user, _recent) && !user->wasFullUpdated()) {
 					const auto &full = result.c_users_userFull();
 					const auto &fields = full.vfull_user().c_userFull();
 					if (fields.vid().v == int64(peerToUser(id).bare)) {
@@ -281,7 +285,7 @@ private:
 					}
 				}
 				if (!_query.isEmpty() && !_query.startsWith(u'@')
-					&& PhoneDigits(_query).isEmpty() && Searchable(user)) {
+					&& PhoneDigits(_query).isEmpty() && Searchable(user, _recent)) {
 					if (const auto rank = Rank(user, _state->terms, QString())) {
 						addResult(user, *rank);
 					}
@@ -313,7 +317,7 @@ private:
 					data.processUsers(resolved.vusers());
 					data.processChats(resolved.vchats());
 					const auto peer = data.peerLoaded(peerFromMTP(resolved.vpeer()));
-					if (peer && Searchable(peer)) {
+					if (peer && Searchable(peer, _recent)) {
 						addResult(peer, Rank(peer, _state->terms, phone).value_or(6));
 					}
 					delegate()->peerListSearchRefreshRows();
@@ -332,6 +336,7 @@ private:
 
 	std::shared_ptr<SearchState> _state;
 	base::weak_ptr<Window::SessionController> _window;
+	const bool _recent;
 	MTP::Sender _api;
 	base::Timer _timer;
 	base::Timer _noteTimer;
@@ -348,7 +353,7 @@ public:
 		not_null<Window::SessionController*> window,
 		bool recent,
 		std::shared_ptr<SearchState> search = std::make_shared<SearchState>())
-	: PeerListController(std::make_unique<ChatSearch>(window, search))
+	: PeerListController(std::make_unique<ChatSearch>(window, search, recent))
 	, _window(base::make_weak(window.get()))
 	, _session(&window->session())
 	, _search(std::move(search))
@@ -394,7 +399,7 @@ public:
 		delegate()->peerListSetSearchMode(PeerListSearchMode::Enabled);
 		setSearchNoResultsText(tr::lng_purple_chat_palette_empty(tr::now));
 		auto peers = std::vector<not_null<PeerData*>>();
-		ForEachChat(_session, [&](not_null<PeerData*> peer) {
+		ForEachChat(_session, _recent, [&](not_null<PeerData*> peer) {
 			peers.push_back(peer);
 		});
 		if (_recent) {
@@ -419,7 +424,7 @@ public:
 
 	std::unique_ptr<PeerListRow> createSearchRow(
 			not_null<PeerData*> peer) override {
-		if (!Searchable(peer)) return {};
+		if (!Searchable(peer, _recent)) return {};
 		auto row = std::make_unique<ChatRow>(peer, _search);
 		if (peer->isSelf()) {
 			row->setSavedMessagesChatStatus(tr::lng_saved_messages(tr::now));
@@ -435,15 +440,16 @@ public:
 		const auto window = _window;
 		const auto live = window.get();
 		const auto peer = row->peer();
-		if (!_box || !live || !Current(live) || !Searchable(peer)) return;
+		if (!_box || !live || !Current(live) || !Searchable(peer, _recent)) return;
 		const auto id = peer->id;
+		const auto recent = _recent;
 		_box->closeBox();
-		crl::on_main(live, [window, id] {
+		crl::on_main(live, [window, id, recent] {
 			const auto controller = window.get();
 			if (!controller || !Current(controller)
 				|| Core::App().activeWindow() != &controller->window()) return;
 			const auto peer = controller->session().data().peerLoaded(id);
-			if (peer && Searchable(peer)) controller->showPeerHistory(peer);
+			if (peer && Searchable(peer, recent)) controller->showPeerHistory(peer);
 		});
 	}
 

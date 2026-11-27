@@ -441,8 +441,10 @@ on the modal status line and cheatsheet footer.
 Open the chat palette with `SPC ,` or `SPC RET` to browse chats, archived
 chats, channels, and contacts in their usual order. `SPC b b` starts with the
 most recently viewed chats and puts the current chat last among equal matches.
-Both respect Work Mode visibility. Recency stays in encrypted per-account
-storage and clears on logout.
+The recent palette follows Work Mode's chat view. The all-chats palette can
+also open chats hidden from that view. Both honor global hiding, including
+`hide_everywhere_p`. Recency stays in encrypted per-account storage and clears
+on logout.
 
 Every query word must match. Literal name matches rank first, followed by name
 matches using the other keyboard layout, username or phone, then contact note.

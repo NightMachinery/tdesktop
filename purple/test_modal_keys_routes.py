@@ -939,4 +939,13 @@ ordered(privacy_input, "bool filterWindowEvent", "QEvent::ShortcutOverride", "QE
 assert all(word not in notice_probe for word in ("writePref", "WriteSettings", "sync(", "api()."))
 assert "Purple::IsChatPaletteController(_controller)" in read("boxes/peer_list_box.cpp")
 
+palette = read("purple/purple_chat_palette.cpp")
+ordered(palette, "bool Searchable(", "PickerVisible(peer)",
+        "!recent || !peer->owner().history(peer)->purpleHiddenFromView()")
+ordered(palette, "void searchQuery(", "ForEachChat(&window->session(), _recent")
+ordered(palette, "void resolve()", "Searchable(peer, _recent)")
+ordered(palette, "void prepare() override", "ForEachChat(_session, _recent")
+ordered(palette, "void rowClicked(", "Searchable(peer, _recent)",
+        "[window, id, recent]", "Searchable(peer, recent)", "showPeerHistory")
+
 print("Modal key, status line, which-key, cheatsheet, M-x, localleader, hints and background routes passed")
