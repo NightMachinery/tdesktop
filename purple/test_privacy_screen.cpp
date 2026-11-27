@@ -201,6 +201,12 @@ int main() {
 	Check(ClassifyTopLevelSurface(true, false, Qt::Dialog) == TopLevelAction::HideAndRecordRestore,
 		"auxiliary dialogs are hidden and recorded");
 
+	Check(CanRestoreFocus(false, true, true, true), "uncover restores the saved focus");
+	Check(!CanRestoreFocus(true, true, true, true), "lock prevents focus restore");
+	Check(!CanRestoreFocus(false, false, true, true), "changed session prevents focus restore");
+	Check(!CanRestoreFocus(false, true, false, true), "foreign window prevents focus restore");
+	Check(!CanRestoreFocus(false, true, true, false), "destroyed or hidden field cannot regain focus");
+
 	// 8. SurfaceTracker: normal activate -> dismiss restores immediately.
 	{
 		SurfaceTracker st;

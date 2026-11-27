@@ -342,7 +342,9 @@ on the modal status line and cheatsheet footer.
   restores hidden auxiliary windows (or defers restoring them until passcode
   unlock when locked via **Lock with passcode** or auto-lock), badges, Now
   Playing metadata, menus, and window titles, and runs any queued `tg://` start
-  URLs. The privacy screen is not a security lock; when a local passcode is
+  URLs. Return restores the previously focused control when it is still in
+  the same unlocked window and account. Modal shortcuts resume in Normal.
+  The privacy screen is not a security lock; when a local passcode is
   configured, it offers a separate **Lock with passcode** button that engages
   the passcode lock before dismissing the privacy overlay so chats do not flash.
   - **World clocks.** Set an ordered list under `[privacy_screen]` in Customize

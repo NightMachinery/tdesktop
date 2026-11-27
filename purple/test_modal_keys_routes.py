@@ -935,6 +935,11 @@ ordered(notices_cpp, "class PendingNoticeDelivery", "QEvent::FocusIn", "schedule
 ordered(notices_cpp, "void SubmitNotice", "Store().submit", "CanPresentNotice(window, accountKey)")
 ordered(keys, "Core::App().passcodeLockValue()", "_held.clear()", "if (!locked)", "schedulePendingNoticeFlush()")
 privacy_input = read("purple/purple_privacy_screen.cpp")
+ordered(privacy_input, "void activate(QRect body)", "if (!_active)", "_window->focusWidget()",
+        "_previousSession", "setFocus(Qt::OtherFocusReason)")
+ordered(privacy_input, "void dismissLocal()", "exchange(_previousFocus", "hide()",
+        "CanRestoreFocus(locked", "focus->setFocus", "_window->setInnerFocus()")
+ordered(keys, "Purple::PrivacyScreenChanges()", "!active && Enabled()", "enterNormal(true, false)")
 ordered(privacy_input, "bool filterWindowEvent", "QEvent::ShortcutOverride", "QEvent::KeyRelease",
         "Swallow every keystroke", "return true")
 assert all(word not in notice_probe for word in ("writePref", "WriteSettings", "sync(", "api()."))

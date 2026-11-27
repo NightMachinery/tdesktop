@@ -25,6 +25,14 @@ enum class TopLevelAction {
 	return TopLevelAction::HideAndRecordRestore;
 }
 
+[[nodiscard]] inline bool CanRestoreFocus(
+		bool locked,
+		bool sameSession,
+		bool sameWindow,
+		bool available) {
+	return !locked && sameSession && sameWindow && available;
+}
+
 struct SurfaceTracker {
 	bool privacyActive = false;
 	bool passcodeLocked = false;

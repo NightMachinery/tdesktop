@@ -2510,7 +2510,12 @@ Keys::Keys(not_null<MainWindow*> window)
 				return;
 			}
 		}
-		clearPrefix();
+		if (!active && Enabled() && !Core::App().passcodeLocked()
+			&& !_window->controller().locked()) {
+			enterNormal(true, false);
+		} else {
+			clearPrefix();
+		}
 		_window->updateControlsGeometry();
 		refreshStatusBar();
 		if (!active) {

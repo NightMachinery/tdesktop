@@ -49,6 +49,7 @@
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 namespace Purple {
@@ -538,6 +539,10 @@ public:
 	}
 
 	void activate(QRect body) {
+		if (!_active) {
+			_previousFocus = _window->focusWidget();
+			_previousSession = base::make_weak(_window->controller().sessionController());
+		}
 		_active = true;
 		_lockButton->setVisible(
 			Core::App().domain().local().hasLocalPasscode()
@@ -559,11 +564,19 @@ public:
 			return;
 		}
 		_active = false;
+		const auto focus = std::exchange(_previousFocus, {});
+		const auto session = std::exchange(_previousSession, {});
 		hide();
 		_window->updateTitle();
 		_window->updateControlsGeometry();
 		_window->fixOrder();
-		if (QApplication::activeWindow() == _window) {
+		const auto locked = Core::App().passcodeLocked() || _window->controller().locked();
+		if (PrivacyState::CanRestoreFocus(locked,
+				session && session.get() == _window->controller().sessionController(),
+				focus && focus->window() == _window && !isAncestorOf(focus),
+				focus && focus->isVisible() && focus->isEnabled())) {
+			focus->setFocus(Qt::OtherFocusReason);
+		} else if (QApplication::activeWindow() == _window) {
 			_window->setInnerFocus();
 		}
 	}
@@ -671,6 +684,8 @@ private:
 	PrivacyBackdropWidget *_backdrop = nullptr;
 	Ui::RoundButton *_returnButton = nullptr;
 	Ui::RoundButton *_lockButton = nullptr;
+	QPointer<QWidget> _previousFocus;
+	base::weak_ptr<Window::SessionController> _previousSession;
 	bool _active = false;
 };
 
