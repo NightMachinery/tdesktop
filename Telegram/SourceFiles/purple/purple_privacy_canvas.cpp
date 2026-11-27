@@ -322,6 +322,17 @@ int Width(const QFont &font, const QString &string) {
 	return QFontMetrics(font).horizontalAdvance(string);
 }
 
+QFont FitHeight(QFont font, int limit) {
+	const auto height = QFontMetrics(font).height();
+	if (height > limit) {
+		font.setPixelSize(std::max(1, font.pixelSize() * std::max(1, limit) / height));
+		while (font.pixelSize() > 1 && QFontMetrics(font).height() > limit) {
+			font.setPixelSize(font.pixelSize() - 1);
+		}
+	}
+	return font;
+}
+
 struct Layout {
 	Fonts fonts;
 	Metrics m;
@@ -502,22 +513,28 @@ Header MeasureHeader(const Frame &frame, const Layout &g, const QFont &base) {
 	const auto clockW = bounds.width() - currentW - (currentW ? 2 * m.gap : 0);
 	const auto tall = bounds.height() > 10 * m.unit;
 	const auto compact = g.panel.isEmpty() && bounds.width() < 24 * m.unit;
-	const auto stackClocks = compact || (tall && !g.columns);
 	const auto top = bounds.y() + (tall ? m.unit : m.gap);
 	const auto dateH = m.label;
 	const auto time = Time(frame.locale, frame.local.time());
 	result.zoneFont = Font(base, 3 * m.unit / 2, QFont::Medium);
 	const auto zoneH = QFontMetrics(result.zoneFont).height() + 2 * m.caption;
-	auto timeSize = std::min(tall ? 6 * m.unit : 5 * m.unit, bounds.height() / 2);
-	if (stackClocks && !frame.clocks.empty()) {
-		const auto room = std::max(1, bounds.bottom() - top - dateH - zoneH - m.gap);
-		const auto natural = QFontMetrics(Font(base, timeSize, QFont::Light)).height();
-		timeSize = std::max(1, std::min(timeSize, timeSize * room / natural));
-	}
+	const auto timeSize = std::min(tall ? 6 * m.unit : 5 * m.unit, bounds.height() / 2);
 	const auto goal = Font(base, timeSize, QFont::Light);
-	timeSize = std::max(1, std::min(timeSize,
-		timeSize * clockW / std::max(1, Width(goal, time))));
-	result.timeFont = Font(base, timeSize, QFont::Light);
+	auto timeFont = Font(base, std::min(timeSize,
+		timeSize * clockW / std::max(1, Width(goal, time))), QFont::Light);
+	auto stackClocks = compact || (!g.columns && g.icons);
+	if (!frame.clocks.empty()) {
+		const auto &first = frame.clocks.front();
+		const auto firstTime = Time(frame.locale, first.time.time());
+		const auto firstW = std::max(Width(g.fonts.caption, first.label),
+			Width(result.zoneFont, firstTime));
+		stackClocks = stackClocks
+			|| Width(timeFont, time) + 5 * m.gap + firstW > clockW;
+		if (stackClocks) {
+			timeFont = FitHeight(timeFont, bounds.bottom() - top - dateH - zoneH - m.gap);
+		}
+	}
+	result.timeFont = timeFont;
 	const auto timeH = QFontMetrics(result.timeFont).height();
 	const auto x = bounds.x() + m.gap;
 	const auto timeW = Width(result.timeFont, time);
@@ -592,7 +609,7 @@ void PaintHeader(QPainter &p, const Frame &frame, const Layout &g,
 	}
 	text({ r.x(), r.y(), r.width(), m.label }, frame.labels.local, f.label, c.muted);
 	r.translate(0, m.label + 2 * m.gap);
-	const auto icon = std::min(3 * m.unit, r.width() / 4);
+	auto icon = std::min(3 * m.unit, r.width() / 4);
 	const auto temp = CurrentTemperature(frame);
 	const auto goal = Width(f.figure, temp);
 	auto figure = f.figure;
@@ -600,20 +617,29 @@ void PaintHeader(QPainter &p, const Frame &frame, const Layout &g,
 		figure = Font(base, f.figure.pixelSize() * std::max(1, r.width() - icon - m.gap)
 			/ std::max(1, goal), QFont::Light);
 	}
+	const auto statusHeight = g.panel.isEmpty() && !frame.update.isEmpty()
+		? m.caption + m.gap : 0;
+	const auto height = g.header.bottom() + 1 - r.y() - statusHeight;
+	figure = FitHeight(figure, height);
+	const auto condition = frame.weather->condition;
+	const auto conditionW = Width(f.label, condition);
+	const auto stack = icon + Width(figure, temp) + 4 * m.gap + conditionW > r.width();
+	if (stack) {
+		figure = FitHeight(figure, height - m.label);
+	}
 	const auto figureH = QFontMetrics(figure).height();
+	icon = std::min(icon, figureH);
 	Condition(p, Visual(p, g.header, QRect(r.x(), r.y() + (figureH - icon) / 2, icon, icon)),
 		frame.weather->code, frame.weather->isDay.value_or(frame.day), c);
 	const auto tempX = r.x() + icon + m.gap;
 	const auto tempW = Width(figure, temp);
 	text({ tempX, r.y(), tempW, figureH }, temp, figure, c.ink);
-	const auto condition = frame.weather->condition;
-	const auto conditionW = Width(f.label, condition);
-	if (tempX + tempW + 3 * m.gap + conditionW <= r.right()) {
-		text({ tempX + tempW + 2 * m.gap, r.y(), conditionW + m.gap, figureH },
-			condition, f.label, c.ink);
-	} else {
+	if (stack) {
 		text({ r.x(), r.y() + figureH, r.width(), m.label }, condition, f.label, c.ink);
 		r.translate(0, m.label);
+	} else {
+		text({ tempX + tempW + 2 * m.gap, r.y(), conditionW + m.gap, figureH },
+			condition, f.label, c.ink);
 	}
 	if (g.panel.isEmpty() && !frame.update.isEmpty()) {
 		p.setFont(f.caption);

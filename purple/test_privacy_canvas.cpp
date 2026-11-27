@@ -91,6 +91,22 @@ QString Render(const QDir &output, const QString &name, QSize size, Frame frame,
 	const auto shot = canvas.grab();
 	Check(!shot.isNull() && shot.deviceIndependentSize().toSize() == size, "production canvas fits viewport");
 	Check(shot.save(output.filePath(name + QStringLiteral(".png"))), "save offscreen production canvas");
+	if (name.startsWith(QStringLiteral("timeline-short"))) {
+		const auto pixels = shot.toImage();
+		const auto panel = frame.dark ? QColor(0x24283a) : QColor(0xf5f8f7);
+		const auto ink = frame.dark ? QColor(0xf9f4ee) : QColor(0x1d3544);
+		auto top = pixels.height() / 6;
+		while (top < pixels.height() / 2
+			&& pixels.pixelColor(pixels.width() / 2, top) != panel) {
+			++top;
+		}
+		Check(top < pixels.height() / 2, "short fixture finds the top of the forecast panel");
+		auto coveredInk = false;
+		for (auto x = 6 * pixels.width() / 10; x < 9 * pixels.width() / 10; ++x) {
+			coveredInk |= pixels.pixelColor(x, top - 1) == ink;
+		}
+		Check(!coveredInk, "current conditions clear the short forecast panel");
+	}
 	const auto desc = canvas.accessibleDescription();
 	Check(desc.contains(frame.locale.toString(frame.local.time(), QLocale::ShortFormat)),
 		"widget reports the locale-formatted time");
