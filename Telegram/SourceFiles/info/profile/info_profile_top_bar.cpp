@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_top_bar.h"
+#include "purple/purple_hint_role.h"
 #include "purple/purple_last_seen_ui.h"
 
 #include "api/api_peer_colors.h"
@@ -1258,6 +1259,7 @@ void TopBar::setupActions(not_null<Window::SessionController*> controller) {
 			this,
 			tr::lng_profile_action_short_leave(tr::now),
 			st::infoProfileTopBarActionLeave);
+		Purple::SetWindowHintRole(leaveButton, Purple::HintRole::Destructive);
 		leaveButton->setClickedCallback(
 			Window::DeleteAndLeaveHandler(controller, peer));
 		leaveButton->setAccessibleName(tr::lng_profile_action_short_leave(tr::now));
@@ -3008,6 +3010,7 @@ void TopBar::setupButtons(
 				(isLayer
 					? st::infoLayerTopBarBlackClose
 					: st::infoTopBarBlackClose));
+			Purple::SetWindowHintRole(_close.get(), Purple::HintRole::Close);
 			_close->setAccessibleName(tr::lng_sr_close_panel(tr::now));
 			_close->show();
 			_close->addClickHandler(isSide

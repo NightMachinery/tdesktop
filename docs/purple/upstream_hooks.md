@@ -938,7 +938,13 @@ B6 extracts the desktop surfaces into `purple_last_seen_ui`. The existing
   click time, requires the original live session and loads that session's user
   by typed ID. It never borrows another account's active controller.
 
+**`Telegram/SourceFiles/info/profile/info_profile_actions.cpp`**
+
+- `ActionsFiller::addLeaveChannelAction` marks the native Leave button as destructive for window hints.
+
 **`Telegram/SourceFiles/info/profile/info_profile_top_bar.cpp`**: B6 and D16.
+
+- The profile action strip marks Leave as destructive. The side-panel and layer Close buttons share the reversible Close hint role.
 - The `show_or_premium_box.h` include and upstream button text are restored,
   with one Purple UI include. `SetupShowLastSeen` handles the existing fork
   branch after the original eligibility and premium early returns. The latter

@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_actions.h"
+#include "purple/purple_hint_role.h"
 
 #include "api/api_blocked_peers.h"
 #include "api/api_chat_participants.h"
@@ -3167,7 +3168,7 @@ void ActionsFiller::addBlockAction(not_null<UserData*> user) {
 void ActionsFiller::addLeaveChannelAction(not_null<ChannelData*> channel) {
 	Expects(_controller->parentController());
 
-	AddActionButton(
+	const auto button = AddActionButton(
 		_wrap,
 		tr::lng_profile_leave_channel(),
 		AmInChannelValue(channel),
@@ -3175,6 +3176,7 @@ void ActionsFiller::addLeaveChannelAction(not_null<ChannelData*> channel) {
 			_controller->parentController(),
 			channel),
 		&st::infoIconLeave);
+	Purple::SetWindowHintRole(button->entity(), Purple::HintRole::Destructive);
 }
 
 void ActionsFiller::addJoinChannelAction(
