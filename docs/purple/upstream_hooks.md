@@ -1408,6 +1408,9 @@ surface, not a new measurement of the older merge-base figures above.
 - Only `HitTextSegment` sets that observation, from `insideText` and the
   underlying `uponSymbol`; wrappers propagate it without synthesizing it.
 
+**`Telegram/SourceFiles/ui/chat/pinned_bar.cpp`**:
+- Registers the message bar body as a navigational hint when displayed content changes. The label uses the native bar click, and the right button remains a separate target.
+
 **`Telegram/SourceFiles/history/view/media/history_view_document.cpp`**:
 - Two paint hooks give keyboard hints the visible primary file control and corner download rectangles in standalone and grouped documents.
 - The normal caption draw has the same empty-highlight hook and a neutral nullable const captionText accessor. Grouped owners remain outside the witness catalog. Nongroup caption reachability is not established.

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/pinned_bar.h"
 
 #include "ui/chat/message_bar.h"
+#include "purple/hooks/message_bar_hint.h"
 #include "ui/effects/spoiler_mess.h"
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/buttons.h"
@@ -79,6 +80,7 @@ void PinnedBar::setContent(rpl::producer<Ui::MessageBarContent> content) {
 		content.margins = { 0, 0, right, 0 };
 
 		_bar->set(std::move(content));
+		Purple::RegisterMessageBarHint(_bar->widget(), [=] { return _shouldBeShown && !_forceHidden; });
 		if (creating) {
 			_bar->finishAnimating();
 		}

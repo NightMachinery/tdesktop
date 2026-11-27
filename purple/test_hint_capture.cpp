@@ -15,6 +15,7 @@ protected:
 		auto painter = QPainter(this);
 		painter.translate(4, 6);
 		Purple::RecordHintFace(painter, QRect(6, 16, 32, 32));
+		Purple::RecordHintFace(painter, QRect(27, 36, 14, 14));
 		painter.drawText(QPoint(46, 32), QStringLiteral("Track title"));
 	}
 };
@@ -30,8 +31,9 @@ int main(int argc, char **argv) {
 	const auto visible = QRect(60, 10, 126, 100);
 	const auto capture = Purple::CaptureHintGeometry(&root, visible);
 	const auto face = QRect(80, 52, 32, 32);
-	if (capture.faces != std::vector<QRect>{ face } || capture.text.empty()) return 1;
+	const auto download = QRect(101, 72, 14, 14);
+	if (capture.faces != std::vector<QRect>{ download, face } || capture.text.empty()) return 1;
 	const auto run = capture.text.front();
 	if (run.left() != 120 || !run.contains(121, 64) || !visible.contains(run)) return 2;
-	std::cout << "Painted control, translated text and clipping checks passed\n";
+	std::cout << "Overlapping controls, translated text and clipping checks passed\n";
 }

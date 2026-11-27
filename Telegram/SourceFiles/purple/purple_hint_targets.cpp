@@ -1,6 +1,8 @@
 #include "purple/purple_hint_targets.h"
 #include "purple/purple_hint_item_identity.h"
+#include "purple/hooks/message_bar_hint.h"
 
+#include "core/click_handler_types.h"
 #include "data/data_document.h"
 #include "data/data_file_click_handler.h"
 #include "data/data_forum_topic.h"
@@ -12,6 +14,7 @@
 #include "history/view/history_view_cursor_state.h"
 #include "info/media/info_media_list_section.h"
 #include "info/media/info_media_list_widget.h"
+#include "lang/lang_keys.h"
 #include "overview/overview_layout.h"
 #include "ui/abstract_button.h"
 #include "ui/rect.h"
@@ -21,6 +24,7 @@
 #include "window/window_peer_menu.h"
 
 #include "styles/style_chat.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
 #include "styles/style_purple_music.h"
 #include "styles/style_media_player.h"
@@ -238,6 +242,51 @@ public:
 	WindowHintTarget::MenuBuilder build;
 };
 
+class MessageBarHint final : public QObject {
+public:
+	MessageBarHint(QWidget *widget, Fn<bool()> shown)
+	: QObject(widget)
+	, _shown(std::move(shown)) {
+		setObjectName(u"purpleMessageBarHint"_q);
+	}
+
+	static MessageBarHint *Find(QWidget *widget) {
+		return dynamic_cast<MessageBarHint*>(widget->findChild<QObject*>(
+			u"purpleMessageBarHint"_q, Qt::FindDirectChildrenOnly));
+	}
+
+	[[nodiscard]] QRect bounds(QWidget *widget, QRect clip) const {
+		if (!_shown()) return {};
+		const auto rect = style::rtlrect(
+			st::msgReplyBarSkip + st::msgReplyBarPos.x(),
+			st::msgReplyPadding.top() + st::msgReplyBarPos.y(),
+			st::msgReplyBarSize.width(),
+			st::msgReplyBarSize.height(),
+			widget->width());
+		return rect.translated(widget->mapToGlobal(QPoint())).intersected(clip);
+	}
+
+	void append(QWidget *widget, QRect clip, std::vector<WindowHintTarget> &out) {
+		const auto hit = bounds(widget, clip);
+		if (hit.isEmpty()) return;
+		const auto guard = QPointer(this);
+		out.push_back({
+			.widget = widget,
+			.bounds = hit,
+			.name = tr::lng_context_to_msg(tr::now),
+			.role = HintRole::Navigate,
+			.current = [=] {
+				return guard && guard->bounds(widget, WindowHintClip(widget)) == hit;
+			},
+			.activate = [=] { ClickWindowHint(widget, widget->mapFromGlobal(hit.center())); },
+		});
+	}
+
+private:
+	Fn<bool()> _shown;
+
+};
+
 HintRole ButtonRole(QWidget *widget) {
 	const auto tagged = TaggedHintRole(widget, HintRole::Count);
 	if (tagged != HintRole::Count) {
@@ -252,7 +301,8 @@ HintRole ButtonRole(QWidget *widget) {
 			return HintRole::Close;
 		} else if (style == &st::purpleMusicMore || style == &st::boxTitleMenu) {
 			return HintRole::Menu;
-		} else if (style == &st::purpleMusicBack || style == &st::purpleMusicBackRtl) {
+		} else if (style == &st::purpleMusicBack || style == &st::purpleMusicBackRtl
+			|| style == &st::historyPinnedShowAll) {
 			return HintRole::Navigate;
 		} else if (style == &st::mediaPlayerPreviousButton || style == &st::mediaPlayerNextButton
 			|| style == &st::mediaPlayerVolumeToggle || style == &st::mediaPlayerRepeatButton
@@ -340,6 +390,8 @@ void AddButton(QWidget *widget, QRect clip, std::vector<WindowHintTarget> &out) 
 HintRole WindowHintHandlerRole(const ClickHandlerPtr &handler) {
 	if (!handler) {
 		return HintRole::General;
+	} else if (handler->property(kPeerLinkPeerIdProperty).toULongLong()) {
+		return HintRole::Navigate;
 	} else if (const auto doc = dynamic_cast<DocumentClickHandler*>(handler.get())) {
 		if (doc->document()->isAudioFile() || doc->document()->isVoiceMessage()) {
 			if (dynamic_cast<DocumentSaveClickHandler*>(doc) || dynamic_cast<VoiceSeekClickHandler*>(doc)) {
@@ -381,6 +433,11 @@ void RegisterFolderHintMenu(QWidget *button, WindowHintTarget::MenuBuilder build
 	new FolderHintMenu(button, std::move(builder));
 }
 
+void RegisterMessageBarHint(QWidget *widget, Fn<bool()> shown) {
+	delete MessageBarHint::Find(widget);
+	new MessageBarHint(widget, std::move(shown));
+}
+
 void ClickWindowHint(QWidget *widget, QPoint localPoint) {
 	const auto global = widget->mapToGlobal(localPoint);
 	const auto guard = QPointer(widget);
@@ -411,6 +468,8 @@ std::vector<WindowHintTarget> CollectWindowHintTargets(QWidget *root) {
 			HintMediaRows::Append(media, clip, result);
 		} else if (const auto view = qobject_cast<QAbstractItemView*>(widget)) {
 			AddItemView(view, result);
+		} else if (const auto bar = MessageBarHint::Find(widget)) {
+			bar->append(widget, clip, result);
 		} else {
 			AddButton(widget, clip, result);
 		}

@@ -141,9 +141,15 @@ with at most four strokes per chord:
     `:localleader` bindings. The bare Music defaults for `m`, `v`, `V`,
     `n` and `N` yield to overlapping `:normal` bindings. Set a bare key
     to `nil` in `:normal` to disable its Music default.
+    In `, u`, Up/Down, Page Up/Page Down and `C-j`/`C-k` move through the
+    results while typing. `RET` plays the selected track or marked tracks.
+    In the dialog's Normal List view, Left/Right seek the current song.
 - **Window hints (`f` / `F`):** `f` labels visible chats, topics, folders,
   supported links, media, and controls. A message label starts a reply when
-  replies are allowed. The topmost Purple or Telegram layer owns the hints
+  replies are allowed. The pinned bar's body jumps to the pinned message.
+  Its pinned-list button has its own hint. Forwarded-source and author links
+  use blue navigation hints. Audio play and download controls use teal hints.
+  The topmost Purple or Telegram layer owns the hints
   when a box is open. Type the label, use `DEL` to undo a letter, or press
   `Esc` / `C-g` to cancel. The composer and search fields retain normal typing
   in Insert mode. Window hints are unavailable while locked or covered.

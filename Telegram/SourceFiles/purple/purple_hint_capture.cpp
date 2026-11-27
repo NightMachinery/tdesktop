@@ -5,6 +5,8 @@
 #include <QtGui/QPaintEngine>
 #include <QtWidgets/QWidget>
 
+#include <algorithm>
+
 namespace Purple {
 namespace {
 
@@ -93,6 +95,9 @@ HintCapture CaptureHintGeometry(QWidget *widget, QRect visible) {
 	auto result = HintCapture();
 	auto device = HintDevice(widget, result);
 	widget->render(&device, visible.topLeft(), visible);
+	std::stable_sort(result.faces.begin(), result.faces.end(), [](QRect a, QRect b) {
+		return qint64(a.width()) * a.height() < qint64(b.width()) * b.height();
+	});
 	return result;
 }
 
