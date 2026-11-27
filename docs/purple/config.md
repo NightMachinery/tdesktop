@@ -113,6 +113,22 @@ The snapshot grows with the referenced lists' memberships, so `state.toml` can
 be much larger than it was before. Desktop reads the whole state with
 `QFile::readAll()` on startup and reload; it has no small state-file cap.
 
+## Hint badges
+
+The app-wide `[hints]` table controls transient keyboard badges in window hints,
+message hints and their action menus. The next capture uses the new settings.
+
+```toml
+[hints]
+badge_opacity_percent = 80
+symbols_p = true
+```
+
+Choose an integer from 60 to 100 for the fill opacity. Text and outlines stay
+opaque. An invalid opacity retains the last valid value, or 80 on first load.
+Set `symbols_p = false` for color and shape alone. Reversible Close has a
+rounded red border. Destructive actions have clipped red corners.
+
 ## The third file, which is nobody's
 
 `readme.md` in the same directory is generated. It is written from `kReadme` in

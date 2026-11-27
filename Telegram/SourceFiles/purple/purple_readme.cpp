@@ -56,6 +56,12 @@ rewritten constantly, carries no comments and preserves nothing. That is the
 entire reason it is a separate file: it must never touch the mtime of the file
 you are editing by hand.
 
+## Keyboard hint badges
+
+In `[hints]`, `badge_opacity_percent = 80` sets the fill opacity (60 to 100).
+Set `symbols_p = false` to omit category marks. Shapes and colors stay visible.
+The next hint capture picks up either change.
+
 ## What the app writes for you
 
 - **List membership.** Right-click a chat, then Work Mode, then the list. It

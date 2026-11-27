@@ -289,6 +289,11 @@ preset    = "work"
 # your behalf. See docs/purple/sync.md.
 send_after_save_p = false
 
+[hints]
+# The fill can show the content behind it. Keys and outlines stay opaque.
+badge_opacity_percent = 80
+symbols_p = true
+
 [peek]
 # Close a conversation only when the restored preset hides it.
 exit_hidden_chats_p = true
@@ -504,6 +509,9 @@ void Config::applyInput(const SettingsFileInput &input) {
 }
 
 void Config::applySettings(Settings settings, const QString &path) {
+	if (!settings.hints.opacityPercent) {
+		settings.hints.opacityPercent = _settings.hints.opacityPercent;
+	}
 	_settings = std::move(settings);
 
 	// One line per load, so "the toggle looks off" can be answered from the log
