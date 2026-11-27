@@ -117,6 +117,74 @@ bool BadgeSheet(QDir dir, bool dark) {
 	return image.save(dir.filePath(dark ? u"palette-night.png"_s : u"palette-classic.png"_s));
 }
 
+bool AudioCluster(QDir dir, const Palette &pal, const QString &theme, bool rtl) {
+	const auto view = QRect(0, 0, 354, 182);
+	auto image = QImage(view.width() * 2, view.height() + 38, QImage::Format_ARGB32_Premultiplied);
+	image.fill(pal.bg);
+	auto p = QPainter(&image);
+	const auto orient = [&](QRect rect) {
+		if (rtl) rect.moveLeft(view.width() - rect.right() - 1);
+		return rect;
+	};
+	const auto face = std::array{
+		orient(QRect(72, 49, 34, 34)), orient(QRect(120, 49, 132, 23)),
+		orient(QRect(115, 108, 104, 27)), orient(QRect(52, 30, 236, 121)),
+	};
+	const auto roles = std::array{ Role::PlayPause, Role::Navigate, Role::General, Role::Reply };
+	const auto labels = QStringList{ u"KJ"_s, u"KF"_s, u"KL"_s, u"AJ"_s };
+	const auto palette = BadgePalette(theme == u"dark"_s);
+	const auto font = QFont(u"Menlo"_s, 12, QFont::Bold);
+	const auto metrics = QFontMetrics(font);
+	auto items = std::vector<Purple::HintGeometry>();
+	for (auto i = size_t(0); i != face.size(); ++i) {
+		const auto width = metrics.horizontalAdvance(labels[i]) + palette.inset(roles[i]);
+		items.push_back({ face[i], QSize(width + 10, 21), false, i == 3, width + 2 });
+	}
+	const auto placements = Purple::LayoutHintBadges(items, view, 2, rtl);
+	for (const auto &placement : placements) {
+		if (placement.badge.isEmpty()) return false;
+	}
+	for (const auto filtered : { false, true }) {
+		p.save();
+		p.translate(filtered ? view.width() : 0, 0);
+		Line(p, QRect(8, 0, 320, 30), filtered ? u"After K"_s : u"All hints"_s, pal.text, 15);
+		p.translate(0, 32);
+		p.fillRect(face[3], pal.surface);
+		p.setPen(Qt::NoPen);
+		p.setBrush(pal.selected);
+		p.drawEllipse(face[0]);
+		p.setPen(pal.text);
+		p.drawText(face[0], Qt::AlignCenter, u"▶"_s);
+		p.setFont(QFont(u"Helvetica Neue"_s, 12));
+		p.drawText(face[1], Qt::AlignCenter, u"Room tone.m4a"_s);
+		p.fillRect(face[2], pal.selected);
+		p.drawText(face[2], Qt::AlignCenter, u"Transcribe"_s);
+		p.setFont(font);
+		for (auto i = size_t(0); i != items.size(); ++i) {
+			if (filtered && !labels[i].startsWith(u'K')) continue;
+			const auto &color = palette.colors[int(roles[i])].edge;
+			p.setPen(QPen(color, 1));
+			if (!placements[i].leader.isNull()) {
+				p.drawLine(placements[i].leader);
+				p.setBrush(color);
+				p.drawEllipse(placements[i].leader.p2(), 1, 1);
+			}
+			if (filtered) {
+				p.setBrush(Qt::NoBrush);
+				p.drawRect(face[i]);
+			}
+		}
+		for (auto i = size_t(0); i != items.size(); ++i) {
+			if (!filtered || labels[i].startsWith(u'K')) {
+				Purple::PaintHintBadge(p, placements[i].badge, labels[i], int(filtered), roles[i], palette, rtl);
+			}
+		}
+		p.restore();
+	}
+	p.end();
+	return image.save(dir.filePath(u"audio-"_s + theme + (rtl ? u"-rtl.png"_s : u"-ltr.png"_s)));
+}
+
 bool Hints(QDir dir, const Palette &pal, const QString &theme, const QString &scene) {
 	auto image = QImage(820, 520, QImage::Format_ARGB32_Premultiplied);
 	image.fill(pal.bg);
@@ -260,6 +328,9 @@ int main(int argc, char **argv) {
 			: Palette{ QColor(0xe4edf4), QColor(0xffffff), QColor(0xd7e9f8), QColor(0x9db4c7), QColor(0x183045), QColor(0x4c6174) };
 		if (!BadgeSheet(dir, dark)) return 5;
 		const auto theme = dark ? u"dark"_s : u"light"_s;
+		for (const auto rtl : { false, true }) {
+			if (!AudioCluster(dir, pal, theme, rtl)) return 6;
+		}
 		for (const auto &scene : { u"chat"_s, u"folders"_s, u"settings"_s }) {
 			if (!Hints(dir, pal, theme, scene)) return 3;
 		}
@@ -267,5 +338,5 @@ int main(int argc, char **argv) {
 			if (!Hydra(dir, pal, theme, scene)) return 4;
 		}
 	}
-	std::cout << "16 offscreen hint fixtures rendered\n";
+	std::cout << "20 offscreen hint fixtures rendered\n";
 }

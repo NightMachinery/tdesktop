@@ -238,8 +238,8 @@ public:
 };
 
 HintRole ButtonRole(QWidget *widget) {
-	const auto tagged = TaggedHintRole(widget, HintRole::General);
-	if (tagged != HintRole::General) {
+	const auto tagged = TaggedHintRole(widget, HintRole::Count);
+	if (tagged != HintRole::Count) {
 		return tagged;
 	} else if (dynamic_cast<Media::Player::PlayButton*>(widget)) {
 		return HintRole::PlayPause;
@@ -247,9 +247,9 @@ HintRole ButtonRole(QWidget *widget) {
 		return HintRole::Playback;
 	} else if (const auto icon = dynamic_cast<Ui::IconButton*>(widget)) {
 		const auto style = &icon->st();
-		if (style == &st::mediaPlayerClose || style == &st::boxTitleClose) {
+		if (style == &st::mediaPlayerClose || style == &st::boxTitleClose || style == &st::separatePanelClose) {
 			return HintRole::Close;
-		} else if (style == &st::purpleMusicMore) {
+		} else if (style == &st::purpleMusicMore || style == &st::boxTitleMenu) {
 			return HintRole::Menu;
 		} else if (style == &st::purpleMusicBack || style == &st::purpleMusicBackRtl) {
 			return HintRole::Navigate;
@@ -320,10 +320,12 @@ HintRole WindowHintHandlerRole(const ClickHandlerPtr &handler) {
 	if (!handler) {
 		return HintRole::General;
 	} else if (const auto doc = dynamic_cast<DocumentClickHandler*>(handler.get())) {
-		if ((doc->document()->isAudioFile() || doc->document()->isVoiceMessage())
-			&& (dynamic_cast<DocumentOpenClickHandler*>(doc)
-				|| dynamic_cast<DocumentSaveClickHandler*>(doc))) {
-			return HintRole::Playback;
+		if (doc->document()->isAudioFile() || doc->document()->isVoiceMessage()) {
+			if (dynamic_cast<DocumentSaveClickHandler*>(doc) || dynamic_cast<VoiceSeekClickHandler*>(doc)) {
+				return HintRole::Playback;
+			} else if (dynamic_cast<DocumentOpenClickHandler*>(doc)) {
+				return HintRole::PlayPause;
+			}
 		} else if (doc->document()->isVideoFile() && dynamic_cast<DocumentOpenClickHandler*>(doc)) {
 			return HintRole::Navigate;
 		}
