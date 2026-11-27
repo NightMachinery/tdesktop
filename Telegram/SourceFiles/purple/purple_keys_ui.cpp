@@ -477,18 +477,21 @@ void WhichKeyOverlay::paintEvent(QPaintEvent *) {
 	const auto line = qreal(st::lineWidth);
 	const auto radius = std::min(qreal(st::boxRadius), r.width() / 2.);
 	const auto bounds = QRectF(r).adjusted(line / 2, line / 2, -line / 2, 0);
-	auto edge = QPainterPath();
-	edge.moveTo(bounds.bottomLeft());
-	edge.lineTo(bounds.left(), bounds.top() + radius);
-	edge.quadTo(bounds.topLeft(), QPointF(bounds.left() + radius, bounds.top()));
-	edge.lineTo(bounds.right() - radius, bounds.top());
-	edge.quadTo(bounds.topRight(), QPointF(bounds.right(), bounds.top() + radius));
-	edge.lineTo(bounds.bottomRight());
+	auto topEdge = QPainterPath();
+	topEdge.moveTo(bounds.left(), bounds.top() + radius);
+	topEdge.quadTo(bounds.topLeft(), QPointF(bounds.left() + radius, bounds.top()));
+	topEdge.lineTo(bounds.right() - radius, bounds.top());
+	topEdge.quadTo(bounds.topRight(), QPointF(bounds.right(), bounds.top() + radius));
+	auto surface = topEdge;
+	surface.lineTo(bounds.bottomRight());
+	surface.lineTo(bounds.bottomLeft());
+	surface.closeSubpath();
 
 	const auto fill = st::windowBg->c;
 	const auto contrast = ReadableText(st::windowSubTextFg->c, fill);
-	p.fillPath(edge, fill);
-	p.strokePath(edge, QPen(BlendColor(fill, contrast, .82), line));
+	p.fillRect(QRectF(r).adjusted(0, radius + line, 0, 0), fill);
+	p.fillPath(surface, fill);
+	p.strokePath(topEdge, QPen(BlendColor(fill, contrast, .82), line));
 
 	// Header strip.
 	constexpr auto kHeaderH = 38;

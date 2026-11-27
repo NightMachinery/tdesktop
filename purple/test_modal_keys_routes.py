@@ -959,6 +959,10 @@ ordered(read("boxes/peer_list_box.cpp"), "void PeerListContent::refreshRows",
         "Purple::PickerSelection::Refresh(this)")
 ordered(music, "void ChooseMusicSourceFolder", "ModalKeysEnabled()",
         "CreateCommandPaletteLayer", "showLayer", "SingleChoiceBox")
+drawer = between(keys_ui, "void WhichKeyOverlay::paintEvent", "// Header strip.")
+ordered(drawer, "surface.lineTo(bounds.bottomRight())", "p.fillPath(surface, fill)",
+        "p.strokePath(topEdge")
+assert "topEdge.lineTo(bounds.bottom" not in drawer
 palette = read("purple/purple_chat_palette.cpp")
 ordered(palette, "bool Searchable(", "PickerVisible(peer)",
         "!recent || !peer->owner().history(peer)->purpleHiddenFromView()")
