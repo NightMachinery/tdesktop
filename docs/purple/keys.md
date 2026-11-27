@@ -314,8 +314,9 @@ on the modal status line and cheatsheet footer.
   in `M-x`.
 - **Zen fullscreen chat (`SPC t z`, `SPC w m`):** enters OS fullscreen with the
   chat list, folder rail, and modal status bar visible. The info sidebar is
-  hidden. `SPC w z` or the chat header menu toggles the chat list and folder
-  rail while a conversation is open. On narrow displays it opens the full
+  hidden. You can enter Zen from the chat list with no chat open, then open
+  a conversation within fullscreen. `SPC w z` or the chat header menu toggles
+  the chat list and folder rail while a conversation is open. On narrow displays it opens the full
   chat list. Resizing the list in Zen keeps the ordinary window's width
   preference. Fullscreen uses normal bubble alignment and centers dates in
   the conversation. `Esc` cancels a pending chord or layer first, returns from

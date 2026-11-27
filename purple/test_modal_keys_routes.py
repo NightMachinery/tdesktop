@@ -633,8 +633,12 @@ ordered(chat_music, "MusicEffectiveShortcuts()", "AddChatMusicLayout", "MakeMusi
 # Phase 2 routes: unread status counts, avatars, iBuffer read-receipt confirm,
 # fullscreen with a persistent status bar, app-wide privacy screen, and topics.
 ordered(keys, "ComputeUnreadSummary", "HasUnmutedUnreadNotification", "BucketForPeer")
-ordered(keys, "void Keys::setZenMode", "setPurpleZenHidden(true)", "showFullScreen()",
-        "setPurpleZenHidden(false)", "PlanWindowRestore", "showNormal()")
+ordered(keys, "case Action::ToggleZenMode:", "return target.controller != nullptr;")
+zen = between(keys, "void Keys::setZenMode", "void Keys::showUnreadBuffer")
+ordered(zen, "if (!controller)", "setPurpleZenHidden(true)", "showFullScreen()",
+        "if (controller->activeChatCurrent().thread()", "setPurpleZenHidden(false)",
+        "PlanWindowRestore", "showNormal()")
+assert "activeChatCurrent" not in zen.split("showFullScreen()", 1)[0]
 ordered(keys, "int Keys::statusBarHeight", "chromeVisible() ?", "ModalStatusBar::PreferredHeight()")
 ordered(classify, "KeyUse::Cancel", "KeyUse::ExitInsertOrBackOut",
         "_window->isFullScreen()", "KeyUse::FullscreenBack")

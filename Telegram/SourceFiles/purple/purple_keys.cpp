@@ -588,7 +588,7 @@ const Command kCommands[] = {
 	{ Action::UnreadBuffer, "unread-chats-buffer", "chats", "",
 		"ibuffer missed conversations notifications",
 		[] { return u"Unread unmuted chats (iBuffer)"_q; } },
-	{ Action::ToggleZenMode, "toggle-chat-zen-mode", "window", "Needs an open chat",
+	{ Action::ToggleZenMode, "toggle-chat-zen-mode", "window", "",
 		"fullscreen maximize distraction focus",
 		[] { return u"Toggle Zen fullscreen chat"_q; } },
 	{ Action::ToggleZenChats, "toggle-zen-chat-list", "window", "Needs Zen fullscreen chat",
@@ -2029,10 +2029,7 @@ bool Available(Action action, const Target &target) {
 		return target.controller
 			&& !ZenChatListToggleLabel(target.controller).isEmpty();
 	case Action::ToggleZenMode:
-		return target.controller != nullptr
-			&& (target.controller->purpleZenHidden()
-				|| target.chat
-				|| target.controller->activeChatCurrent().thread() != nullptr);
+		return target.controller != nullptr;
 	case Action::TopicPalette:
 	case Action::TopicUnreadPalette:
 	case Action::TopicNext:
@@ -3288,7 +3285,7 @@ void Keys::setZenMode(bool enabled) {
 		return;
 	}
 	if (enabled) {
-		if (!controller || !controller->activeChatCurrent().thread()) {
+		if (!controller) {
 			return;
 		}
 		_zenSavedWindow = {
@@ -3303,7 +3300,7 @@ void Keys::setZenMode(bool enabled) {
 			_window->showFullScreen();
 		}
 		_window->updateControlsGeometry();
-		if (controller->content()) {
+		if (controller->activeChatCurrent().thread() && controller->content()) {
 			controller->content()->activate();
 		}
 		refreshStatusBar();
