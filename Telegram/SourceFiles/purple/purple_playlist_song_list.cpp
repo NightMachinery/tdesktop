@@ -268,6 +268,7 @@ private:
 	[[nodiscard]] QString sourceState(int index) const;
 	[[nodiscard]] MusicRowPlayback musicPlayback(uint64_t id) const;
 	void select(int index, bool scroll = true);
+	void setHovered(int index);
 	void markRange(int first, int last);
 	void refreshArtwork();
 	void updatePlaybackBadge();
@@ -348,6 +349,9 @@ PlaylistSongList::Rows::Rows(
 		if (_data[i].documentId == selected) _selected = i;
 	}
 	if (_selected < 0 && !_data.empty()) _selected = 0;
+	if (_mode == Mode::Library) {
+		_scroll->scrollTopChanges() | rpl::on_next([=] { setHovered(-1); }, lifetime());
+	}
 }
 
 int PlaylistSongList::Rows::rowHeight() const {
@@ -799,12 +803,7 @@ void PlaylistSongList::Rows::mousePressEvent(QMouseEvent *e) {
 
 void PlaylistSongList::Rows::mouseMoveEvent(QMouseEvent *e) {
 	if (_mode == Mode::Library) {
-		const auto hovered = hit(e->pos());
-		if (_hovered != hovered) {
-			const auto previous = std::exchange(_hovered, hovered);
-			if (previous >= 0) update(itemRect(previous));
-			if (hovered >= 0) update(itemRect(hovered));
-		}
+		setHovered(hit(e->pos()));
 	}
 	if (_pressed < 0 || !_handlePressed || !isEnabled()) return;
 	if (!_dragging
@@ -815,6 +814,13 @@ void PlaylistSongList::Rows::mouseMoveEvent(QMouseEvent *e) {
 		_autoscroll.callEach(16);
 	}
 	if (_dragging) updateDrag();
+}
+
+void PlaylistSongList::Rows::setHovered(int index) {
+	if (_hovered == index) return;
+	const auto previous = std::exchange(_hovered, index);
+	if (previous >= 0) update(itemRect(previous));
+	if (index >= 0) update(itemRect(index));
 }
 
 void PlaylistSongList::Rows::updateDrag() {
@@ -1124,6 +1130,7 @@ int PlaylistSongList::Rows::setTiles(bool tiles) {
 	const auto current = _scroll->scrollTop();
 	if (_tiles == tiles || _mode != Mode::Library) return current;
 	const auto anchor = current / rowHeight() * columns(width());
+	setHovered(-1);
 	_tiles = tiles;
 	_desiredColumn = -1;
 	resizeToWidth(width());
@@ -1152,9 +1159,8 @@ void PlaylistSongList::Rows::focusOutEvent(QFocusEvent *e) {
 }
 
 bool PlaylistSongList::Rows::eventHook(QEvent *e) {
-	if (e->type() == QEvent::Leave && _hovered >= 0) {
-		_hovered = -1;
-		update();
+	if (e->type() == QEvent::Leave) {
+		setHovered(-1);
 	}
 	if (e->type() == QEvent::Hide || e->type() == QEvent::WindowDeactivate
 		|| e->type() == QEvent::UngrabMouse

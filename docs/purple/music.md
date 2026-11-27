@@ -59,6 +59,7 @@ Click a track to play it, or click the checkbox to mark it. Command-click on
 macOS and Ctrl-click on other platforms also mark tracks. Playing, paused,
 and loading cues follow the player. The row tint and checkmark show marks,
 and a border shows the keyboard cursor. Hold an arrow to move repeatedly.
+Scrolling clears the row hover until the pointer moves again.
 While an input method is composing text, Down stays in search.
 
 Choose **List** or **Tiles**, or press `, t` to switch between them. The
