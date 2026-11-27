@@ -2677,6 +2677,7 @@ public:
 				.widget = this,
 				.bounds = bounds,
 				.name = _items[_visible[row]].title,
+				.role = HintRole::Navigate,
 				.current = [=] {
 					return guard && _session && row < int(_visible.size())
 						&& _items[_visible[row]].rootId == topic

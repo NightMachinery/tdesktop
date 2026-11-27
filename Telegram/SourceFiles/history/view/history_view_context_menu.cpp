@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_context_menu.h"
 
 #include "purple/purple_copy.h"
+#include "purple/purple_hint_role.h"
 #include "purple/purple_archive_v2_boxes.h"
 #include "purple/purple_user_control.h"
 
@@ -1105,7 +1106,7 @@ bool AddDeleteSelectedAction(
 		return false;
 	}
 
-	menu->addAction(tr::lng_context_delete_selected(tr::now), [=] {
+	const auto action = menu->addAction(tr::lng_context_delete_selected(tr::now), [=] {
 		const auto clear = crl::guard(list, [=] { list->cancelSelection(); });
 		if (ranges::all_of(request.selectedItems, &SelectedItem::ephemeral)) {
 			const auto owner = &request.navigation->session().data();
@@ -1129,6 +1130,7 @@ bool AddDeleteSelectedAction(
 		box->setDeleteConfirmedCallback(clear);
 		request.navigation->parentController()->show(std::move(box));
 	}, &st::menuIconDelete);
+	Purple::SetWindowHintRole(action, Purple::HintRole::Destructive);
 	return true;
 }
 
@@ -2172,7 +2174,7 @@ void FillPollOptionPage(
 		return false;
 	}();
 	if (canDelete) {
-		menu->addAction(
+		const auto action = menu->addAction(
 			tr::lng_context_delete_poll_option(tr::now),
 			[=] {
 				if (const auto item = owner->message(itemId)) {
@@ -2185,6 +2187,7 @@ void FillPollOptionPage(
 				}
 			},
 			&st::menuIconDelete);
+		Purple::SetWindowHintRole(action, Purple::HintRole::Destructive);
 	}
 	if (const auto addedBy = a->addedBy) {
 		menu->addSeparator(&st::expandedMenuSeparator);
@@ -3040,7 +3043,7 @@ void AddEphemeralMessageActions(
 		}, &st::menuIconReport);
 	}
 	if (anchored) {
-		menu->addAction(base::make_unique_q<RevertAction>(
+		const auto action = menu->addAction(base::make_unique_q<RevertAction>(
 			menu->menu(),
 			st::menuWithIconsAttention,
 			[=] {
@@ -3048,9 +3051,10 @@ void AddEphemeralMessageActions(
 					session->ephemeralMessages().deleteMessage(item);
 				}
 			}));
+		Purple::SetWindowHintRole(action, Purple::HintRole::Destructive);
 		return;
 	}
-	menu->addAction(tr::lng_context_delete_msg(tr::now), [=] {
+	const auto action = menu->addAction(tr::lng_context_delete_msg(tr::now), [=] {
 		show->show(Ui::MakeConfirmBox({
 			.text = tr::lng_selected_delete_sure_this(),
 			.confirmed = [=](Fn<void()> &&close) {
@@ -3063,6 +3067,7 @@ void AddEphemeralMessageActions(
 			.confirmStyle = &st::attentionBoxButton,
 		}));
 	}, &st::menuIconDelete);
+	Purple::SetWindowHintRole(action, Purple::HintRole::Destructive);
 }
 
 void AddEphemeralAboutAction(

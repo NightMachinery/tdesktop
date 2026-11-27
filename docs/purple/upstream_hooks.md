@@ -1,5 +1,10 @@
 # Upstream hooks
 
+The semantic keyboard hint hooks in `ui/controls/delete_message_context_action.cpp`,
+`history/history_inner_widget.cpp` and `history/view/history_view_context_menu.cpp`
+mark the native deletion actions when their producers create them. Purple's action
+menu reads the role even for a localized title or a timed deletion row.
+
 Upstream tdesktop is merged into this fork again and again. Every line Purple
 changes in an upstream file can conflict in a later merge, so AGENTS.md
 ("Keeping upstream merges easy") allows only hooks there. Much older Purple

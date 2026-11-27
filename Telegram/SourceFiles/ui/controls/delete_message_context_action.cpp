@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "ui/controls/delete_message_context_action.h"
+#include "purple/purple_hint_role.h"
 
 #include "ui/widgets/menu/menu_action.h"
 #include "ui/effects/ripple_animation.h"
@@ -82,6 +83,7 @@ ActionWithTimer::ActionWithTimer(
 		+ _st.itemStyle.font->height
 		+ st::ttlItemTimerFont->height
 		+ st::ttlItemPadding.bottom()) {
+	Purple::SetWindowHintRole(_dummyAction, Purple::HintRole::Destructive);
 	setAcceptBoth(true);
 	fitToMenuWidth();
 	setActionTriggered(std::move(callback));
@@ -237,13 +239,12 @@ base::unique_qptr<Menu::ItemBase> DeleteMessageContextAction(
 		TimeId destroyAt,
 		Fn<void()> destroyByTimerCallback) {
 	if (destroyAt <= 0) {
+		const auto action = Menu::CreateAction(menu, tr::lng_context_delete_msg(tr::now), std::move(callback));
+		Purple::SetWindowHintRole(action, Purple::HintRole::Destructive);
 		return base::make_unique_q<Menu::Action>(
 			menu,
 			menu->st(),
-			Menu::CreateAction(
-				menu,
-				tr::lng_context_delete_msg(tr::now),
-				std::move(callback)),
+			action,
 			&st::menuIconDelete,
 			&st::menuIconDelete);
 	}

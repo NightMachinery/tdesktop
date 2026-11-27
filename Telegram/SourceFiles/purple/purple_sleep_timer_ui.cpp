@@ -1,4 +1,5 @@
 #include "purple/purple_sleep_timer_ui.h"
+#include "purple/purple_hint_role.h"
 
 #include "base/timer.h"
 #include "chat_helpers/compose/compose_show.h"
@@ -246,8 +247,9 @@ void DecorateSleepTimer(
 		Fn<void()> relayout,
 		Fn<void(bool)> menuOver,
 		Fn<bool(QPoint)> otherDropdown) {
-	Ui::CreateChild<Button>(bar, menuParent, std::move(show), std::move(relayout),
+	const auto button = Ui::CreateChild<Button>(bar, menuParent, std::move(show), std::move(relayout),
 		std::move(menuOver), std::move(otherDropdown));
+	SetWindowHintRole(button, HintRole::Playback);
 }
 
 not_null<Ui::RpWidget*> SleepTimerControl(not_null<QWidget*> bar) {

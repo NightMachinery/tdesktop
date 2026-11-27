@@ -1,12 +1,15 @@
 #include "purple/purple_hint_targets.h"
 #include "purple/purple_hint_item_identity.h"
 
+#include "data/data_document.h"
+#include "data/data_file_click_handler.h"
 #include "data/data_forum_topic.h"
 #include "data/data_peer.h"
 #include "dialogs/dialogs_inner_widget.h"
 #include "dialogs/dialogs_row.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/view/history_view_cursor_state.h"
 #include "info/media/info_media_list_section.h"
 #include "info/media/info_media_list_widget.h"
 #include "overview/overview_layout.h"
@@ -17,6 +20,12 @@
 #include "window/window_peer_menu.h"
 
 #include "styles/style_chat.h"
+#include "styles/style_layers.h"
+#include "styles/style_purple_music.h"
+#include "styles/style_media_player.h"
+#include "media/player/media_player_button.h"
+#include "ui/widgets/buttons.h"
+#include <QtWidgets/QDialogButtonBox>
 
 #include <QtGui/QMouseEvent>
 #include <QtWidgets/QAbstractButton>
@@ -56,6 +65,7 @@ public:
 				.name = list->accessibilityChildName(index),
 				.mainList = true,
 				.kind = WindowHintTarget::Kind::Chat,
+				.role = HintRole::Navigate,
 				.current = current,
 				.activate = [=] {
 					if (guard->selectChildByIndex(index) && guard && filter == guard->_filterId
@@ -162,15 +172,19 @@ public:
 				}
 				const auto id = item->fullId();
 				const auto local = bounds.center() - origin;
+				const auto cursor = local - list->findItemByPoint(local).geometry.topLeft();
+				const auto handler = layout->getState(cursor, {}).link;
 				out.push_back({
 					.widget = list,
 					.bounds = bounds,
+					.role = WindowHintHandlerRole(handler),
 					.current = [=] {
 						if (!guard || guard->_sections.empty() || guard->mapToGlobal(QPoint()) != origin) {
 							return false;
 						}
 						const auto live = guard->findItemByPoint(local);
 						return live.exact && live.layout == layout
+							&& layout->getState(local - live.geometry.topLeft(), {}).link == handler
 							&& live.layout->getItem()->fullId() == id
 							&& !live.layout->getItem()->history()->purpleHiddenFromView();
 					},
@@ -223,6 +237,41 @@ public:
 	WindowHintTarget::MenuBuilder build;
 };
 
+HintRole ButtonRole(QWidget *widget) {
+	const auto tagged = TaggedHintRole(widget, HintRole::General);
+	if (tagged != HintRole::General) {
+		return tagged;
+	} else if (dynamic_cast<Media::Player::PlayButton*>(widget)) {
+		return HintRole::PlayPause;
+	} else if (dynamic_cast<Media::Player::SpeedButton*>(widget)) {
+		return HintRole::Playback;
+	} else if (const auto icon = dynamic_cast<Ui::IconButton*>(widget)) {
+		const auto style = &icon->st();
+		if (style == &st::mediaPlayerClose || style == &st::boxTitleClose) {
+			return HintRole::Close;
+		} else if (style == &st::purpleMusicMore) {
+			return HintRole::Menu;
+		} else if (style == &st::purpleMusicBack || style == &st::purpleMusicBackRtl) {
+			return HintRole::Navigate;
+		} else if (style == &st::mediaPlayerPreviousButton || style == &st::mediaPlayerNextButton
+			|| style == &st::mediaPlayerVolumeToggle || style == &st::mediaPlayerRepeatButton
+			|| style == &st::mediaPlayerOrderButton || style == &st::purpleMusicSkipButton) {
+			return HintRole::Playback;
+		}
+	} else if (const auto round = dynamic_cast<Ui::RoundButton*>(widget)) {
+		if (&round->st() == &st::attentionBoxButton) {
+			return HintRole::Destructive;
+		}
+	} else if (const auto button = qobject_cast<QAbstractButton*>(widget)) {
+		if (const auto box = qobject_cast<QDialogButtonBox*>(widget->parentWidget())) {
+			const auto role = box->buttonRole(button);
+			if (role == QDialogButtonBox::DestructiveRole) return HintRole::Destructive;
+			if (role == QDialogButtonBox::RejectRole) return HintRole::Close;
+		}
+	}
+	return HintRole::General;
+}
+
 void AddButton(QWidget *widget, QRect clip, std::vector<WindowHintTarget> &out) {
 	const auto button = dynamic_cast<Ui::AbstractButton*>(widget);
 	const auto qt = qobject_cast<QAbstractButton*>(widget);
@@ -249,6 +298,7 @@ void AddButton(QWidget *widget, QRect clip, std::vector<WindowHintTarget> &out) 
 		.bounds = clip,
 		.name = name,
 		.kind = folderMenu ? WindowHintTarget::Kind::Folder : WindowHintTarget::Kind::Control,
+		.role = folderMenu ? HintRole::Navigate : ButtonRole(widget),
 		.current = [=] {
 			return guard && (!button || !button->isDisabled())
 				&& (!send || send->state() == *sendState);
@@ -265,6 +315,44 @@ void AddButton(QWidget *widget, QRect clip, std::vector<WindowHintTarget> &out) 
 }
 
 } // namespace
+
+HintRole WindowHintHandlerRole(const ClickHandlerPtr &handler) {
+	if (!handler) {
+		return HintRole::General;
+	} else if (const auto doc = dynamic_cast<DocumentClickHandler*>(handler.get())) {
+		if ((doc->document()->isAudioFile() || doc->document()->isVoiceMessage())
+			&& (dynamic_cast<DocumentOpenClickHandler*>(doc)
+				|| dynamic_cast<DocumentSaveClickHandler*>(doc))) {
+			return HintRole::Playback;
+		} else if (doc->document()->isVideoFile() && dynamic_cast<DocumentOpenClickHandler*>(doc)) {
+			return HintRole::Navigate;
+		}
+	} else if (dynamic_cast<PhotoOpenClickHandler*>(handler.get())) {
+		return HintRole::Navigate;
+	}
+	switch (handler->getTextEntity().type) {
+	case EntityType::Url:
+	case EntityType::CustomUrl:
+	case EntityType::Mention:
+	case EntityType::MentionName:
+	case EntityType::Hashtag:
+	case EntityType::Cashtag: return HintRole::Navigate;
+	case EntityType::MediaTimestamp: return HintRole::Playback;
+	default: return HintRole::General;
+	}
+}
+
+void SetWindowHintRole(QObject *object, HintRole role) {
+	object->setProperty("purpleHintRole", int(role));
+}
+
+HintRole TaggedHintRole(const QObject *object, HintRole fallback) {
+	const auto value = object->property("purpleHintRole");
+	const auto role = value.toInt();
+	return (value.isValid() && role >= 0 && role < int(HintRole::Count))
+		? HintRole(role)
+		: fallback;
+}
 
 void RegisterFolderHintMenu(QWidget *button, WindowHintTarget::MenuBuilder builder) {
 	new FolderHintMenu(button, std::move(builder));
