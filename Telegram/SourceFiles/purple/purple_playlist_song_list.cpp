@@ -308,6 +308,7 @@ private:
 	MusicRowPlayback _musicState = MusicRowPlayback::Idle;
 	int _selected = -1;
 	int _hovered = -1;
+	std::optional<QPoint> _pointerAtScroll;
 	int _pressed = -1;
 	int _target = -1;
 	int _pressAnchor = -1;
@@ -352,7 +353,10 @@ PlaylistSongList::Rows::Rows(
 	}
 	if (_selected < 0 && !_data.empty()) _selected = 0;
 	if (_mode == Mode::Library) {
-		_scroll->scrollTopChanges() | rpl::on_next([=] { setHovered(-1); }, lifetime());
+		_scroll->scrollTopChanges() | rpl::on_next([=] {
+			_pointerAtScroll = QCursor::pos();
+			setHovered(-1);
+		}, lifetime());
 	}
 }
 
@@ -807,7 +811,8 @@ void PlaylistSongList::Rows::mousePressEvent(QMouseEvent *e) {
 }
 
 void PlaylistSongList::Rows::mouseMoveEvent(QMouseEvent *e) {
-	if (_mode == Mode::Library) {
+	if (_mode == Mode::Library && _pointerAtScroll != e->globalPosition().toPoint()) {
+		_pointerAtScroll.reset();
 		setHovered(hit(e->pos()));
 	}
 	if (_pressed < 0 || !_handlePressed || !isEnabled()) return;
