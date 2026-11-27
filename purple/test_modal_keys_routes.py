@@ -173,7 +173,7 @@ ordered(palette_ui, "InstallListFilter(this, _input", "ListFilter::Submit(key)",
         "ListStep(key, mods, false)",
         "Qt::AltModifier", "stepHistory(")
 ordered(palette_ui, "void keyPressEvent", "ListStep(key, mods, ModalKeysEnabled())",
-        "AllowModalLayerKey(*event, this, true)", "moveSelection(step)",
+        "AllowModalLayerKey(*event, this, true)", "moveSelection(step, mods == Qt::AltModifier)",
         "ListFilter::Submit(key)", "activateRow(_selected)", "ListFilter::Exit", "cancel()")
 ordered(palette_ui, "void doSetInnerFocus()", "_input->setFocusFast()")
 assert "_input->setText(QString())" not in palette_ui
@@ -320,7 +320,8 @@ ordered(keys, "bool Keys::advanceScroll", "current->top != _pixel.expectedTop",
 ordered(routing, "_motion.release(physical)", "_pixel.motion.release", "_pixel.physical = 0")
 ordered(keys, "type == QEvent::Wheel", "cancelScroll()")
 for surface in ("ModalHelpLayer", "NoticeLayer"):
-    assert "ScrollModalLayer" in keys_ui.split(f"class {surface} final", 1)[1].split("\nclass ", 1)[0]
+    assert "ScrollList" in keys_ui.split(f"class {surface} final", 1)[1].split("\nclass ", 1)[0]
+ordered(keys_ui, "void ScrollList(", "HalfPagePixels", "ScrollModalLayer")
 ordered(customize, "if (_reviewBody && object == _reviewBody", "ScrollModalLayer", "singleStep()")
 ordered(keys, "QEvent::InputMethodQuery", "watched == _normalComposer",
         "Enabled() && _normal && owner()", "setValue(Qt::ImEnabled, false)")
@@ -942,6 +943,13 @@ assert "Purple::IsChatPaletteController(_controller)" in read("boxes/peer_list_b
 ordered(palette_ui, "void refilter()", "RankAndFilter", "FirstListMatch")
 picker = read("purple/purple_picker.cpp")
 ordered(picker, "void PickerSelection::Refresh", "FirstListMatch", "disabled()", "setSelected")
+ordered(picker, "void PickerSelection::HalfPage", "HalfPageRows", "void InstallPickerFilter")
+ordered(read("dialogs/dialogs_inner_widget.cpp"), "bool InnerWidget::processKeyDispatch",
+        "HalfPageDirection", "HalfPageRows", "Qt::Key_PageUp")
+track_rows = read("purple/purple_playlist_song_list.cpp")
+ordered(track_rows, "void PlaylistSongList::Rows::navigate", "HalfPageRows")
+ordered(track_rows, "void PlaylistSongList::Rows::keyPressEvent", "reorderDelta",
+        "HalfPageDirection", "TrackListAction::HalfUp")
 ordered(read("boxes/peer_list_box.cpp"), "void PeerListContent::refreshRows",
         "Purple::PickerSelection::Refresh(this)")
 ordered(music, "void ChooseMusicSourceFolder", "ModalKeysEnabled()",

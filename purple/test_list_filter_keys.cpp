@@ -37,6 +37,16 @@ int main() {
 		ProtectPreedit(Qt::Key_Escape, Qt::NoModifier, false),
 		ProtectPreedit(Qt::Key_Enter, Qt::KeypadModifier, true),
 		!ProtectPreedit(Qt::Key_E, Qt::NoModifier, true),
+		HalfPageDirection(Qt::Key_Up, Qt::AltModifier) == -1,
+		HalfPageDirection(Qt::Key_Down, Qt::AltModifier | Qt::KeypadModifier) == 1,
+		!HalfPageDirection(Qt::Key_Down, Qt::NoModifier),
+		!HalfPageDirection(Qt::Key_Down, Qt::AltModifier | Qt::ShiftModifier),
+		!HalfPageDirection(Qt::Key_Left, Qt::AltModifier),
+		HalfPagePixels(401) == 200,
+		HalfPageRows(401, 42) == 4,
+		HalfPageRows(60, 42) == 1,
+		ListDelta(-1, Qt::AltModifier, 401, 42) == -4,
+		ListDelta(1, Qt::NoModifier, 401, 42) == 1,
 	};
 	auto failures = 0;
 	for (const auto check : checks) failures += !check;

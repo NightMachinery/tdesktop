@@ -1,4 +1,5 @@
 #include "purple/purple_playlist_song_list.h"
+#include "purple/purple_list_filter_keys.h"
 #include "purple/purple_music_artwork.h"
 #include "purple/purple_music_widgets.h"
 
@@ -993,7 +994,7 @@ void PlaylistSongList::Rows::navigate(TrackListAction action, int repeat) {
 	if (!isEnabled() || _data.empty()) return;
 	cancelInteraction();
 	const auto page = std::max(1, _scroll->viewport()->height() / rowHeight());
-	const auto half = std::max(1, _scroll->viewport()->height() / (2 * rowHeight()));
+	const auto half = ListFilter::HalfPageRows(_scroll->viewport()->height(), rowHeight());
 	const auto count = columns(width());
 	const auto size = int(_data.size());
 	auto next = std::max(0, _selected);
@@ -1073,7 +1074,7 @@ void PlaylistSongList::Rows::keyPressEvent(QKeyEvent *e) {
 		moveSelected(delta);
 		return;
 	}
-	const auto half = (_mode == Mode::Library && e->modifiers() == Qt::AltModifier);
+	const auto half = ListFilter::HalfPageDirection(key, e->modifiers());
 	const auto action = (key == Qt::Key_Up)
 		? (half ? TrackListAction::HalfUp : TrackListAction::Up)
 		: (key == Qt::Key_Down)

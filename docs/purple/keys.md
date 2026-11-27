@@ -90,6 +90,10 @@ with at most four strokes per chord:
   `C-u` scroll half a page, `C-f` / `C-b` (`]` / `[` `m`) scroll a full page,
   `G` / `] ]` jump to latest, `] u` / `g u` jump to unread, `] f` / `[ f` step
   through folders with wrapping when the main chat list is focused.
+- **Half-page list motion:** `Alt+Up` and `Alt+Down` move through half of the
+  visible rows, or scroll half of the viewport in a scrolling panel. Lists
+  move at least one row when the viewport is short. Playlist editing keeps
+  its existing track-reorder shortcut.
 - **Leader (`SPC`):**
   - `SPC SPC`, `M-x`, `:`, `SPC :`: command palette (`M-x`).
   - `SPC ,`, `SPC RET`: chat switcher palette. `SPC b b`: recently viewed chats.

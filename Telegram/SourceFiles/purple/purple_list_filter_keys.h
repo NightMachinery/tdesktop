@@ -3,6 +3,7 @@
 #include <QtCore/QVariant>
 #include <QtGui/QKeyEvent>
 #include <QtWidgets/QWidget>
+#include <algorithm>
 
 namespace Purple::ListFilter {
 
@@ -11,6 +12,29 @@ inline constexpr auto kControl = Qt::MetaModifier;
 #else
 inline constexpr auto kControl = Qt::ControlModifier;
 #endif
+
+[[nodiscard]] inline int HalfPageDirection(int key, Qt::KeyboardModifiers mods) {
+	if ((mods & ~Qt::KeypadModifier) != Qt::AltModifier) {
+		return 0;
+	}
+	return (key == Qt::Key_Down) ? 1 : (key == Qt::Key_Up) ? -1 : 0;
+}
+
+[[nodiscard]] inline int HalfPagePixels(int height) {
+	return std::max(1, height / 2);
+}
+
+[[nodiscard]] inline int HalfPageRows(int height, int rowHeight) {
+	return std::max(1, HalfPagePixels(height) / std::max(1, rowHeight));
+}
+
+[[nodiscard]] inline int ListDelta(
+		int direction,
+		Qt::KeyboardModifiers mods,
+		int height,
+		int rowHeight) {
+	return direction * ((mods == Qt::AltModifier) ? HalfPageRows(height, rowHeight) : 1);
+}
 
 [[nodiscard]] inline bool Enter(const QKeyEvent &event, int key, bool allowA = true) {
 	const auto mods = event.modifiers() & ~Qt::KeypadModifier;

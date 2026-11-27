@@ -22,6 +22,7 @@
 #include "media/player/media_player_instance.h"
 #include "purple/purple_exact_search.h"
 #include "purple/purple_keys.h"
+#include "purple/purple_list_filter_keys.h"
 #include "purple/purple_music_now_playing.h"
 #include "purple/purple_music_section.h"
 #include "purple/purple_music_widgets.h"
@@ -366,7 +367,7 @@ bool ChatMusicBox::eventFilter(QObject *object, QEvent *event) {
 		focusList();
 	} else if (key->key() == Qt::Key_Down || key->key() == Qt::Key_Up) {
 		const auto down = key->key() == Qt::Key_Down;
-		if (key->modifiers() == Qt::AltModifier) {
+		if (ListFilter::HalfPageDirection(key->key(), key->modifiers())) {
 			_view.tracks->navigate(down ? TrackListAction::HalfDown : TrackListAction::HalfUp);
 		} else if (!key->modifiers()) {
 			_view.tracks->navigate(down ? TrackListAction::Down : TrackListAction::Up);

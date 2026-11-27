@@ -45,6 +45,7 @@ namespace Purple {
 class PickerSelection final {
 public:
 	static void Refresh(not_null<PeerListContent*> list);
+	static void HalfPage(not_null<PeerListContent*> list, int direction);
 };
 
 void InstallPickerFilter(

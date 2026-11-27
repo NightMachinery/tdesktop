@@ -40,6 +40,11 @@ void PickerSelection::Refresh(not_null<PeerListContent*> list) {
 	list->setSelected(PeerListContent::Selected(row, 0));
 }
 
+void PickerSelection::HalfPage(not_null<PeerListContent*> list, int direction) {
+	const auto height = list->_visibleBottom - list->_visibleTop;
+	list->selectSkip(direction * ListFilter::HalfPageRows(height, list->_rowHeight));
+}
+
 void InstallPickerFilter(
 		not_null<PeerListBox*> box,
 		not_null<Ui::MultiSelect*> filter,
@@ -75,6 +80,11 @@ void InstallPickerFilter(
 			return Result::Cancel;
 		} else if (closeOnEscape && ListFilter::Submit(key)) {
 			return AllowModalLayerKey(*press, box) ? Result::Continue : Result::Cancel;
+		} else if (const auto half = ListFilter::HalfPageDirection(key, mods)) {
+			if (AllowModalLayerKey(*press, box, true)) {
+				PickerSelection::HalfPage(list, half);
+			}
+			return Result::Cancel;
 		} else if (mods == ListFilter::kControl
 			&& (key == Qt::Key_N || key == Qt::Key_P)) {
 			if (AllowModalLayerKey(*press, box, true)) {
@@ -98,6 +108,14 @@ bool HandlePickerFilter(
 	if (closeOnEscape && ListFilter::Exit(key, mods, modal) && (modal || key == Qt::Key_Escape)) {
 		if (AllowModalLayerKey(*event, box)) {
 			box->closeBox();
+		}
+		event->accept();
+		return true;
+	}
+	if (const auto half = ListFilter::HalfPageDirection(key, mods);
+			half && (modal || closeOnEscape)) {
+		if (AllowModalLayerKey(*event, box, true)) {
+			PickerSelection::HalfPage(list, half);
 		}
 		event->accept();
 		return true;

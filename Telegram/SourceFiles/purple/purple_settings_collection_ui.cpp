@@ -275,9 +275,13 @@ protected:
 			|| (mods == kCtrlMod && code == Qt::Key_N);
 		const auto up = (!mods && (code == Qt::Key_Up || (plainMotion && code == Qt::Key_K)))
 			|| (mods == kCtrlMod && code == Qt::Key_P);
-		if (list && (down || up)) {
+		const auto half = ListFilter::HalfPageDirection(code, mods);
+		if (list && (down || up || half)) {
 			if (AllowModalLayerKey(*key, this, true)) {
-				list->setCurrentRow(std::clamp(list->currentRow() + (down ? 1 : -1),
+				const auto delta = half ? half * ListFilter::HalfPageRows(
+					list->viewport()->height(), list->sizeHintForRow(list->currentRow()))
+					: (down ? 1 : -1);
+				list->setCurrentRow(std::clamp(list->currentRow() + delta,
 					0, std::max(0, list->count() - 1)));
 			}
 			return true;

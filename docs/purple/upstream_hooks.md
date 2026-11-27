@@ -192,13 +192,18 @@ the numbers.
   `history/view/controls/history_view_compose_controls.cpp` use the same rule
   for the birthday-triggered gift button in both composers.
 
+## Half-page list motion
+
+- `dialogs/dialogs_inner_widget.cpp` applies the shared half-page step to the
+  stock chat list, archive and forum list.
+
 ## Recipient picker visibility
 
 - `boxes/peer_list_box.cpp` shares the modal filter entry and exit keys with
   the chat palette and searchable peer pickers. The handler receives the
   chat-palette classification so pressing Escape closes it directly. A row
   refresh hook preselects the first eligible match until the user moves the
-  cursor. The header grants the picker helper access to the visible rows.
+  cursor. The header grants the picker helper access to the visible rows and viewport.
 
 - `boxes/share_box.cpp`: candidate guards for default, folder-filtered and server
   search sources, plus two calls and a friend declaration for the owned share

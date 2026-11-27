@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/dialogs_inner_widget.h"
 
+#include "purple/purple_list_filter_keys.h"
 #include "purple/hooks/dialogs_inner_widget.h"
 
 #include "dialogs/dialogs_three_state_icon.h"
@@ -6627,7 +6628,9 @@ bool InnerWidget::processKeyDispatch(QKeyEvent *e) {
 		_previewSelected,
 		_searchedSelected,
 	};
-	if (e->key() == Qt::Key_Up) {
+	if (const auto half = Purple::ListFilter::HalfPageDirection(e->key(), e->modifiers())) {
+		selectSkip(half * Purple::ListFilter::HalfPageRows(_visibleBottom - _visibleTop, _st->height));
+	} else if (e->key() == Qt::Key_Up) {
 		selectSkip(-1);
 	} else if (e->key() == Qt::Key_Down) {
 		selectSkip(1);

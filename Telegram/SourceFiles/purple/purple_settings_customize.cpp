@@ -973,6 +973,31 @@ private:
 		}
 		if (_preedit.contains(object) || _preedit.contains(QApplication::focusWidget())
 			|| (_collection && SettingsCollectionHasPreedit(_collection))) return false;
+		if (const auto half = ListFilter::HalfPageDirection(key, mods)) {
+			if (const auto list = qobject_cast<QListWidget*>(object)) {
+				if (moving()) {
+					const auto rows = ListFilter::HalfPageRows(
+						list->viewport()->height(), list->sizeHintForRow(list->currentRow()));
+					list->setCurrentRow(std::clamp(list->currentRow() + half * rows,
+						0, std::max(0, list->count() - 1)));
+				}
+				return true;
+			} else if (object == _tree || object == _filter) {
+				if (moving()) {
+					const auto row = _tree->visualItemRect(_tree->currentItem()).height();
+					selectSibling(half * ListFilter::HalfPageRows(
+						_tree->viewport()->height(), row));
+				}
+				return true;
+			} else if (_reviewBody && object == _reviewBody) {
+				if (moving()) {
+					const auto bar = _reviewBody->verticalScrollBar();
+					bar->setValue(bar->value() + half * ListFilter::HalfPagePixels(
+						_reviewBody->viewport()->height()));
+				}
+				return true;
+			}
+		}
 		if (const auto button = qobject_cast<QPushButton*>(object); button && enter && !mods) {
 			if (once()) button->click();
 			return true;

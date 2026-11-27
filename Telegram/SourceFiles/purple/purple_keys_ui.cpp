@@ -191,6 +191,9 @@ int PaintChords(
 }
 
 int ListStep(int key, Qt::KeyboardModifiers mods, bool plainLetters) {
+	if (const auto direction = ListFilter::HalfPageDirection(key, mods)) {
+		return direction;
+	}
 	if (!mods) {
 		if (key == Qt::Key_Down || (plainLetters && key == Qt::Key_J)) {
 			return 1;
@@ -205,6 +208,19 @@ int ListStep(int key, Qt::KeyboardModifiers mods, bool plainLetters) {
 		}
 	}
 	return 0;
+}
+
+void ScrollList(
+		const QKeyEvent &event,
+		not_null<QWidget*> layer,
+		not_null<Ui::ScrollArea*> scroll,
+		int direction,
+		int step) {
+	if ((event.modifiers() & ~Qt::KeypadModifier) == Qt::AltModifier) {
+		scroll->scrollToY(scroll->scrollTop() + direction * ListFilter::HalfPagePixels(scroll->height()));
+	} else {
+		ScrollModalLayer(event, layer, scroll, direction * step);
+	}
 }
 
 using FilterResult = base::EventFilterResult;
@@ -900,7 +916,7 @@ public:
 			const auto step = ListStep(key, mods, false);
 			if (step) {
 				if (AllowModalLayerKey(*k, this, true)) {
-					ScrollModalLayer(*k, this, _scroll, 48 * step);
+					ScrollList(*k, this, _scroll, step, 48);
 				}
 				return base::EventFilterResult::Cancel;
 			}
@@ -979,7 +995,7 @@ protected:
 			toggleTab();
 			return;
 		} else if (step) {
-			ScrollModalLayer(*e, this, _scroll, 48 * step);
+			ScrollList(*e, this, _scroll, step, 48);
 			return;
 		} else if (modal && ListFilter::Enter(*e, key)) {
 			if (!_showAll) {
@@ -1686,7 +1702,7 @@ public:
 				if (AllowModalLayerKey(*k, this)) setFocus();
 				return base::EventFilterResult::Cancel;
 			} else if (const auto step = ListStep(key, mods, false)) {
-				if (AllowModalLayerKey(*k, this, true)) moveSelection(step);
+				if (AllowModalLayerKey(*k, this, true)) moveSelection(step, mods == Qt::AltModifier);
 				return base::EventFilterResult::Cancel;
 			} else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) {
 				if (AllowModalLayerKey(*k, this)) {
@@ -1710,7 +1726,7 @@ protected:
 		const auto mods = event->modifiers() & ~Qt::KeypadModifier;
 		const auto key = ModalPhysicalKey(*event);
 		if (const auto step = ListStep(key, mods, ModalKeysEnabled())) {
-			if (AllowModalLayerKey(*event, this, true)) moveSelection(step);
+			if (AllowModalLayerKey(*event, this, true)) moveSelection(step, mods == Qt::AltModifier);
 		} else if (ListFilter::Submit(key)) {
 			if (AllowModalLayerKey(*event, this)) activateRow(_selected);
 		} else if (ListFilter::Exit(key, mods, ModalKeysEnabled())) {
@@ -1866,12 +1882,15 @@ private:
 		update();
 	}
 
-	void moveSelection(int delta) {
+	void moveSelection(int delta, bool half = false) {
 		if (_filtered.empty()) {
 			return;
 		}
 		const auto n = int(_filtered.size());
-		_selected = (_selected + delta % n + n) % n;
+		_selected = half
+			? std::clamp(_selected + delta * ListFilter::HalfPageRows(
+				_scroll->height(), PaletteRowsWidget::kRowHeight), 0, n - 1)
+			: (_selected + delta % n + n) % n;
 		_rows->setSelected(_selected);
 		const auto rowTop = 4 + _selected * PaletteRowsWidget::kRowHeight;
 		const auto rowBottom = rowTop + PaletteRowsWidget::kRowHeight;
@@ -2289,7 +2308,8 @@ public:
 				return FilterResult::Cancel;
 			} else if (const auto step = ListStep(key, mods, false)) {
 				if (AllowModalLayerKey(*k, this, true)) {
-					moveSelection(step);
+					moveSelection(ListFilter::ListDelta(
+				step, mods, _scroll->height(), UnreadBufferRowsWidget::kRowHeight));
 				}
 				return base::EventFilterResult::Cancel;
 			}
@@ -2401,7 +2421,8 @@ protected:
 			_filter->setFocusFast();
 			return;
 		} else if (step) {
-			moveSelection(step);
+			moveSelection(ListFilter::ListDelta(
+				step, mods, _scroll->height(), UnreadBufferRowsWidget::kRowHeight));
 			return;
 		} else if (key == Qt::Key_G && mods == Qt::ShiftModifier) {
 			jumpSelection(int(_visible.size()) - 1);
@@ -3059,7 +3080,8 @@ public:
 				return FilterResult::Cancel;
 			} else if (const auto step = ListStep(key, mods, false)) {
 				if (AllowModalLayerKey(*k, this, true)) {
-					moveSelection(step);
+					moveSelection(ListFilter::ListDelta(
+				step, mods, _scroll->height(), TopicRowsWidget::kRowHeight));
 				}
 				return base::EventFilterResult::Cancel;
 			}
@@ -3159,7 +3181,8 @@ protected:
 			requestMore();
 			return;
 		} else if (step) {
-			moveSelection(step);
+			moveSelection(ListFilter::ListDelta(
+				step, mods, _scroll->height(), TopicRowsWidget::kRowHeight));
 			return;
 		} else if (key == Qt::Key_U && !mods) {
 			_unreadOnly = !_unreadOnly;
@@ -3778,7 +3801,7 @@ protected:
 			_scroll->scrollToY(_scroll->scrollTopMax());
 			return;
 		} else if (step) {
-			ScrollModalLayer(*e, this, _scroll, 44 * step);
+			ScrollList(*e, this, _scroll, step, 44);
 			return;
 		} else if (key == Qt::Key_Tab && !mods) {
 			moveButton(1);
@@ -4240,7 +4263,8 @@ public:
 				return FilterResult::Cancel;
 			} else if (const auto step = ListStep(key, mods, false)) {
 				if (AllowModalLayerKey(*k, this, true)) {
-					moveSelection(step);
+					moveSelection(ListFilter::ListDelta(
+				step, mods, _scroll->height(), NoticeHistoryRowsWidget::kRowHeight));
 				}
 				return base::EventFilterResult::Cancel;
 			}
@@ -4318,7 +4342,8 @@ protected:
 			moveSelection(int(_visible.size()));
 			return;
 		} else if (step) {
-			moveSelection(step);
+			moveSelection(ListFilter::ListDelta(
+				step, mods, _scroll->height(), NoticeHistoryRowsWidget::kRowHeight));
 			return;
 		} else if (key == Qt::Key_Y && !mods) {
 			if (_selected >= 0 && _selected < int(_visible.size()) && _config.onCopy) {
