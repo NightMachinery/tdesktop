@@ -68,18 +68,20 @@ int main() {
 	Check(!badSnap.has_value(), "rejects malformed forecast JSON");
 
 	{
-		Check(EffectiveSource({}, false) == "current",
+		Check(EffectiveSource({}, std::nullopt) == "current",
 			"untouched settings use approximate location");
-		Check(EffectiveSource({}, true) == "place",
+		Check(EffectiveSource({}, QByteArray("Oslo")) == "place",
 			"legacy town stays selected");
-		Check(EffectiveSource("off", true) == "off",
+		Check(EffectiveSource({}, QByteArray()) == "off",
+			"a saved blank legacy town keeps weather off");
+		Check(EffectiveSource("off", QByteArray("Oslo")) == "off",
 			"explicit off wins even with a legacy town");
-		Check(EffectiveSource("off", false) == "off",
+		Check(EffectiveSource("off", std::nullopt) == "off",
 			"explicit off survives without a saved location");
-		Check(EffectiveSource("place", false) == "place",
+		Check(EffectiveSource("place", std::nullopt) == "place",
 			"explicit town stays selected");
-		Check(EffectiveSource("current", true) == "current",
-			"explicit approximate location wins over legacy town");
+		Check(EffectiveSource("current", QByteArray()) == "current",
+			"explicit approximate location wins over a saved blank town");
 		Check(CanRequestLocation(LocationAccess::NotDetermined, false),
 			"undetermined permission may prompt on the first due cover");
 		Check(!CanRequestLocation(LocationAccess::NotDetermined, true),

@@ -139,13 +139,20 @@ constexpr auto kCurrentLocationInterval = qint64(6 * 60 * 60 * 1000);
 constexpr auto kFreshForecast = qint64(60 * 60 * 1000);
 constexpr auto kExpireForecast = qint64(24 * 60 * 60 * 1000);
 
-QByteArray WeatherPref(std::string_view name) {
-	return Core::App().settings().readPref<QByteArray>(name);
+QByteArray WeatherPref(std::string_view name, QByteArray fallback = {}) {
+	return Core::App().settings().readPref<QByteArray>(name, std::move(fallback));
 }
 
 QByteArray WeatherSource() {
-	return PrivacyWeather::EffectiveSource(WeatherPref(kWeatherSourcePref),
-		!WeatherPref(PrivacyWeather::kLocationPref).isEmpty());
+	const auto source = WeatherPref(kWeatherSourcePref);
+	if (!source.isEmpty()) {
+		return source;
+	}
+	const auto legacy = WeatherPref(PrivacyWeather::kLocationPref);
+	const auto legacySet = !legacy.isEmpty()
+		|| WeatherPref(PrivacyWeather::kLocationPref, "unset").isEmpty();
+	return PrivacyWeather::EffectiveSource(source,
+		legacySet ? std::make_optional(legacy) : std::nullopt);
 }
 
 std::optional<GeoPoint> ConfiguredWeatherCell() {

@@ -777,6 +777,8 @@ last_seen_cpp = read("purple/purple_last_seen.cpp")
 ordered(last_seen_cpp, "ShowPurpleNotice", "lastseen:empty:", ".background = true")
 
 privacy = read("purple/purple_privacy_screen.cpp")
+ordered(privacy, "QByteArray WeatherSource()", "const auto legacy =", "const auto legacySet =",
+        'WeatherPref(PrivacyWeather::kLocationPref, "unset").isEmpty()', "EffectiveSource")
 ordered(privacy, "NetworkProxy(proxy.isSystem(), proxy.isEnabled(),",
         "MTP::ToNetworkProxy(proxy.selected())")
 ordered(privacy, "void ensureFresh()", "PrivacyScreenActiveAny()", "!Core::App().passcodeLocked()",

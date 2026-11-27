@@ -2,6 +2,8 @@
 
 #include <QtCore/QByteArray>
 
+#include <optional>
+
 namespace Purple::PrivacyWeather {
 
 enum class LocationAccess {
@@ -15,8 +17,14 @@ enum class LocationAccess {
 
 [[nodiscard]] inline QByteArray EffectiveSource(
 		const QByteArray &saved,
-		bool hasLegacyPlace) {
-	return !saved.isEmpty() ? saved : QByteArray(hasLegacyPlace ? "place" : "current");
+		const std::optional<QByteArray> &legacy) {
+	if (!saved.isEmpty()) {
+		return saved;
+	}
+	if (!legacy) {
+		return "current";
+	}
+	return legacy->isEmpty() ? "off" : "place";
 }
 
 [[nodiscard]] inline bool CanRequestLocation(

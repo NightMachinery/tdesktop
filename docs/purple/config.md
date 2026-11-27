@@ -33,7 +33,8 @@ UTC offset, with the system clock first. The clocks follow the system's
 
 The weather source and units are set on this device in **Privacy screen
 weather**. With no saved choice, the source is approximate current location.
-An explicit Off or a previously configured town is preserved. Purple requests
+An explicit Off, including a saved blank city from the original weather
+setting, or a previously configured town is preserved. Purple requests
 system location when the cover is visible and needs a forecast. If location
 is denied, restricted, or unavailable, the cover omits the forecast and the
 settings show the reason and offer town or postal-code search. At full size the cover shows current conditions, the next six
