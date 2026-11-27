@@ -1402,6 +1402,7 @@ surface, not a new measurement of the older merge-base figures above.
   underlying `uponSymbol`; wrappers propagate it without synthesizing it.
 
 **`Telegram/SourceFiles/history/view/media/history_view_document.cpp`**:
+- Two paint hooks give keyboard hints the visible primary file control and corner download rectangles in standalone and grouped documents.
 - The normal caption draw has the same empty-highlight hook and a neutral nullable const captionText accessor. Grouped owners remain outside the witness catalog. Nongroup caption reachability is not established.
 - Winning open/save/open-with document-card handlers and actual caption
   glyphs mark `realParent` ownership. Caption links and offsets stay intact;

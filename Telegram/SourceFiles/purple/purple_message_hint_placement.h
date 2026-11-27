@@ -50,6 +50,7 @@ struct HintGeometry {
 	bool row = false;
 	bool bubble = false;
 	int compactWidth = 0;
+	QRect clip = {};
 };
 
 struct HintPlacement {
@@ -94,7 +95,8 @@ struct HintPlacement {
 		const std::vector<HintGeometry> &items,
 		QRect viewport,
 		int gap,
-		bool rtl) {
+		bool rtl,
+		const std::vector<QRect> &text = {}) {
 	auto result = std::vector<HintPlacement>(items.size());
 	auto order = std::vector<size_t>(items.size());
 	std::iota(order.begin(), order.end(), size_t(0));
@@ -110,11 +112,16 @@ struct HintPlacement {
 	};
 	for (const auto index : order) {
 		const auto &item = items[index];
-		const auto target = item.target.intersected(viewport);
-		if (target.isEmpty()) {
-			continue;
-		}
+		const auto clip = item.clip.isEmpty() ? viewport : viewport.intersected(item.clip);
+		const auto target = item.target.intersected(clip);
+		if (target.isEmpty()) continue;
 		const auto clear = [&](QRect box, QLine line) {
+			for (const auto &run : text) {
+				if (box.intersects(run)
+					|| (!target.intersects(run) && HintLineHits(line, run))) {
+					return false;
+				}
+			}
 			for (auto i = size_t(0); i < items.size(); ++i) {
 				const auto &placed = result[i];
 				if (box.intersects(placed.badge) || HintLineHits(placed.leader, box)
@@ -129,59 +136,58 @@ struct HintPlacement {
 			}
 			return true;
 		};
-		const auto place = [&](QSize size) -> HintPlacement {
-			const auto w = size.width();
-			const auto h = size.height();
-			if (viewport.width() < w || viewport.height() < h) {
-				return {};
+		const auto h = item.size.height();
+		const auto center = target.center();
+		const auto clearance = std::max(3 * gap, h / 3);
+		const auto tryBox = [&](int x, int y, int w) {
+			if (w > clip.width() || h > clip.height()) return false;
+			const auto box = QRect(
+				std::clamp(x, clip.left(), clip.right() + 1 - w),
+				std::clamp(y, clip.top(), clip.bottom() + 1 - h), w, h);
+			if (!item.row && !item.bubble && box.intersects(target)) {
+				const auto inset = std::min({ target.width() / 4, target.height() / 4, h / 3 });
+				if (box.intersects(target.adjusted(inset, inset, -inset, -inset))) return false;
 			}
-			const auto preferred = item.bubble
-				? MessageHintBadgeRect(target, target.top(), size, viewport, gap, rtl)
-				: WindowHintAnchor(target, size, item.row, rtl);
-			const auto center = target.center();
-			const auto y = item.bubble ? target.top() : center.y() - h / 2;
-			const auto left = target.left() - w - gap;
-			const auto right = target.right() + gap + 1;
-			const auto x = center.x() - w / 2;
-			auto points = std::vector<QPoint>();
-			if (item.row || item.bubble) {
-				points.push_back(preferred.topLeft());
+			auto line = QLine();
+			if (!box.intersects(target)) {
+				const auto end = nearest(target, box.center());
+				line = QLine(nearest(box, end), end);
+				if (QLineF(line).length() > 3 * h) return false;
 			}
-			for (const auto offset : { 0, -h, h }) {
-				points.push_back(QPoint(rtl ? right : left, y + offset));
-				points.push_back(QPoint(rtl ? left : right, y + offset));
-				points.push_back(QPoint(x + offset, target.top() - h - gap));
-				points.push_back(QPoint(x + offset, target.bottom() + gap + 1));
-			}
-			if (!item.row && !item.bubble && target.width() >= w * 2) {
-				points.push_back(preferred.topLeft());
-			}
-			for (auto point : points) {
-				point.setX(std::clamp(point.x(), viewport.left(), viewport.right() + 1 - w));
-				point.setY(std::clamp(point.y(), viewport.top(), viewport.bottom() + 1 - h));
-				const auto box = QRect(point, size);
-				if (!item.bubble && !item.row && box.contains(center)) {
-					continue;
-				}
-				auto line = QLine();
-				if (!box.intersects(target)) {
-					const auto end = nearest(target, box.center());
-					line = QLine(nearest(box, end), end);
-					if (QLineF(line).length() > 2 * h) {
-						continue;
+			if (!clear(box, line)) return false;
+			result[index] = { box, line };
+			return true;
+		};
+		const auto widths = std::array{ item.size.width(), item.compactWidth };
+		const auto y = (item.bubble ? target.top() : center.y()) - h / 2;
+		const auto place = [&] {
+			for (const auto dy : { 0, -h, h, -2 * h, 2 * h }) {
+				for (const auto w : widths) {
+					if (w <= 0) continue;
+					if (!dy && (item.bubble || item.row)) {
+						const auto pos = item.bubble
+							? MessageHintBadgeRect(target, target.top(), QSize(w, h), clip, clearance, rtl)
+							: WindowHintAnchor(target, QSize(w, h), true, rtl);
+						if (tryBox(pos.x(), pos.y(), w)) return;
+					}
+					for (const auto distance : { clearance, 0, h, 2 * h }) {
+						const auto left = target.left() - w - distance;
+						const auto right = target.right() + 1 + distance;
+						if (tryBox(rtl ? right : left, y + dy, w)
+							|| tryBox(rtl ? left : right, y + dy, w)) return;
 					}
 				}
-				if (clear(box, line)) {
-					return { box, line };
+				for (const auto w : widths) {
+					if (w <= 0) continue;
+					for (const auto distance : { clearance, h, 2 * h }) {
+						const auto x = center.x() - w / 2 + dy;
+						if (tryBox(x, target.top() - h - distance, w)
+							|| tryBox(x, target.bottom() + 1 + distance, w)) return;
+					}
 				}
 			}
-			return {};
 		};
-		result[index] = place(item.size);
-		if (result[index].badge.isEmpty()
-			&& item.compactWidth > 0 && item.compactWidth < item.size.width()) {
-			result[index] = place(QSize(item.compactWidth, item.size.height()));
-		}
+		place();
 	}
 	return result;
 }

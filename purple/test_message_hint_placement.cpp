@@ -58,5 +58,18 @@ int main() {
 			}
 		}
 	}
+	const auto pane = QRect(90, 0, 110, 100);
+	const auto play = QRect(108, 44, 32, 32);
+	const auto title = QRect(143, 45, 54, 16);
+	const auto confined = Purple::LayoutHintBadges({
+		{ play, QSize(44, 18), false, false, 22, pane },
+		{ title, badge, false, false, 18, pane },
+	}, viewport, gap, false, { title });
+	for (const auto &cap : confined) {
+		check(!cap.badge.isEmpty() && pane.contains(cap.badge), "badge stays inside history");
+		check(!cap.badge.intersects(title), "painted title remains readable");
+	}
+	check(std::abs(confined[0].badge.center().y() - play.center().y()) <= 1,
+		"compact play label stays on its album row");
 	std::cout << "Hint placement checks passed\n";
 }

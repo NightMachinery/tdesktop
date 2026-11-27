@@ -32,6 +32,8 @@ class RpWidget;
 
 namespace Purple {
 
+struct HintCapture;
+
 class MessageHints final {
 public:
 	enum class Action { Select, Copy, Menu, Link, Reply, Edit, CopyUrl, OpenUrl };
@@ -93,6 +95,7 @@ private:
 		std::optional<BodyLink> bodyLink;
 		HintRole role = HintRole::General;
 		bool row = false;
+		QRect viewport;
 		HintPlacement placement;
 
 		friend bool operator==(const Entry &, const Entry &) = default;
@@ -117,6 +120,8 @@ private:
 		Target view,
 		Main::Session *session,
 		bool menus,
+		const HintCapture &capture,
+		QPoint captureOrigin,
 		std::vector<WindowHintTarget> &out);
 	[[nodiscard]] static WindowHintTarget::Menu buildMenu(
 		Target view,
@@ -144,6 +149,7 @@ private:
 	std::vector<Entry> _entries;
 	std::vector<WindowHintTarget> _windowEntries;
 	HintPalette _palette;
+	std::vector<QRect> _textRuns;
 	QString _prefix;
 	QRect _globalClip;
 	rpl::lifetime _watch;

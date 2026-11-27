@@ -1,5 +1,6 @@
 #include "purple/purple_message_hints.h"
 #include "purple/purple_hint_labels.h"
+#include "purple/purple_hint_capture.h"
 #include "purple/purple_hint_paint.h"
 #include "purple/purple_message_hint_placement.h"
 
@@ -230,12 +231,12 @@ protected:
 			const auto &colors = _hints._palette.colors[int(entry.role)];
 			const auto line = entry.placement.leader;
 			if (!line.isNull()) {
-				p.setPen(QPen(st::windowBg->c, 3 * st::lineWidth));
+				p.setPen(QPen(st::windowBg->c, 4 * st::lineWidth));
 				p.drawLine(line);
-				p.setPen(QPen(colors.edge, st::lineWidth));
+				p.setPen(QPen(colors.edge, 2 * st::lineWidth));
 				p.drawLine(line);
 				p.setBrush(colors.edge);
-				p.drawEllipse(line.p2(), st::lineWidth, st::lineWidth);
+				p.drawEllipse(line.p2(), 2 * st::lineWidth, 2 * st::lineWidth);
 			}
 			if (!_hints._prefix.isEmpty()) {
 				p.setPen(QPen(colors.edge, 2 * st::lineWidth));
@@ -531,9 +532,9 @@ void MessageHints::layout(std::vector<Entry> &entries, QRect viewport) const {
 		const auto compactWidth = size.width() - st::msgServicePadding.left()
 			- st::msgServicePadding.right() + 2 * st::lineWidth;
 		regions.push_back({ entry.rect, size, entry.row,
-			!entry.bubbleRect.isEmpty() && !entry.bodyLink, compactWidth });
+			!entry.bubbleRect.isEmpty() && !entry.bodyLink, compactWidth, entry.viewport });
 	}
-	const auto placed = LayoutHintBadges(regions, viewport, st::lineWidth, style::RightToLeft());
+	const auto placed = LayoutHintBadges(regions, viewport, st::lineWidth, style::RightToLeft(), _textRuns);
 	for (auto i = size_t(0); i != entries.size(); ++i) {
 		entries[i].placement = placed[i];
 	}
@@ -547,6 +548,7 @@ bool MessageHints::start(Target view, Action action) {
 	_action = action;
 	_scheduled = view.scheduled;
 	_palette = CurrentHintPalette();
+	_textRuns = CaptureHintGeometry(_view, clip()).text;
 	_entries = snapshot();
 	if (_entries.empty()) {
 		clear();
@@ -574,12 +576,18 @@ bool MessageHints::startWindow(
 	_windowRoot = root;
 	_windowMenus = menus;
 	_session = base::make_weak(session);
+	const auto origin = root->mapToGlobal(QPoint());
+	const auto viewport = WindowHintClip(root).translated(-origin);
+	auto capture = CaptureHintGeometry(root, viewport);
+	auto panes = std::vector<QRect>();
 	auto targets = CollectWindowHintTargets(root);
 	for (const auto widget : root->findChildren<QWidget*>()) {
 		const auto main = dynamic_cast<HistoryInner*>(widget);
 		const auto section = dynamic_cast<HistoryView::ListWidget*>(widget);
-		if (main || section) {
-			appendWindowMessages({ .main = main, .section = section }, session, menus, targets);
+		if ((main || section) && !WindowHintClip(widget).isEmpty()) {
+			panes.push_back(WindowHintClip(widget).translated(-origin));
+			appendWindowMessages({ .main = main, .section = section }, session, menus,
+				capture, origin, targets);
 		}
 	}
 	const auto focusCenter = focus ? focus->mapToGlobal(focus->rect().center())
@@ -590,16 +598,32 @@ bool MessageHints::startWindow(
 	std::stable_sort(begin(targets), end(targets), [&](const auto &a, const auto &b) {
 		return rank(a) < rank(b);
 	});
-	const auto origin = root->mapToGlobal(QPoint());
-	const auto viewport = WindowHintClip(root).translated(-origin);
+	_textRuns = std::move(capture.text);
 	_palette = CurrentHintPalette();
 	for (auto &entry : targets) {
 		if (!WindowHintExposed(entry.widget, entry.bounds.center())) continue;
+		const auto rect = entry.bounds.translated(-origin);
+		auto area = viewport;
+		if (entry.mainList || dynamic_cast<HistoryInner*>(entry.widget.data())
+			|| dynamic_cast<HistoryView::ListWidget*>(entry.widget.data())) {
+			area &= WindowHintClip(entry.widget).translated(-origin);
+		}
+		for (const auto &pane : panes) {
+			if (rect.right() < pane.left()) {
+				area.setRight(std::min(area.right(), pane.left() - 1));
+			} else if (rect.left() > pane.right()) {
+				area.setLeft(std::max(area.left(), pane.right() + 1));
+			} else if (rect.left() >= pane.left() && rect.right() <= pane.right()) {
+				area.setLeft(std::max(area.left(), pane.left()));
+				area.setRight(std::min(area.right(), pane.right()));
+			}
+		}
 		_entries.push_back({
-			.rect = entry.bounds.translated(-origin),
+			.rect = rect,
 			.bubbleRect = entry.bubble.isEmpty() ? QRect() : entry.bubble.translated(-origin),
 			.role = menus ? HintRole::Menu : entry.role,
 			.row = entry.mainList,
+			.viewport = area,
 		});
 		_windowEntries.push_back(std::move(entry));
 	}
@@ -638,6 +662,8 @@ void MessageHints::appendWindowMessages(
 		Target view,
 		Main::Session *session,
 		bool menus,
+		const HintCapture &capture,
+		QPoint captureOrigin,
 		std::vector<WindowHintTarget> &out) {
 	const auto widget = view.widget();
 	const auto clip = WindowHintClip(widget);
@@ -742,13 +768,44 @@ void MessageHints::appendWindowMessages(
 				add(link.rect, true, link.handler, message->textItem()->fullId());
 			}
 		}
+		const auto addPainted = [&](const std::vector<QRect> &painted) {
+			for (const auto &rect : painted) {
+				const auto local = rect.translated(captureOrigin - origin - delta).intersected(region);
+				if (local.isEmpty()) continue;
+				const auto state = element->textState(local.center(), {});
+				add(local, false, state.link, state.itemId ? state.itemId : id);
+			}
+		};
+		addPainted(capture.faces);
+		addPainted(capture.text);
+		struct Sample {
+			ClickHandlerPtr link;
+			FullMsgId owner;
+			QRect bounds;
+			std::vector<QPoint> hits;
+		};
+		auto samples = std::vector<Sample>();
+		auto indices = QHash<const ClickHandler*, int>();
 		const auto step = std::max(st::lineWidth * 8, 4);
 		for (auto y = region.top() + step / 2; y <= region.bottom(); y += step) {
 			for (auto x = region.left() + step / 2; x <= region.right(); x += step) {
 				const auto point = QPoint(x, y);
 				const auto state = element->textState(point, {});
-				add(QRect(point, QSize(1, 1)), false, state.link, state.itemId ? state.itemId : id);
+				if (!state.link || handlers.contains(state.link.get())) continue;
+				auto i = indices.find(state.link.get());
+				if (i == indices.end()) {
+					i = indices.insert(state.link.get(), int(samples.size()));
+					samples.push_back({ state.link, state.itemId ? state.itemId : id, {}, {} });
+				}
+				auto &sample = samples[i.value()];
+				sample.bounds |= QRect(point, QSize(1, 1));
+				sample.hits.push_back(point);
 			}
+		}
+		for (const auto &sample : samples) {
+			const auto distance = [&](QPoint p) { return (p - sample.bounds.center()).manhattanLength(); };
+			const auto point = *std::ranges::min_element(sample.hits, {}, distance);
+			add(QRect(point, QSize(1, 1)), false, sample.link, sample.owner);
 		}
 		return true;
 	};
@@ -1069,6 +1126,7 @@ void MessageHints::clear() {
 	_session = {};
 	_entries.clear();
 	_windowEntries.clear();
+	_textRuns.clear();
 	_prefix.clear();
 	_globalClip = {};
 }

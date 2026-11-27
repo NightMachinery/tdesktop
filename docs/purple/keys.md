@@ -156,8 +156,9 @@ with at most four strokes per chord:
     message, `g e` edit message, `g u` jump to unread.
   - Hints use blue for navigation, violet for reply, teal for playback, amber
     for menus and neutral for other controls. Close has a rounded red border.
-    Delete, Remove, Leave and Discard have clipped red corners. A short line
-    ties a displaced badge to its target. Typing a prefix underlines the letters
+    Delete, Remove, Leave and Discard have clipped red corners. History badges
+    stay in their pane and leave visible text clear. A line with an endpoint
+    dot connects a displaced badge to its control. Typing a prefix underlines the letters
     already entered, outlines the matching targets and preserves their positions.
     Backspace restores the previous set. Configure marks and opacity in
     [settings.toml](config.md#hint-badges). Telegram's copy and selection

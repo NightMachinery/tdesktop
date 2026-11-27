@@ -23,6 +23,12 @@ done
 env QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORM_PLUGIN_PATH="${qt}/share/qt/plugins/platforms" \
   "${work}/item-identity"
 
+"${CXX:-c++}" "${flags[@]}" -F"${frameworks}" -framework QtWidgets -framework QtGui -framework QtCore \
+  "-Wl,-rpath,${frameworks}" "${root}/purple/test_hint_capture.cpp" \
+  "${root}/Telegram/SourceFiles/purple/purple_hint_capture.cpp" -o "${work}/capture"
+env QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORM_PLUGIN_PATH="${qt}/share/qt/plugins/platforms" \
+  "${work}/capture"
+
 if [[ $# -gt 0 ]]; then
   "${CXX:-c++}" "${flags[@]}" -F"${frameworks}" -framework QtGui -framework QtCore "-Wl,-rpath,${frameworks}" \
     "${root}/purple/test_window_hint_renders.cpp" -o "${work}/renders"

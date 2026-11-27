@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/media/history_view_document.h"
 #include "purple/purple_ui_witness.h"
+#include "purple/purple_hint_capture.h"
 
 #include "base/random.h"
 #include "lang/lang_keys.h"
@@ -767,6 +768,7 @@ void Document::draw(
 	const auto rthumb = style::rtlrect(st.padding.left(), st.padding.top() - topMinus, st.thumbSize, st.thumbSize, width);
 	const auto innerSize = st::msgFileLayout.thumbSize;
 	const auto inner = QRect(rthumb.x() + (rthumb.width() - innerSize) / 2, rthumb.y() + (rthumb.height() - innerSize) / 2, innerSize, innerSize);
+	Purple::RecordHintFace(p, inner);
 	const auto radialOpacity = radial ? _animation->radial.opacity() : 1.;
 	if (thumbed) {
 		const auto rounding = thumbRounding(mode, outsideRounding);
@@ -1249,6 +1251,7 @@ void Document::drawCornerDownload(
 	const auto shift = st::historyAudioDownloadShift;
 	const auto size = st::historyAudioDownloadSize;
 	const auto inner = style::rtlrect(st.padding.left() + shift, st.padding.top() - topMinus + shift, size, size, width());
+	Purple::RecordHintFace(p, inner);
 	const auto bubblePattern = usesBubblePattern(context);
 	if (bubblePattern) {
 		p.setPen(Qt::NoPen);

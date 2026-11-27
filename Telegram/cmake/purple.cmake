@@ -197,6 +197,8 @@ PRIVATE
     purple/purple_privacy_weather.h
     purple/purple_privacy_clocks.h
     purple/purple_message_hint_placement.h
+    purple/purple_hint_capture.cpp
+    purple/purple_hint_capture.h
     purple/purple_hint_labels.h
     purple/purple_hint_hydra.cpp
     purple/purple_hint_hydra.h
