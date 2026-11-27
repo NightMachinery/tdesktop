@@ -8,6 +8,7 @@
 #include "ui/painter.h"
 #include "ui/widgets/menu/menu.h"
 #include "ui/widgets/menu/menu_item_base.h"
+#include "ui/widgets/menu/menu_action.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
 
@@ -24,6 +25,7 @@
 #include <QtWidgets/QStyle>
 
 #include <algorithm>
+#include <ranges>
 
 namespace Purple {
 namespace {
@@ -162,6 +164,7 @@ protected:
 		} else if (key == Qt::Key_Backspace) {
 			if (!_prefix.isEmpty()) {
 				_prefix.chop(1);
+				_rows->update();
 				update();
 			} else if (!_path.empty()) {
 				const auto parent = _path.back().parent;
@@ -195,6 +198,7 @@ protected:
 				choose(int(found - begin(_actions)));
 				return;
 			}
+			_rows->update();
 			update();
 		}
 	}
@@ -204,6 +208,7 @@ private:
 		QString title;
 		QString key;
 		char known = 0;
+		HintRole role = HintRole::Menu;
 		QPointer<QAction> native;
 		QPointer<Ui::PopupMenu> child;
 		Fn<void()> callback;
@@ -242,6 +247,8 @@ private:
 			_actions.push_back({
 				.title = (_target.kind == Kind::Control) ? u"Activate"_q : u"Open"_q,
 				.known = 'o',
+				.role = (_target.role == HintRole::Close || _target.role == HintRole::Destructive)
+					? _target.role : HintRole::Menu,
 				.callback = _target.activate,
 			});
 		}
@@ -257,9 +264,13 @@ private:
 				if (_path.empty() && _target.reply && known == 'r' && _default < 0) {
 					_default = int(_actions.size());
 				}
+				const auto native = dynamic_cast<Ui::Menu::Action*>(item);
+				const auto attention = native && (&native->st() == &st::menuAttention
+					|| &native->st() == &st::menuWithIconsAttention);
 				_actions.push_back({
 					.title = title,
 					.known = known,
+					.role = TaggedHintRole(action, attention ? HintRole::Destructive : HintRole::Menu),
 					.native = action.get(),
 					.child = action->menu() ? menu->ensureSubmenu(action, menu->st()).get() : nullptr,
 				});
@@ -350,7 +361,11 @@ private:
 		const auto height = rowHeight();
 		const auto fm = p.fontMetrics();
 		const auto pad = st::boxPadding.left();
-		const auto cap = fm.horizontalAdvance(u"SPC XX"_q) + st::keysLegendCapSkip * 2;
+		const auto longest = std::ranges::max_element(_actions, {}, [&](const Action &action) {
+			return fm.horizontalAdvance(ShortcutName(action.key));
+		});
+		const auto cap = std::max(fm.horizontalAdvance(u"SPC XX"_q), longest == end(_actions)
+			? 0 : fm.horizontalAdvance(ShortcutName(longest->key))) + st::keysLegendCapSkip * 2 + _palette.inset(HintRole::Menu);
 		for (auto i = std::max(clip.top() / height, 0); i < int(_actions.size()) && i * height <= clip.bottom(); ++i) {
 			const auto &action = _actions[i];
 			const auto row = QRect(0, i * height, widget->width(), height);
@@ -363,8 +378,9 @@ private:
 			};
 			const auto capRect = orient(QRect(pad, row.y() + (height - st::keysLegendCapHeight) / 2,
 				cap, st::keysLegendCapHeight));
-			PaintHydraCap(p, capRect, ShortcutName(action.key), st::keysLegendCapBg->c,
-				st::keysLegendCapBorder->c, st::keysLegendCapFg->c, st::keysLegendCapRadius);
+			const auto display = ShortcutName(action.key);
+			const auto prefix = action.key.startsWith(_prefix) ? ShortcutName(_prefix).size() : 0;
+			PaintHintBadge(p, capRect, display, prefix, action.role, _palette, mirrored);
 			const auto &icon = MenuIcon(_target.kind, action.known);
 			const auto iconX = pad + cap + st::keysLegendCapSkip;
 			const auto iconRect = orient(QRect(iconX, row.y() + (height - icon.height()) / 2, icon.width(), icon.height()));
@@ -384,6 +400,7 @@ private:
 		}
 	}
 
+	const HintPalette _palette = CurrentHintPalette();
 	WindowHintTarget _target;
 	WindowHintTarget::Menu _menu;
 	Fn<bool()> _allowed;

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "purple/purple_media_seek.h"
 
 #include "purple/purple_config.h"
+#include "purple/purple_hint_targets.h"
 #include "purple/purple_seek_rules.h"
 
 #include "base/platform/base_platform_info.h"
@@ -104,6 +105,7 @@ not_null<Ui::AbstractButton*> AddSeekButton(
 			const QString&)> paint,
 		Fn<void()> clicked) {
 	const auto button = Ui::CreateChild<Ui::AbstractButton>(parent.get());
+	SetWindowHintRole(button, HintRole::Playback);
 	const auto step = button->lifetime().make_state<int>(SeekStepSeconds());
 	button->setClickedCallback(std::move(clicked));
 	button->paintRequest() | rpl::on_next([=] {

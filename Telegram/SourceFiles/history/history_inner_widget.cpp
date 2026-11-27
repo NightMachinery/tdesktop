@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
 #include "purple/purple_archive_v2_boxes.h"
+#include "purple/purple_hint_role.h"
 #include "purple/hooks/media_playback.h"
 #include "purple/purple_copy.h"
 #include "purple/purple_message_hints.h"
@@ -3516,9 +3517,10 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				}, &st::menuIconForward);
 			}
 			if (selectedState.count > 0 && selectedState.canDeleteCount == selectedState.count) {
-				_menu->addAction(tr::lng_context_delete_selected(tr::now), [=] {
+				const auto action = _menu->addAction(tr::lng_context_delete_selected(tr::now), [=] {
 					_widget->confirmDeleteSelected();
 				}, &st::menuIconDelete);
+				Purple::SetWindowHintRole(action, Purple::HintRole::Destructive);
 			}
 			addUnpinSelectedAction();
 			if (selectedState.count > 0 && !hasCopyRestrictionForSelected()) {
@@ -3823,9 +3825,10 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				}, &st::menuIconForward);
 			}
 			if (selectedState.count > 0 && selectedState.count == selectedState.canDeleteCount) {
-				_menu->addAction(tr::lng_context_delete_selected(tr::now), [=] {
+				const auto action = _menu->addAction(tr::lng_context_delete_selected(tr::now), [=] {
 					_widget->confirmDeleteSelected();
 				}, &st::menuIconDelete);
+				Purple::SetWindowHintRole(action, Purple::HintRole::Destructive);
 			}
 			addUnpinSelectedAction();
 			if (selectedState.count > 0 && !hasCopyRestrictionForSelected()) {

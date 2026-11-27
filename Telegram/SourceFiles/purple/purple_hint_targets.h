@@ -4,6 +4,8 @@
 #include "base/unique_qptr.h"
 #include "data/data_msg_id.h"
 #include "purple/purple_window_hint_geometry.h"
+#include "purple/purple_hint_role.h"
+#include "ui/click_handler.h"
 
 #include <QtCore/QPointer>
 #include <QtCore/QRect>
@@ -31,6 +33,7 @@ struct WindowHintTarget {
 	bool mainList = false;
 	bool reply = false;
 	Kind kind = Kind::Control;
+	HintRole role = HintRole::General;
 	std::vector<FullMsgId> messages;
 	Fn<bool()> current;
 	Fn<void()> activate;
@@ -48,6 +51,7 @@ public:
 };
 
 [[nodiscard]] std::vector<WindowHintTarget> CollectWindowHintTargets(QWidget *root);
+[[nodiscard]] HintRole WindowHintHandlerRole(const ClickHandlerPtr &handler);
 void ClickWindowHint(QWidget *widget, QPoint localPoint);
 void RegisterFolderHintMenu(QWidget *button, WindowHintTarget::MenuBuilder builder);
 

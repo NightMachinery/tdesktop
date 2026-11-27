@@ -1,4 +1,5 @@
 #include "purple/purple_music_widgets.h"
+#include "purple/purple_hint_targets.h"
 
 #include "lang/lang_keys.h"
 #include "ui/controls/keys_legend.h"
@@ -204,8 +205,8 @@ ChatMusicLayout AddChatMusicLayout(
 	box->addRow(MakeMusicSelectionBar(
 		box, std::move(args.marks), std::move(args.selection), keys));
 	box->setTitle(rpl::single(u"Music shared in this chat"_q));
-	box->addButton(tr::lng_close(), [=] { box->closeBox(); });
-	box->addButton(rpl::single(u"Actions"_q), [=] { tracks->showActions(); });
+	SetWindowHintRole(box->addButton(tr::lng_close(), [=] { box->closeBox(); }), HintRole::Close);
+	SetWindowHintRole(box->addButton(rpl::single(u"Actions"_q), [=] { tracks->showActions(); }), HintRole::Menu);
 	const auto more = box->addLeftButton(tr::lng_purple_music_more(), std::move(args.loadMore));
 	more->hide();
 	if (style::RightToLeft()) {
@@ -252,6 +253,7 @@ object_ptr<Ui::RpWidget> MakeMusicHeader(
 		header, tr::lng_purple_music_title(), st::purpleMusicTitle);
 	const auto playlist = Ui::CreateChild<MusicActionButton>(
 		header, tr::lng_purple_playlists_title(), playlistKeys, std::move(playlists));
+	SetWindowHintRole(playlist, HintRole::Navigate);
 	const auto menu = Ui::CreateChild<Ui::IconButton>(header, st::purpleMusicMore);
 	menu->setAccessibleName(tr::lng_purple_music_options(tr::now));
 	menu->setClickedCallback([=] {

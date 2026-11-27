@@ -1371,6 +1371,7 @@ void PlaylistSongList::Rows::collectWindowHints(
 			.widget = this,
 			.bounds = bounds,
 			.name = accessibilityChildName(row),
+			.role = _play ? HintRole::Playback : HintRole::General,
 			.current = [=] {
 				return guard && !_dragging && row < int(_data.size())
 					&& _data[row].documentId == document

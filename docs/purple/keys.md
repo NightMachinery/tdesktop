@@ -154,8 +154,15 @@ with at most four strokes per chord:
     message, expand a Details block before hinting links inside it.
   - `g s` select message, `g m` open message context menu, `g r` reply to
     message, `g e` edit message, `g u` jump to unread.
-  - Hint tags render in high-contrast amber-gold with crimson typed-prefix
-    highlighting and follow Telegram's copy and selection restrictions.
+  - Hints use blue for navigation, violet for reply, teal for playback, amber
+    for menus and neutral for other controls. Close has a rounded red border.
+    Delete, Remove, Leave and Discard have clipped red corners. History badges
+    stay in their pane and leave visible text clear. A line with an endpoint
+    dot connects a displaced badge to its control. Typing a prefix underlines the letters
+    already entered, outlines the matching targets and preserves their positions.
+    Backspace restores the previous set. Configure marks and opacity in
+    [settings.toml](config.md#hint-badges). Telegram's copy and selection
+    restrictions apply.
 - **Insert mode (`:insert`):** `C-[` enters Normal mode, `M-x` opens the
   command palette and restores focus to the composer on cancel.
 

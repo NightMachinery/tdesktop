@@ -695,6 +695,7 @@
         "purple/test_hint_mnemonics.cpp",
         "purple/test_message_hint_placement.cpp",
         "purple/test_hint_item_identity.cpp",
+        "purple/test_hint_capture.cpp",
         "purple/test_window_hint_renders.cpp"
       ]
     },

@@ -1,5 +1,11 @@
 # Upstream hooks
 
+The semantic keyboard hint hooks in `ui/controls/delete_message_context_action.cpp`,
+`history/history_inner_widget.cpp` and `history/view/history_view_context_menu.cpp`
+mark native deletion actions when their producers create them. Purple’s hint
+menu reads the role for each eligible action independently of its translated title.
+Custom action rows still use the existing menu eligibility checks.
+
 Upstream tdesktop is merged into this fork again and again. Every line Purple
 changes in an upstream file can conflict in a later merge, so AGENTS.md
 ("Keeping upstream merges easy") allows only hooks there. Much older Purple
@@ -932,7 +938,13 @@ B6 extracts the desktop surfaces into `purple_last_seen_ui`. The existing
   click time, requires the original live session and loads that session's user
   by typed ID. It never borrows another account's active controller.
 
+**`Telegram/SourceFiles/info/profile/info_profile_actions.cpp`**
+
+- `ActionsFiller::addLeaveChannelAction` marks the native Leave button as destructive for window hints.
+
 **`Telegram/SourceFiles/info/profile/info_profile_top_bar.cpp`**: B6 and D16.
+
+- The profile action strip marks Leave as destructive. The side-panel and layer Close buttons share the reversible Close hint role.
 - The `show_or_premium_box.h` include and upstream button text are restored,
   with one Purple UI include. `SetupShowLastSeen` handles the existing fork
   branch after the original eligibility and premium early returns. The latter
@@ -1390,6 +1402,7 @@ surface, not a new measurement of the older merge-base figures above.
   underlying `uponSymbol`; wrappers propagate it without synthesizing it.
 
 **`Telegram/SourceFiles/history/view/media/history_view_document.cpp`**:
+- Two paint hooks give keyboard hints the visible primary file control and corner download rectangles in standalone and grouped documents.
 - The normal caption draw has the same empty-highlight hook and a neutral nullable const captionText accessor. Grouped owners remain outside the witness catalog. Nongroup caption reachability is not established.
 - Winning open/save/open-with document-card handlers and actual caption
   glyphs mark `realParent` ownership. Caption links and offsets stay intact;

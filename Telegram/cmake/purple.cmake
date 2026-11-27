@@ -199,11 +199,15 @@ PRIVATE
     purple/purple_privacy_weather_proxy.h
     purple/purple_privacy_clocks.h
     purple/purple_message_hint_placement.h
+    purple/purple_hint_capture.cpp
+    purple/purple_hint_capture.h
     purple/purple_hint_labels.h
     purple/purple_hint_hydra.cpp
     purple/purple_hint_hydra.h
     purple/purple_hint_item_identity.h
     purple/purple_hint_mnemonics.h
+    purple/purple_hint_role.h
+    purple/purple_hint_paint.cpp
     purple/purple_hint_paint.h
     purple/purple_hint_targets.cpp
     purple/purple_hint_targets.h
