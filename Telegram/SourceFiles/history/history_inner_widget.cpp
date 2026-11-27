@@ -6,9 +6,9 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
+#include "purple/hooks/media_playback.h"
 #include "purple/purple_archive_v2_boxes.h"
 #include "purple/purple_hint_role.h"
-#include "purple/hooks/media_playback.h"
 #include "purple/purple_copy.h"
 #include "purple/purple_message_hints.h"
 #include "purple/purple_sync.h"
