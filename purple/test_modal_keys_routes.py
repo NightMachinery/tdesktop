@@ -440,7 +440,8 @@ ordered(keys, "bool Keys::eventFilter", "_hints.windowActive()", "WindowHintGeom
 ordered(keys, "void Keys::refreshStatusBar", "visibleLayer()", "&& !_hints.windowActive()",
         "else if (_hints.active())", 'u"HINTS"_q')
 ordered(universal, "bool MessageHints::startWindow", "CollectWindowHintTargets(root)",
-        "appendWindowMessages", "HintLabels(targets.size())", "WindowHintExposed", "PlaceHintBadge")
+        "appendWindowMessages", "WindowHintExposed", "layout(_entries, viewport)", "_entries.resize(kept)")
+ordered(universal, "void MessageHints::layout", "HintLabels(entries.size())", "LayoutHintBadges", ".placement = placed[i]")
 ordered(universal, "MessageHints::Input MessageHints::typeWindow", "session != _session.get()",
         "Qt::Key_Backspace", "_prefix.chop(1)", "auto entry = std::move", "clear()",
         "entry.current()", "WindowHintExposed", "entry.activate()")
@@ -456,6 +457,12 @@ ordered(customize, "FilterCustomizeSettingsInput", "owns(target)", "HandleModalW
 ordered(hint_targets, "void AddButton", "SendButton::Type::Record", "SendButton::Type::Round",
         "send->state() == *sendState", "clicked(Qt::NoModifier, Qt::LeftButton)")
 hydra = read("purple/purple_hint_hydra.cpp")
+ordered(hydra, "const auto attention", "TaggedHintRole(action, attention", "HintMnemonics(requests)")
+ordered(read("ui/controls/delete_message_context_action.cpp"), "ActionWithTimer::ActionWithTimer",
+        "SetWindowHintRole(_dummyAction, Purple::HintRole::Destructive)", "DeleteMessageContextAction(",
+        "SetWindowHintRole(action, Purple::HintRole::Destructive)")
+ordered(hint_targets, "const auto handler = layout->getState", "WindowHintHandlerRole(handler)",
+        "layout->getState(local - live.geometry.topLeft(), {}).link == handler")
 ordered(hydra, "void keyPressEvent", "AllowModalLayerKey(*e, this)", "live()", "Qt::Key_Backspace", "Qt::Key_Return")
 ordered(hydra, "void load(", "menu->actions()", "action->isEnabled()", "menu->ensureSubmenu", "HintMnemonics")
 ordered(hydra, "void choose(", "action.child", "action.native->trigger()", "const auto menu = std::move(_menu)",
@@ -851,7 +858,7 @@ ordered(background, "readPref<bool>(kVisiblePref, true)", "VisibilityChanges.fir
 
 hints = read("purple/purple_message_hints.cpp")
 ordered(hints, "setFocusPolicy(Qt::NoFocus)", "Qt::WA_TransparentForMouseEvents")
-ordered(read("purple/purple_hint_paint.h"), "0xff, 0xd8, 0x4a", "0xb9, 0x1c, 0x1c")
+ordered(read("purple/purple_hint_paint.h"), "ResolveHintColors", "fill.setAlpha(alpha)", "PaintHintBadge", "HintRole::Destructive", "colors.prefix")
 ordered(hints, "bool MessageHints::eligible", "hasCopyRestriction", "goodForSelection")
 
 menu = read("window/window_main_menu.cpp")

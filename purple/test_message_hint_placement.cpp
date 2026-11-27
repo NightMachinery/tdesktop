@@ -27,21 +27,36 @@ int main() {
 	check(MessageHintBadgeRect(wide, 24, badge, viewport, gap, false) == QRect(0, 16, 24, 16), "straddles corner when both sides are tight");
 	check(viewport.contains(MessageHintBadgeRect(clipped, 0, badge, viewport, gap, true)), "clipped top corner stays visible");
 	check(MessageHintBadgeRect(both, 45, badge, viewport, gap, false).y() == 45, "link aligns with its own line");
-	const auto link = QRect(32, 42, 88, 18);
-	check(Purple::MessageHintLeaderEnd(QPoint(15, 64), link) == QPoint(31, 60), "leader stops before near corner");
-	check(Purple::MessageHintLeaderEnd(QPoint(140, 50), link) == QPoint(120, 50), "leader stops before right edge");
-	auto placed = std::vector<QRect>();
-	for (auto i = 0; i < 30; ++i) {
-		const auto next = Purple::PlaceHintBadge(QRect(88, 40, 24, 16), viewport, placed);
-		check(viewport.contains(next), "dense badge remains in the viewport");
-		for (const auto previous : placed) {
-			check(!previous.intersects(next), "dense badges must not overlap");
-		}
-		placed.push_back(next);
-	}
-	check(Purple::PlaceHintBadge(QRect(0, 0, 201, 20), viewport, {}).isEmpty(),
-		"an oversized badge cannot be drawn");
+	check(Purple::LayoutHintBadges({ { both, QSize(201, 20) } }, viewport, gap, false).front().badge.isEmpty(),
+		"oversized badge omitted");
 	check(Purple::WindowHintAnchor(both, badge, false, false).right() == both.right(), "control cap uses trailing edge");
 	check(Purple::WindowHintAnchor(both, badge, true, true).right() == both.right(), "RTL row cap uses leading edge");
-	std::cout << "477 checks, 0 failures\n";
+	check(Purple::HintLinesMeet(QLine(1, 9, 1, 2), QLine(1, 5, 1, 14)), "collinear leaders overlap");
+	check(!Purple::HintLinesMeet(QLine(1, 9, 1, 2), QLine(1, 10, 1, 14)), "adjacent leaders separate");
+	const auto narrow = Purple::LayoutHintBadges({ { both, QSize(210, 16), true, false, 180 } }, viewport, gap, false);
+	check(narrow.front().badge.width() == 180, "compact side padding before omission");
+	const auto cluster = std::vector<Purple::HintGeometry>{
+		{ QRect(18, 28, 28, 28), badge },
+		{ QRect(56, 30, 90, 18), badge },
+		{ QRect(56, 54, 64, 20), badge },
+		{ QRect(12, 14, 150, 70), badge, false, true },
+	};
+	for (const auto rtl : { false, true }) {
+		const auto result = Purple::LayoutHintBadges(cluster, viewport, gap, rtl);
+		check(result == Purple::LayoutHintBadges(cluster, viewport, gap, rtl), "stable cluster layout");
+		for (auto i = size_t(0); i != result.size(); ++i) {
+			check(!result[i].badge.isEmpty() && viewport.contains(result[i].badge), "audio cluster coverage");
+			if (!result[i].leader.isNull()) {
+				check(cluster[i].target.contains(result[i].leader.p2()), "endpoint belongs to target");
+			} else {
+				check(result[i].badge.intersects(cluster[i].target), "attached cap reaches target");
+			}
+			for (auto j = size_t(0); j < i; ++j) {
+				check(!result[i].badge.intersects(result[j].badge), "distinct caps");
+				check(!Purple::HintLineHits(result[i].leader, result[j].badge), "no crossing a cap");
+				check(!Purple::HintLinesMeet(result[i].leader, result[j].leader), "no crossing leaders");
+			}
+		}
+	}
+	std::cout << "Hint placement checks passed\n";
 }

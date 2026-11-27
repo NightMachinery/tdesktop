@@ -27,6 +27,96 @@ void Line(QPainter &p, QRect rect, const QString &title, QColor color, int size 
 	p.drawText(rect, Qt::AlignLeft | Qt::AlignVCenter, title);
 }
 
+using Role = Purple::HintRole;
+
+Purple::HintPalette BadgePalette(bool dark, int percent = 80, bool symbols = true) {
+	auto colors = Purple::HintPalette{ .symbols = symbols, .markWidth = 10, .stroke = 1, .radius = 4 };
+	const auto accents = dark
+		? std::array{ 0x708499, 0x6ab3f3, 0xb48bf2, 0x62d4e3, 0x62d4e3, 0xf3bc5c, 0xec3942, 0xec3942 }
+		: std::array{ 0x999999, 0x168acd, 0x8544d6, 0x2996ad, 0x2996ad, 0xd09306, 0xd14e4e, 0xd14e4e };
+	for (auto i = size_t(0); i != accents.size(); ++i) {
+		colors.colors[i] = Purple::ResolveHintColors(
+			dark ? QColor(0x17212b) : QColor(Qt::white),
+			dark ? QColor(0xf5f5f5) : QColor(Qt::black),
+			QColor(accents[i]), percent);
+	}
+	return colors;
+}
+
+bool Readable(const Purple::HintColors &colors) {
+	for (const auto backdrop : { QColor(Qt::white), QColor(Qt::black) }) {
+		const auto fill = Purple::MixHintColor(backdrop, colors.fill, colors.fill.alphaF());
+		const auto contrast = [&](QColor ink) {
+			const auto a = Purple::HintLuminance(fill) + .05;
+			const auto b = Purple::HintLuminance(ink) + .05;
+			return std::max(a, b) / std::min(a, b);
+		};
+		if (colors.ink.alpha() != 255 || colors.prefix.alpha() != 255 || colors.edge.alpha() != 255
+			|| contrast(colors.ink) < 4.5 || contrast(colors.prefix) < 4.5 || contrast(colors.edge) < 3.) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool CheckPalette() {
+	for (auto opacity = 60; opacity <= 100; ++opacity) {
+		for (const auto dark : { false, true }) {
+			for (const auto &colors : BadgePalette(dark, opacity).colors) {
+				if (!Readable(colors)) return false;
+			}
+		}
+		if (!Readable(Purple::ResolveHintColors(QColor(139, 136, 133, 142),
+			QColor(140, 137, 134, 100), QColor(147, 143, 135, 47), opacity))) {
+			return false;
+		}
+	}
+	auto silhouettes = std::vector<QImage>();
+	auto palette = BadgePalette(false, 80, false);
+	for (auto i = 0; i < int(Role::Count); ++i) {
+		const auto role = Role(i);
+		if (role == Role::PlayPause) continue;
+		auto image = QImage(60, 24, QImage::Format_ARGB32_Premultiplied);
+		image.fill(Qt::transparent);
+		palette.colors[i] = palette.colors[0];
+		auto painter = QPainter(&image);
+		Purple::PaintHintBadge(painter, image.rect().adjusted(1, 1, -1, -1), {}, 0, role, palette, false);
+		painter.end();
+		if (palette.inset(role) || std::find(silhouettes.begin(), silhouettes.end(), image) != silhouettes.end()) {
+			return false;
+		}
+		silhouettes.push_back(image);
+	}
+	return true;
+}
+
+bool BadgeSheet(QDir dir, bool dark) {
+	const auto titles = QStringList{ u"General"_s, u"Navigate"_s, u"Reply"_s, u"Playback"_s,
+		u"Play/pause"_s, u"Menu"_s, u"Close"_s, u"Delete"_s };
+	auto image = QImage(1020, 230, QImage::Format_ARGB32_Premultiplied);
+	image.fill(dark ? QColor(0x17212b) : QColor(Qt::white));
+	auto p = QPainter(&image);
+	p.setFont(QFont(u"Menlo"_s, 12, QFont::Bold));
+	for (auto i = 0; i != int(Role::Count); ++i) {
+		const auto x = 138 + 110 * i;
+		p.setPen(dark ? Qt::white : Qt::black);
+		p.drawText(x, 23, titles[i]);
+		for (auto j = 0; j < 6; ++j) {
+			const auto alpha = std::array{ 60, 80, 100 }[j % 3];
+			const auto colors = BadgePalette(dark, alpha, j < 3);
+			const auto area = QRect(x, 32 + j * 32, 56, 23);
+			Purple::PaintHintBadge(p, area, u"KF"_s, 1, Role(i), colors, false);
+			if (!i) {
+				p.setPen(dark ? Qt::white : Qt::black);
+				p.drawText(7, area.center().y()+4,
+					QString::number(alpha) + (j < 3 ? u"%  marks"_s : u"%  plain"_s));
+			}
+		}
+	}
+	p.end();
+	return image.save(dir.filePath(dark ? u"palette-night.png"_s : u"palette-classic.png"_s));
+}
+
 bool Hints(QDir dir, const Palette &pal, const QString &theme, const QString &scene) {
 	auto image = QImage(820, 520, QImage::Format_ARGB32_Premultiplied);
 	image.fill(pal.bg);
@@ -89,19 +179,25 @@ bool Hints(QDir dir, const Palette &pal, const QString &theme, const QString &sc
 		button(QRect(496, 391, 100, 36), u"Done"_s);
 	}
 	const auto labels = Purple::HintLabels(targets.size());
-	auto placed = std::vector<QRect>();
+	auto regions = std::vector<Purple::HintGeometry>();
+	auto roles = std::vector<Role>();
+	const auto colors = BadgePalette(theme == u"dark"_s);
 	p.setFont(QFont(u"Menlo"_s, 12, QFont::Bold));
-	for (auto i = std::size_t(0); i < targets.size(); ++i) {
-		const auto label = QString::fromStdString(labels[i]);
-		const auto size = QSize(p.fontMetrics().horizontalAdvance(label.toUpper()) + 10, 21);
-		const auto anchor = bubbles[i].isEmpty()
-			? Purple::WindowHintAnchor(targets[i], size,
-				scene != u"settings"_s && targets[i].x() >= 69 && targets[i].x() < 350, false)
-			: Purple::MessageHintBadgeRect(bubbles[i], bubbles[i].top(), size, image.rect(), 2, false);
-		const auto badge = Purple::PlaceHintBadge(anchor, image.rect(), placed);
-		if (badge.isEmpty()) return false;
-		placed.push_back(badge);
-		Purple::PaintHintBadge(p, badge, label, 0);
+	for (auto i = size_t(0); i < targets.size(); ++i) {
+		const auto row = targets[i].x() >= 69 && targets[i].x() < 350 && scene != u"settings"_s;
+		const auto role = !bubbles[i].isEmpty() ? Role::Reply : row ? Role::Navigate : Role::General;
+		roles.push_back(role);
+		const auto label = QString::fromStdString(labels[i]).toUpper();
+		regions.push_back({ targets[i], QSize(p.fontMetrics().horizontalAdvance(label)
+			+ 10 + colors.inset(role), 21), row, !bubbles[i].isEmpty() });
+	}
+	const auto placed = Purple::LayoutHintBadges(regions, image.rect(), 2, false);
+	for (auto i = size_t(0); i != placed.size(); ++i) {
+		if (placed[i].badge.isEmpty()) continue;
+		p.setPen(colors.colors[int(roles[i])].edge);
+		if (!placed[i].leader.isNull()) p.drawLine(placed[i].leader);
+		Purple::PaintHintBadge(p, placed[i].badge, QString::fromStdString(labels[i]).toUpper(),
+			0, roles[i], colors, false);
 	}
 	p.end();
 	return image.save(dir.filePath(u"hint-"_s + scene + u"-"_s + theme + u".png"_s));
@@ -139,8 +235,9 @@ bool Hydra(QDir dir, const Palette &pal, const QString &theme, const QString &sc
 	for (auto i = std::size_t(0); i < rows.size(); ++i) {
 		const auto row = QRect(panel.x(), 85 + int(i) * 32, panel.width(), 32);
 		if (i == 0) p.fillRect(row, pal.selected);
-		Purple::PaintHydraCap(p, row.adjusted(19, 5, -row.width() + 77, -5),
-			QString::fromStdString(keys[i]), pal.bg, pal.border, pal.text, 4);
+		Purple::PaintHintBadge(p, row.adjusted(19, 5, -row.width() + 77, -5),
+			QString::fromStdString(keys[i]), 0, rows[i].known == 'd' ? Role::Destructive : Role::Menu,
+			BadgePalette(theme == u"dark"_s), false);
 		p.setPen(QPen(pal.muted, 1.5));
 		p.setBrush(Qt::NoBrush);
 		p.drawEllipse(QRect(row.x() + 91, row.y() + 11, 10, 10));
@@ -154,13 +251,14 @@ bool Hydra(QDir dir, const Palette &pal, const QString &theme, const QString &sc
 
 int main(int argc, char **argv) {
 	auto app = QGuiApplication(argc, argv);
-	if (argc != 2) return 1;
+	if (argc != 2 || !CheckPalette()) return 1;
 	const auto dir = QDir(QString::fromLocal8Bit(argv[1]));
 	if (!QDir().mkpath(dir.path())) return 2;
 	for (const auto dark : { false, true }) {
 		const auto pal = dark
 			? Palette{ QColor(0x17212b), QColor(0x202b36), QColor(0x31455a), QColor(0x576b81), QColor(0xe5edf5), QColor(0xb2c1d0) }
 			: Palette{ QColor(0xe4edf4), QColor(0xffffff), QColor(0xd7e9f8), QColor(0x9db4c7), QColor(0x183045), QColor(0x4c6174) };
+		if (!BadgeSheet(dir, dark)) return 5;
 		const auto theme = dark ? u"dark"_s : u"light"_s;
 		for (const auto &scene : { u"chat"_s, u"folders"_s, u"settings"_s }) {
 			if (!Hints(dir, pal, theme, scene)) return 3;
@@ -169,5 +267,5 @@ int main(int argc, char **argv) {
 			if (!Hydra(dir, pal, theme, scene)) return 4;
 		}
 	}
-	std::cout << "14 offscreen hint fixtures rendered\n";
+	std::cout << "16 offscreen hint fixtures rendered\n";
 }

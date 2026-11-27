@@ -3,6 +3,8 @@
 #include "base/weak_ptr.h"
 #include "data/data_msg_id.h"
 #include "purple/purple_hint_targets.h"
+#include "purple/purple_message_hint_placement.h"
+#include "purple/purple_hint_paint.h"
 
 #include <QtCore/QPointer>
 #include <QtCore/QRect>
@@ -89,7 +91,9 @@ private:
 		std::vector<FullMsgId> group;
 		QString label;
 		std::optional<BodyLink> bodyLink;
-		QRect windowBadge;
+		HintRole role = HintRole::General;
+		bool row = false;
+		HintPlacement placement;
 
 		friend bool operator==(const Entry &, const Entry &) = default;
 	};
@@ -97,6 +101,7 @@ private:
 	[[nodiscard]] Target target() const;
 	[[nodiscard]] QRect clip() const;
 	[[nodiscard]] std::vector<Entry> snapshot() const;
+	void layout(std::vector<Entry> &entries, QRect viewport) const;
 	[[nodiscard]] bool eligible(
 		not_null<HistoryView::Element*> view,
 		std::vector<FullMsgId> &groupIds) const;
@@ -138,6 +143,7 @@ private:
 	bool _windowMenus = false;
 	std::vector<Entry> _entries;
 	std::vector<WindowHintTarget> _windowEntries;
+	HintPalette _palette;
 	QString _prefix;
 	QRect _globalClip;
 	rpl::lifetime _watch;

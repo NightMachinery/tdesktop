@@ -27,7 +27,6 @@
 #include "mainwindow.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/painter.h"
-#include "ui/round_rect.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/popup_menu.h"
@@ -180,30 +179,6 @@ std::vector<BodyLinkHit> VisibleBodyLinks(
 	return result;
 }
 
-QRect PlaceLinkBadge(
-		QRect box,
-		QSize space,
-		const std::vector<QRect> &placed) {
-	const auto overlaps = [&](const QRect &rect) {
-		return ranges::any_of(placed, [&](const QRect &other) {
-			return rect.intersects(other);
-		});
-	};
-	if (!overlaps(box)) {
-		return box;
-	}
-	for (auto dy = box.height(); dy < space.height(); dy += box.height()) {
-		for (const auto offset : { dy, -dy }) {
-			const auto other = box.translated(0, offset);
-			if (other.top() >= 0 && other.bottom() < space.height()
-				&& !overlaps(other)) {
-				return other;
-			}
-		}
-	}
-	return box;
-}
-
 QSize LabelSize(const QString &label) {
 	const auto &font = st::defaultToast.style.font;
 	const auto &padding = st::msgServicePadding;
@@ -238,8 +213,7 @@ class MessageHints::Overlay final : public Ui::RpWidget {
 public:
 	Overlay(not_null<Ui::RpWidget*> parent, const MessageHints &hints)
 	: Ui::RpWidget(parent)
-	, _hints(hints)
-	, _background(st::defaultToast.radius, st::toastBg) {
+	, _hints(hints) {
 		setFocusPolicy(Qt::NoFocus);
 		setAttribute(Qt::WA_TransparentForMouseEvents);
 	}
@@ -248,37 +222,37 @@ protected:
 	void paintEvent(QPaintEvent *) override {
 		auto p = QPainter(this);
 		p.setFont(st::defaultToast.style.font);
-		p.setPen(st::toastFg->c);
-		auto badges = std::vector<QRect>();
+		p.translate(-geometry().topLeft());
+		p.setRenderHint(QPainter::Antialiasing);
+		const auto rtl = style::RightToLeft();
 		for (const auto &entry : _hints._entries) {
-			const auto matches = entry.label.startsWith(_hints._prefix);
-			if (!matches && !entry.bodyLink) {
-				continue;
+			if (!entry.label.startsWith(_hints._prefix)) continue;
+			const auto &colors = _hints._palette.colors[int(entry.role)];
+			const auto line = entry.placement.leader;
+			if (!line.isNull()) {
+				p.setPen(QPen(st::windowBg->c, 3 * st::lineWidth));
+				p.drawLine(line);
+				p.setPen(QPen(colors.edge, st::lineWidth));
+				p.drawLine(line);
+				p.setBrush(colors.edge);
+				p.drawEllipse(line.p2(), st::lineWidth, st::lineWidth);
 			}
-			const auto anchor = entry.rect.translated(-geometry().topLeft());
-			const auto bubble = entry.bubbleRect.translated(-geometry().topLeft());
-			const auto box = !entry.windowBadge.isEmpty() ? entry.windowBadge : MessageHintBadgeRect(
-				bubble, anchor.y(), LabelSize(entry.label), rect(),
-				st::lineWidth, style::RightToLeft());
-			const auto placed = entry.bodyLink
-				? PlaceLinkBadge(box, this->size(), badges)
-				: box;
-			if (entry.bodyLink) {
-				badges.push_back(placed);
+			if (!_hints._prefix.isEmpty()) {
+				p.setPen(QPen(colors.edge, 2 * st::lineWidth));
+				p.setBrush(Qt::NoBrush);
+				p.drawRect(entry.rect);
 			}
-			if (matches) {
-				if (placed != box && !placed.intersects(anchor)) {
-					p.setPen(QPen(QColor(0xb8, 0x92, 0x00), 1.5));
-					p.drawLine(placed.center(), MessageHintLeaderEnd(placed.center(), anchor));
-				}
-				PaintHintBadge(p, placed, entry.label, int(_hints._prefix.size()));
+		}
+		for (const auto &entry : _hints._entries) {
+			if (entry.label.startsWith(_hints._prefix)) {
+				PaintHintBadge(p, entry.placement.badge, entry.label.toUpper(),
+					_hints._prefix.size(), entry.role, _hints._palette, rtl);
 			}
 		}
 	}
 
 private:
 	const MessageHints &_hints;
-	Ui::RoundRect _background;
 };
 
 MessageHints::MessageHints() = default;
@@ -535,11 +509,34 @@ std::vector<MessageHints::Entry> MessageHints::snapshot() const {
 	} else {
 		section->purpleEnumerateVisible(collect);
 	}
+	for (auto &entry : entries) {
+		entry.role = _action == Action::Reply ? HintRole::Reply
+			: _action == Action::Menu ? HintRole::Menu
+			: _action == Action::OpenUrl ? HintRole::Navigate : HintRole::General;
+	}
+	layout(entries, visible);
+	std::erase_if(entries, [](const Entry &entry) { return entry.placement.badge.isEmpty(); });
+	return entries;
+}
+
+void MessageHints::layout(std::vector<Entry> &entries, QRect viewport) const {
+	auto regions = std::vector<HintGeometry>();
+	regions.reserve(entries.size());
 	const auto labels = HintLabels(entries.size());
 	for (auto i = size_t(0); i != entries.size(); ++i) {
-		entries[i].label = QString::fromStdString(labels[i]);
+		auto &entry = entries[i];
+		entry.label = QString::fromStdString(labels[i]);
+		auto size = LabelSize(entry.label.toUpper());
+		size.rwidth() += _palette.inset(entry.role);
+		const auto compactWidth = size.width() - st::msgServicePadding.left()
+			- st::msgServicePadding.right() + 2 * st::lineWidth;
+		regions.push_back({ entry.rect, size, entry.row,
+			!entry.bubbleRect.isEmpty() && !entry.bodyLink, compactWidth });
 	}
-	return entries;
+	const auto placed = LayoutHintBadges(regions, viewport, st::lineWidth, style::RightToLeft());
+	for (auto i = size_t(0); i != entries.size(); ++i) {
+		entries[i].placement = placed[i];
+	}
 }
 
 bool MessageHints::start(Target view, Action action) {
@@ -549,6 +546,7 @@ bool MessageHints::start(Target view, Action action) {
 	_session = base::make_weak(&view.session());
 	_action = action;
 	_scheduled = view.scheduled;
+	_palette = CurrentHintPalette();
 	_entries = snapshot();
 	if (_entries.empty()) {
 		clear();
@@ -594,27 +592,29 @@ bool MessageHints::startWindow(
 	});
 	const auto origin = root->mapToGlobal(QPoint());
 	const auto viewport = WindowHintClip(root).translated(-origin);
-	const auto labels = HintLabels(targets.size());
-	auto badges = std::vector<QRect>();
+	_palette = CurrentHintPalette();
 	for (auto &entry : targets) {
-		if (!WindowHintExposed(entry.widget, entry.bounds.center())) {
-			continue;
-		}
-		auto label = QString::fromStdString(labels[_entries.size()]);
-		const auto size = LabelSize(label.toUpper());
-		const auto bounds = entry.bounds.translated(-origin);
-		const auto bubble = entry.bubble.translated(-origin);
-		const auto box = entry.bubble.isEmpty()
-			? WindowHintAnchor(bounds, size, entry.mainList, style::RightToLeft())
-			: MessageHintBadgeRect(bubble, bounds.top(), size, viewport, st::lineWidth, style::RightToLeft());
-		auto placed = PlaceHintBadge(box, viewport, badges);
-		if (placed.isEmpty()) {
-			continue;
-		}
-		badges.push_back(placed);
-		_entries.push_back({ .rect = bounds, .label = std::move(label), .windowBadge = placed });
+		if (!WindowHintExposed(entry.widget, entry.bounds.center())) continue;
+		_entries.push_back({
+			.rect = entry.bounds.translated(-origin),
+			.bubbleRect = entry.bubble.isEmpty() ? QRect() : entry.bubble.translated(-origin),
+			.role = menus ? HintRole::Menu : entry.role,
+			.row = entry.mainList,
+		});
 		_windowEntries.push_back(std::move(entry));
 	}
+	layout(_entries, viewport);
+	auto kept = size_t(0);
+	for (auto i = size_t(0); i != _entries.size(); ++i) {
+		if (_entries[i].placement.badge.isEmpty()) continue;
+		if (kept != i) {
+			_entries[kept] = std::move(_entries[i]);
+			_windowEntries[kept] = std::move(_windowEntries[i]);
+		}
+		++kept;
+	}
+	_entries.resize(kept);
+	_windowEntries.resize(kept);
 	if (_entries.empty()) {
 		clear();
 		return false;
@@ -688,6 +688,7 @@ void MessageHints::appendWindowMessages(
 				.name = u"Message actions"_q,
 				.reply = reply,
 				.kind = WindowHintTarget::Kind::Message,
+				.role = reply ? HintRole::Reply : HintRole::Menu,
 				.messages = std::move(messages),
 				.current = [=] { return current() && (menus || CanSendReply(element->data())); },
 				.activate = reply ? Fn<void()>([=] {
@@ -720,6 +721,7 @@ void MessageHints::appendWindowMessages(
 				.widget = widget,
 				.bounds = bounds.translated(origin + delta),
 				.name = handler->tooltip(),
+				.role = WindowHintHandlerRole(handler),
 				.current = [=] {
 					return current() && widget->mapToGlobal(QPoint()) == origin
 						&& bool(hit());
@@ -895,7 +897,11 @@ MessageHints::Input MessageHints::type(int key, Target view) {
 		clear();
 		return Input::Finished;
 	}
-	if (key < Qt::Key_A || key > Qt::Key_Z) {
+	if (key == Qt::Key_Backspace || key == Qt::Key_Delete) {
+		_prefix.chop(1);
+		_overlay->update();
+		return Input::Pending;
+	} else if (key < Qt::Key_A || key > Qt::Key_Z) {
 		clear();
 		return Input::Unknown;
 	}
