@@ -1,5 +1,6 @@
 #include "purple/purple_hint_targets.h"
 #include "purple/purple_hint_item_identity.h"
+#include "purple/hooks/message_bar_hint.h"
 
 #include "core/click_handler_types.h"
 #include "data/data_document.h"
