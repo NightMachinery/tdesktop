@@ -14,6 +14,7 @@
 #include "info/media/info_media_list_widget.h"
 #include "overview/overview_layout.h"
 #include "ui/abstract_button.h"
+#include "ui/rect.h"
 #include "ui/controls/send_button.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/widgets/popup_menu.h"
@@ -272,6 +273,26 @@ HintRole ButtonRole(QWidget *widget) {
 	return HintRole::General;
 }
 
+QRect ButtonFace(QWidget *widget, QRect clip) {
+	auto local = widget->rect();
+	if (const auto button = dynamic_cast<Ui::IconButton*>(widget)) {
+		const auto &st = button->st();
+		if (st.icon.empty()) return clip;
+		const auto size = st.icon.size();
+		const auto pos = st.iconPosition;
+		const auto x = pos.x() < 0 ? (local.width() - size.width()) / 2 : pos.x();
+		const auto y = pos.y() < 0 ? (local.height() - size.height()) / 2 : pos.y();
+		local = style::rtlrect(x, y, size.width(), size.height(), local.width());
+	} else if (dynamic_cast<Media::Player::PlayButton*>(widget)) {
+		local = local.marginsRemoved(QMargins(local.width() / 4, local.height() / 4,
+			local.width() / 4, local.height() / 4));
+	} else {
+		return clip;
+	}
+	const auto face = local.translated(widget->mapToGlobal(QPoint())).intersected(clip);
+	return face.isEmpty() ? clip : face;
+}
+
 void AddButton(QWidget *widget, QRect clip, std::vector<WindowHintTarget> &out) {
 	const auto button = dynamic_cast<Ui::AbstractButton*>(widget);
 	const auto qt = qobject_cast<QAbstractButton*>(widget);
@@ -295,7 +316,7 @@ void AddButton(QWidget *widget, QRect clip, std::vector<WindowHintTarget> &out) 
 		? nullptr : static_cast<FolderHintMenu*>(*folder);
 	out.push_back({
 		.widget = widget,
-		.bounds = clip,
+		.bounds = ButtonFace(widget, clip),
 		.name = name,
 		.kind = folderMenu ? WindowHintTarget::Kind::Folder : WindowHintTarget::Kind::Control,
 		.role = folderMenu ? HintRole::Navigate : ButtonRole(widget),

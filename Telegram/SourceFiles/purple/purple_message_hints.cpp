@@ -215,6 +215,9 @@ public:
 	Overlay(not_null<Ui::RpWidget*> parent, const MessageHints &hints)
 	: Ui::RpWidget(parent)
 	, _hints(hints) {
+		for (const auto &run : hints._textRuns) {
+			_text |= run.marginsAdded(QMargins(st::lineWidth, 0, st::lineWidth, 0));
+		}
 		setFocusPolicy(Qt::NoFocus);
 		setAttribute(Qt::WA_TransparentForMouseEvents);
 	}
@@ -226,17 +229,25 @@ protected:
 		p.translate(-geometry().topLeft());
 		p.setRenderHint(QPainter::Antialiasing);
 		const auto rtl = style::RightToLeft();
+		const auto leaderClip = QRegion(geometry()).subtracted(_text);
 		for (const auto &entry : _hints._entries) {
 			if (!entry.label.startsWith(_hints._prefix)) continue;
 			const auto &colors = _hints._palette.colors[int(entry.role)];
 			const auto line = entry.placement.leader;
 			if (!line.isNull()) {
+				p.save();
+				p.setClipRegion(leaderClip);
+				const auto towardsBadge = QLineF(line.p2(), line.p1());
+				const auto dot = _text.contains(line.p2())
+					? towardsBadge.pointAt(std::min(.5, 3 * st::lineWidth / towardsBadge.length()))
+					: QPointF(line.p2());
 				p.setPen(QPen(st::windowBg->c, 4 * st::lineWidth));
 				p.drawLine(line);
 				p.setPen(QPen(colors.edge, 2 * st::lineWidth));
 				p.drawLine(line);
 				p.setBrush(colors.edge);
-				p.drawEllipse(line.p2(), 2 * st::lineWidth, 2 * st::lineWidth);
+				p.drawEllipse(dot, 2. * st::lineWidth, 2. * st::lineWidth);
+				p.restore();
 			}
 			if (!_hints._prefix.isEmpty()) {
 				p.setPen(QPen(colors.edge, 2 * st::lineWidth));
@@ -254,6 +265,7 @@ protected:
 
 private:
 	const MessageHints &_hints;
+	QRegion _text;
 };
 
 MessageHints::MessageHints() = default;
@@ -530,7 +542,7 @@ void MessageHints::layout(std::vector<Entry> &entries, QRect viewport) const {
 		auto size = LabelSize(entry.label.toUpper());
 		size.rwidth() += _palette.inset(entry.role);
 		const auto compactWidth = size.width() - st::msgServicePadding.left()
-			- st::msgServicePadding.right() + 2 * st::lineWidth;
+			- st::msgServicePadding.right() + 4 * st::lineWidth;
 		regions.push_back({ entry.rect, size, entry.row,
 			!entry.bubbleRect.isEmpty() && !entry.bodyLink, compactWidth, entry.viewport });
 	}
@@ -604,7 +616,13 @@ bool MessageHints::startWindow(
 		if (!WindowHintExposed(entry.widget, entry.bounds.center())) continue;
 		const auto rect = entry.bounds.translated(-origin);
 		auto area = viewport;
-		if (entry.mainList || dynamic_cast<HistoryInner*>(entry.widget.data())
+		if (entry.mainList) {
+			area &= rect;
+		} else if (entry.kind == WindowHintTarget::Kind::Folder) {
+			const auto strip = WindowHintClip(entry.widget).translated(-origin);
+			area.setLeft(strip.left());
+			area.setRight(strip.right());
+		} else if (dynamic_cast<HistoryInner*>(entry.widget.data())
 			|| dynamic_cast<HistoryView::ListWidget*>(entry.widget.data())) {
 			area &= WindowHintClip(entry.widget).translated(-origin);
 		}
