@@ -1,6 +1,7 @@
 #include "purple/purple_hint_targets.h"
 #include "purple/purple_hint_item_identity.h"
 
+#include "core/click_handler_types.h"
 #include "data/data_document.h"
 #include "data/data_file_click_handler.h"
 #include "data/data_forum_topic.h"
@@ -388,6 +389,8 @@ void AddButton(QWidget *widget, QRect clip, std::vector<WindowHintTarget> &out) 
 HintRole WindowHintHandlerRole(const ClickHandlerPtr &handler) {
 	if (!handler) {
 		return HintRole::General;
+	} else if (handler->property(kPeerLinkPeerIdProperty).toULongLong()) {
+		return HintRole::Navigate;
 	} else if (const auto doc = dynamic_cast<DocumentClickHandler*>(handler.get())) {
 		if (doc->document()->isAudioFile() || doc->document()->isVoiceMessage()) {
 			if (dynamic_cast<DocumentSaveClickHandler*>(doc) || dynamic_cast<VoiceSeekClickHandler*>(doc)) {

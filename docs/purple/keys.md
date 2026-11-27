@@ -140,8 +140,9 @@ with at most four strokes per chord:
 - **Window hints (`f` / `F`):** `f` labels visible chats, topics, folders,
   supported links, media, and controls. A message label starts a reply when
   replies are allowed. The pinned bar's body jumps to the pinned message.
-  Its pinned-list button has its own hint. Audio play and download controls
-  use teal playback hints. The topmost Purple or Telegram layer owns the hints
+  Its pinned-list button has its own hint. Forwarded-source and author links
+  use blue navigation hints. Audio play and download controls use teal hints.
+  The topmost Purple or Telegram layer owns the hints
   when a box is open. Type the label, use `DEL` to undo a letter, or press
   `Esc` / `C-g` to cancel. The composer and search fields retain normal typing
   in Insert mode. Window hints are unavailable while locked or covered.
