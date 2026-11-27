@@ -54,5 +54,6 @@ public:
 [[nodiscard]] HintRole WindowHintHandlerRole(const ClickHandlerPtr &handler);
 void ClickWindowHint(QWidget *widget, QPoint localPoint);
 void RegisterFolderHintMenu(QWidget *button, WindowHintTarget::MenuBuilder builder);
+void RegisterMessageBarHint(QWidget *widget, Fn<bool()> shown);
 
 } // namespace Purple

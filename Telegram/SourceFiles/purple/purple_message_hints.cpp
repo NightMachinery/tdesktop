@@ -784,16 +784,34 @@ void MessageHints::appendWindowMessages(
 				add(link.rect, true, link.handler, message->textItem()->fullId());
 			}
 		}
-		const auto addPainted = [&](const std::vector<QRect> &painted) {
-			for (const auto &rect : painted) {
-				const auto local = rect.translated(captureOrigin - origin - delta).intersected(region);
-				if (local.isEmpty()) continue;
-				const auto state = element->textState(local.center(), {});
-				add(local, false, state.link, state.itemId ? state.itemId : id);
-			}
+		const auto localRect = [&](QRect rect) {
+			return rect.translated(captureOrigin - origin - delta).intersected(region);
 		};
-		addPainted(capture.faces);
-		addPainted(capture.text);
+		const auto addPainted = [&](QRect local) {
+			if (local.isEmpty()) return false;
+			const auto state = element->textState(local.center(), {});
+			if (!state.link || handlers.contains(state.link.get())) return false;
+			add(local, false, state.link, state.itemId ? state.itemId : id);
+			return true;
+		};
+		auto controls = QRegion();
+		for (const auto &rect : capture.faces) {
+			const auto local = localRect(rect);
+			if (local.isEmpty()) continue;
+			if (addPainted(local)) {
+				controls |= local;
+				continue;
+			}
+			for (const auto &part : QRegion(local).subtracted(controls)) {
+				if (part != local && addPainted(part)) {
+					controls |= part;
+					break;
+				}
+			}
+		}
+		for (const auto &rect : capture.text) {
+			addPainted(localRect(rect));
+		}
 		struct Sample {
 			ClickHandlerPtr link;
 			FullMsgId owner;
