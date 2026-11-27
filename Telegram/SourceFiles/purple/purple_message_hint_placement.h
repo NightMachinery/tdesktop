@@ -51,6 +51,7 @@ struct HintGeometry {
 	bool bubble = false;
 	int compactWidth = 0;
 	QRect clip = {};
+	bool close = false;
 };
 
 struct HintPlacement {
@@ -104,6 +105,7 @@ struct HintPlacement {
 		return qint64(items[i].target.width()) * items[i].target.height();
 	};
 	std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+		if (items[a].close != items[b].close) return items[a].close;
 		return area(a) < area(b);
 	});
 	const auto nearest = [](QRect rect, QPoint point) {
@@ -161,6 +163,16 @@ struct HintPlacement {
 		const auto widths = std::array{ item.size.width(), item.compactWidth };
 		const auto y = (item.bubble ? target.top() : center.y()) - h / 2;
 		const auto place = [&] {
+			if (item.row && clip.width() < 2 * item.size.width()) {
+				for (const auto w : { item.compactWidth, item.size.width() }) {
+					if (w <= 0) continue;
+					for (const auto y : { target.top(), center.y() - h / 2, target.bottom() - h + 1 }) {
+						const auto left = target.left();
+						const auto right = target.right() + 1 - w;
+						if (tryBox(rtl ? right : left, y, w) || tryBox(rtl ? left : right, y, w)) return;
+					}
+				}
+			}
 			for (const auto dy : { 0, -h, h, -2 * h, 2 * h }) {
 				for (const auto w : widths) {
 					if (w <= 0) continue;
@@ -183,6 +195,20 @@ struct HintPlacement {
 						const auto x = center.x() - w / 2 + dy;
 						if (tryBox(x, target.top() - h - distance, w)
 							|| tryBox(x, target.bottom() + 1 + distance, w)) return;
+					}
+				}
+			}
+			const auto step = std::max(1, h / 3);
+			for (auto radius = step; radius <= 3 * h; radius += step) {
+				for (const auto w : widths) {
+					if (w <= 0) continue;
+					for (auto offset = -radius; offset <= radius; offset += step) {
+						for (const auto side : { -radius, radius }) {
+							const auto x = center.x() - w / 2;
+							const auto y = center.y() - h / 2;
+							if (tryBox(x + side, y + offset, w)
+								|| tryBox(x + offset, y + side, w)) return;
+						}
 					}
 				}
 			}

@@ -58,6 +58,16 @@ int main() {
 			}
 		}
 	}
+	const auto folders = std::vector<Purple::HintGeometry>{
+		{ QRect(0, 0, 42, 40), QSize(42, 16), true, false, 20, QRect(0, 0, 42, 40) },
+		{ QRect(0, 40, 42, 40), QSize(42, 16), true, false, 20, QRect(0, 40, 42, 40) },
+	};
+	const auto names = std::vector<QRect>{ QRect(1, 24, 40, 12), QRect(1, 64, 40, 12) };
+	const auto folderCaps = Purple::LayoutHintBadges(folders, viewport, gap, false, names);
+	for (auto i = size_t(0); i < folders.size(); ++i) {
+		check(!folderCaps[i].badge.isEmpty() && folders[i].target.contains(folderCaps[i].badge)
+			&& !folderCaps[i].badge.intersects(names[i]), "folder badge fits beside its label");
+	}
 	const auto pane = QRect(90, 0, 110, 100);
 	const auto play = QRect(108, 44, 32, 32);
 	const auto title = QRect(143, 45, 54, 16);

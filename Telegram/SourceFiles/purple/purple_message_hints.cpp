@@ -544,7 +544,8 @@ void MessageHints::layout(std::vector<Entry> &entries, QRect viewport) const {
 		const auto compactWidth = size.width() - st::msgServicePadding.left()
 			- st::msgServicePadding.right() + 4 * st::lineWidth;
 		regions.push_back({ entry.rect, size, entry.row,
-			!entry.bubbleRect.isEmpty() && !entry.bodyLink, compactWidth, entry.viewport });
+			!entry.bubbleRect.isEmpty() && !entry.bodyLink, compactWidth, entry.viewport,
+			entry.role == HintRole::Close });
 	}
 	const auto placed = LayoutHintBadges(regions, viewport, st::lineWidth, style::RightToLeft(), _textRuns);
 	for (auto i = size_t(0); i != entries.size(); ++i) {
@@ -616,12 +617,9 @@ bool MessageHints::startWindow(
 		if (!WindowHintExposed(entry.widget, entry.bounds.center())) continue;
 		const auto rect = entry.bounds.translated(-origin);
 		auto area = viewport;
-		if (entry.mainList) {
+		const auto row = entry.mainList || entry.kind == WindowHintTarget::Kind::Folder;
+		if (row) {
 			area &= rect;
-		} else if (entry.kind == WindowHintTarget::Kind::Folder) {
-			const auto strip = WindowHintClip(entry.widget).translated(-origin);
-			area.setLeft(strip.left());
-			area.setRight(strip.right());
 		} else if (dynamic_cast<HistoryInner*>(entry.widget.data())
 			|| dynamic_cast<HistoryView::ListWidget*>(entry.widget.data())) {
 			area &= WindowHintClip(entry.widget).translated(-origin);
@@ -640,7 +638,7 @@ bool MessageHints::startWindow(
 			.rect = rect,
 			.bubbleRect = entry.bubble.isEmpty() ? QRect() : entry.bubble.translated(-origin),
 			.role = menus ? HintRole::Menu : entry.role,
-			.row = entry.mainList,
+			.row = row,
 			.viewport = area,
 		});
 		_windowEntries.push_back(std::move(entry));
