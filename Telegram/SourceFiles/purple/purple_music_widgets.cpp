@@ -8,6 +8,7 @@
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
+#include "ui/widgets/shadow.h"
 
 #include "styles/style_keys_legend.h"
 #include "styles/style_layers.h"
@@ -197,13 +198,14 @@ ChatMusicLayout AddChatMusicLayout(
 	const auto tracks = box->addRow(object_ptr<PlaylistSongList>(
 		box, std::vector<PlaylistSongListRow>(), 0, 0, std::move(args.play),
 		Fn<void(std::vector<uint64_t>)>(), PlaylistSongList::Mode::Library));
-	tracks->reserveTileScrollbarSpace();
+	tracks->reserveScrollbarSpace();
 	std::move(args.tiles) | rpl::on_next([=](bool tiles) {
 		tracks->setTiles(tiles);
 	}, tracks->lifetime());
 	args.selection.more = [=] { tracks->showActions(); };
 	box->addRow(MakeMusicSelectionBar(
 		box, std::move(args.marks), std::move(args.selection), keys));
+	box->setPinnedToBottomContent(object_ptr<Ui::PlainShadow>(box));
 	box->setTitle(rpl::single(u"Music shared in this chat"_q));
 	SetWindowHintRole(box->addButton(tr::lng_close(), [=] { box->closeBox(); }), HintRole::Close);
 	SetWindowHintRole(box->addButton(rpl::single(u"Actions"_q), [=] { tracks->showActions(); }), HintRole::Menu);

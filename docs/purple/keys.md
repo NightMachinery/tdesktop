@@ -134,6 +134,9 @@ with at most four strokes per chord:
     `:localleader` bindings. The bare Music defaults for `m`, `v`, `V`,
     `n` and `N` yield to overlapping `:normal` bindings. Set a bare key
     to `nil` in `:normal` to disable its Music default.
+    In `, u`, Up/Down, Page Up/Page Down and `C-j`/`C-k` move through the
+    results while typing. `RET` plays the selected track or marked tracks.
+    In the dialog's Normal List view, Left/Right seek the current song.
 - **Window hints (`f` / `F`):** `f` labels visible chats, topics, folders,
   supported links, media, and controls. A message label starts a reply when
   replies are allowed. The topmost Purple or Telegram layer owns the hints

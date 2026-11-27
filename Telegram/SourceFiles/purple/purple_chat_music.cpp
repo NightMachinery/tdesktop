@@ -22,6 +22,8 @@
 #include "media/player/media_player_instance.h"
 #include "purple/purple_exact_search.h"
 #include "purple/purple_keys.h"
+#include "purple/purple_list_filter_keys.h"
+#include "purple/purple_media_seek.h"
 #include "purple/purple_music_now_playing.h"
 #include "purple/purple_music_section.h"
 #include "purple/purple_music_widgets.h"
@@ -168,7 +170,6 @@ ChatMusicBox::ChatMusicBox(
 	_view.filter->rawTextEdit()->installEventFilter(this);
 	box->installEventFilter(this);
 	_view.filter->changes() | rpl::on_next([=] { filter(); }, box->lifetime());
-	_view.filter->submits() | rpl::on_next([=] { focusList(); }, box->lifetime());
 	_view.tracks->setViewportLimit(std::max(1, controller->content()->height() / 2));
 	_view.tracks->setKeyHandler([=](QKeyEvent *event) { return keyPress(event); });
 	_view.tracks->setSelectionActions([=](uint64_t key) { mark(key); },
@@ -354,10 +355,15 @@ void ChatMusicBox::focusList() {
 }
 
 bool ChatMusicBox::eventFilter(QObject *object, QEvent *event) {
+	if (object == _box.get()) {
+		return event->type() == QEvent::KeyPress
+			&& keyPress(static_cast<QKeyEvent*>(event));
+	}
+	if (!_closed && (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut)) {
+		_view.tracks->setFilterFocused(event->type() == QEvent::FocusIn);
+	}
 	if (event->type() != QEvent::KeyPress) return false;
 	const auto key = static_cast<QKeyEvent*>(event);
-	if (object == _box.get()) return keyPress(key);
-	if (object != _view.filter->rawTextEdit()) return false;
 	const auto layout = _view.filter->textCursor().block().layout();
 	if (layout && !layout->preeditAreaText().isEmpty()) return false;
 	if (key->key() == Qt::Key_Escape && !key->modifiers()) {
@@ -374,7 +380,21 @@ bool ChatMusicBox::eventFilter(QObject *object, QEvent *event) {
 			return false;
 		}
 	} else {
-		return false;
+		const auto mods = key->modifiers() & ~Qt::KeypadModifier;
+		if (!mods && ListFilter::Submit(key->key())) {
+			if (!key->isAutoRepeat()) _view.tracks->navigate(TrackListAction::Play);
+		} else if (!mods && (key->key() == Qt::Key_PageUp || key->key() == Qt::Key_PageDown)) {
+			_view.tracks->navigate(key->key() == Qt::Key_PageUp
+				? TrackListAction::PageUp : TrackListAction::PageDown);
+		} else if (ModalKeysEnabled() && ListFilter::Exit(key->key(), mods)) {
+			focusList();
+		} else if (ModalKeysEnabled() && mods == ListFilter::kControl
+			&& (key->key() == Qt::Key_J || key->key() == Qt::Key_K)) {
+			_view.tracks->navigate(key->key() == Qt::Key_J
+				? TrackListAction::Down : TrackListAction::Up);
+		} else {
+			return false;
+		}
 	}
 	return true;
 }
@@ -393,6 +413,14 @@ bool ChatMusicBox::keyPress(QKeyEvent *event) {
 	}
 	if (key == Qt::Key_Home || key == Qt::Key_End) {
 		navigate(key == Qt::Key_Home ? TrackListAction::First : TrackListAction::Last, 1);
+		return true;
+	}
+	if (ModalKeysEnabled() && !MusicTiles() && current()
+		&& (key == Qt::Key_Left || key == Qt::Key_Right)) {
+		const auto current = Media::Player::instance()->current(AudioMsgId::Type::Song);
+		if (current.audio() && &current.audio()->session() == _session.get()) {
+			SeekBy(AudioMsgId::Type::Song, key == Qt::Key_Left ? -1 : 1);
+		}
 		return true;
 	}
 	return false;

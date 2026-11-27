@@ -72,7 +72,7 @@ A track can show the cursor border, mark, and playback badge at the same
 time. In List, marks have a separate column and titles and artists sit
 beside the cover in the interface's direction. The text keeps its own
 reading order. Tiles keep the text direction and inset the title and cover
-inside the focused card. In the chat dialog, the grid leaves room for the
+inside the focused card. In the chat dialog, both views leave room for the
 scrollbar. Moving the cursor into a partially visible tile scrolls its caption
 into view with the cover.
 The now-playing panel shows the current song, with a seek slider and
@@ -112,9 +112,12 @@ In a chat or topic, `, u` opens **Music shared in this chat**. It uses
 Telegram's shared-media history and also works in chats outside the Music
 source folder. The filter matches title, artist, or filename in the loaded
 tracks. **Load more tracks** expands the history and keeps the filter applied.
-Use the arrows or `j` and `k` to move the cursor, and Alt+Up or Alt+Down to move
-by half a page. Press Escape to close the filter, then Escape to close the
-dialog. The **Actions** button or a right-click offers play, forward, go to
+Use Up/Down or `j` and `k` to move the cursor, and Alt+Up/Down to move by half a
+page. While typing a filter, Up/Down, Page Up/Page Down and modal `C-j`/`C-k`
+move the visible cursor. Return plays the selection and leaves the filter
+focused. `C-g` returns focus to the list with the query applied. Escape clears
+the filter and returns focus to the list. In the Normal List view, Left/Right
+seek the current song. The **Actions** button or a right-click offers play, forward, go to
 message, add to playlist, and copy message link. The dialog and library share
 the now-playing card and effective Music keymap. Changes to `keys.edn` update
 the chords and their labels on both surfaces.

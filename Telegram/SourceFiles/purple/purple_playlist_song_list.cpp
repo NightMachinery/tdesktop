@@ -203,7 +203,8 @@ public:
 	void setContextActions(Fn<void(not_null<Ui::PopupMenu*>, uint64_t)> actions);
 	void showActions();
 	void setArtworkSession(not_null<Main::Session*> session);
-	void reserveTileScrollbarSpace();
+	void reserveScrollbarSpace();
+	void setFilterFocused(bool focused);
 	int setTiles(bool tiles);
 	bool cancelRangeMark();
 	[[nodiscard]] int contentHeight(int width) const;
@@ -256,7 +257,7 @@ private:
 	};
 
 	[[nodiscard]] int hit(QPoint position) const;
-	[[nodiscard]] int tileWidth(int width) const;
+	[[nodiscard]] int musicContentWidth(int width) const;
 	[[nodiscard]] int columns(int width) const;
 	[[nodiscard]] int sleeve(int width) const;
 	[[nodiscard]] int rowHeightForWidth(int width) const;
@@ -294,7 +295,7 @@ private:
 	std::map<uint64_t, Cover> _cover;
 	base::weak_ptr<Main::Session> _artworkSession;
 	Mode _mode = Mode::Playlist;
-	int _tileTrailingInset = 0;
+	int _scrollbarInset = 0;
 	base::Timer _autoscroll;
 	base::Timer _artworkUpdate;
 	rpl::lifetime _artworkLifetime;
@@ -313,6 +314,7 @@ private:
 	int _rangeAnchor = -1;
 	int _desiredColumn = -1;
 	bool _tiles = false;
+	bool _filterFocused = false;
 	bool _handlePressed = false;
 	bool _dragging = false;
 	bool _unavailable = false;
@@ -372,12 +374,12 @@ int PlaylistSongList::Rows::rowHeightForWidth(int width) const {
 			* st::normalFont->height + layout.songPadding.bottom());
 }
 
-int PlaylistSongList::Rows::tileWidth(int width) const {
-	return std::max(1, width - _tileTrailingInset);
+int PlaylistSongList::Rows::musicContentWidth(int width) const {
+	return std::max(1, width - _scrollbarInset);
 }
 
 int PlaylistSongList::Rows::columns(int width) const {
-	return _tiles ? std::max(1, (tileWidth(width) + st::purpleMusicTileGap)
+	return _tiles ? std::max(1, (musicContentWidth(width) + st::purpleMusicTileGap)
 		/ (st::purpleMusicTileMin + st::purpleMusicTileGap)) : 1;
 }
 
@@ -386,7 +388,7 @@ int PlaylistSongList::Rows::sleeve(int width) const {
 	const auto maximum = width <= st::purpleMusicTileNarrowWidth
 		? st::purpleMusicTileNarrowMax : st::purpleMusicTileMax;
 	return std::max(1, std::min(maximum,
-		(tileWidth(width) - (count - 1) * st::purpleMusicTileGap) / count));
+		(musicContentWidth(width) - (count - 1) * st::purpleMusicTileGap) / count));
 }
 
 int PlaylistSongList::Rows::contentHeight(int width) const {
@@ -401,12 +403,13 @@ int PlaylistSongList::Rows::resizeGetHeight(int width) {
 
 QRect PlaylistSongList::Rows::itemRect(int index) const {
 	const auto height = rowHeight();
-	if (!_tiles) return QRect(0, index * height, width(), height);
+	if (!_tiles) return style::rtlrect(0, index * height,
+		musicContentWidth(width()), height, width());
 	const auto count = columns(width());
 	const auto side = sleeve(width());
 	const auto gap = st::purpleMusicTileGap;
 	const auto leading = count > 1
-		? (index % count) * (tileWidth(width()) - side) / (count - 1) : 0;
+		? (index % count) * (musicContentWidth(width()) - side) / (count - 1) : 0;
 	return style::rtlrect(
 		leading,
 		(index / count) * height,
@@ -610,6 +613,7 @@ void PlaylistSongList::Rows::paintMusicItem(Painter &p, int index) const {
 		&& index >= std::min(_rangeAnchor, _selected)
 		&& index <= std::max(_rangeAnchor, _selected);
 	const auto chosen = _chosen.contains(row.documentId) || preview;
+	const auto cursor = index == _selected && (hasFocus() || _filterFocused);
 	const auto accent = st::windowActiveTextFg->c;
 	const auto bg = chosen ? st::windowBgRipple->c
 		: index == _hovered ? st::windowBgOver->c : st::windowBg->c;
@@ -643,7 +647,7 @@ void PlaylistSongList::Rows::paintMusicItem(Painter &p, int index) const {
 			}
 		}
 	}
-	if (chosen || index == _hovered || (hasFocus() && index == _selected)) {
+	if (chosen || index == _hovered || cursor) {
 		const auto mark = markRect(item);
 		p.setBrush(chosen ? MusicReadableColor(accent, Qt::white, 3.) : QColor(20, 20, 26, 232));
 		p.setPen(QPen(Qt::white, st::lineWidth));
@@ -660,12 +664,13 @@ void PlaylistSongList::Rows::paintMusicItem(Painter &p, int index) const {
 	const auto gap = st::purpleMusicTrackGap;
 	const auto textLeft = (rtl() ? width() - art.left() : art.right() + 1) + gap;
 	const auto durationWidth = st::normalFont->width(row.duration) + gap;
-	const auto sourceWidth = width() >= 4 * st::purpleMusicTileMin && !row.source.isEmpty()
+	const auto contentWidth = musicContentWidth(width());
+	const auto sourceWidth = contentWidth >= 4 * st::purpleMusicTileMin && !row.source.isEmpty()
 		? st::purpleMusicTileMin : 0;
 	const auto nameTop = item.y() + (item.height()
 		- st::semiboldFont->height - st::normalFont->height) / 2;
 	const auto textWidth = std::max(0,
-		width() - textLeft - durationWidth - (sourceWidth ? (sourceWidth + gap) : 0));
+		contentWidth - textLeft - durationWidth - (sourceWidth ? (sourceWidth + gap) : 0));
 	const auto titleLines = (_tiles && st::semiboldFont->width(row.title) > art.width())
 		? 2 : 1;
 	const auto title = _tiles
@@ -682,18 +687,18 @@ void PlaylistSongList::Rows::paintMusicItem(Painter &p, int index) const {
 	p.setPen(MusicReadableColor(st::windowSubTextFg->c, bg, 4.5));
 	PaintMusicText(p, sub, row.performer, 1, alignment);
 	if (!_tiles) {
-		const auto duration = style::rtlrect(width() - durationWidth, item.top(),
+		const auto duration = style::rtlrect(contentWidth - durationWidth, item.top(),
 			durationWidth - st::purpleMusicTrackInset, item.height(), width());
 		p.drawText(duration, trailing | Qt::AlignVCenter | Qt::TextForceLeftToRight, row.duration);
 		if (sourceWidth) {
-			const auto source = style::rtlrect(width() - durationWidth - sourceWidth,
+			const auto source = style::rtlrect(contentWidth - durationWidth - sourceWidth,
 				item.top(), sourceWidth - gap, item.height(), width());
 			p.drawText(source,
 				leading | Qt::AlignVCenter,
 				st::normalFont->elided(row.source, source.width()));
 		}
 	}
-	if (index == _selected && hasFocus()) {
+	if (cursor) {
 		const auto line = _tiles ? st::purpleMusicTileCursor : st::lineWidth;
 		const auto inset = (line + 1) / 2;
 		p.setPen(QPen(MusicReadableColor(accent, bg, 3.), line));
@@ -1122,8 +1127,14 @@ void PlaylistSongList::Rows::setRows(
 	update();
 }
 
-void PlaylistSongList::Rows::reserveTileScrollbarSpace() {
-	_tileTrailingInset = st::mediaPlayerScroll.width;
+void PlaylistSongList::Rows::reserveScrollbarSpace() {
+	_scrollbarInset = st::mediaPlayerScroll.width;
+}
+
+void PlaylistSongList::Rows::setFilterFocused(bool focused) {
+	if (_filterFocused == focused) return;
+	_filterFocused = focused;
+	if (_selected >= 0) update(itemRect(_selected));
 }
 
 int PlaylistSongList::Rows::setTiles(bool tiles) {
@@ -1156,6 +1167,7 @@ void PlaylistSongList::Rows::focusInEvent(QFocusEvent *e) {
 void PlaylistSongList::Rows::focusOutEvent(QFocusEvent *e) {
 	cancelInteraction();
 	RpWidget::focusOutEvent(e);
+	if (_mode == Mode::Library && _selected >= 0) update(itemRect(_selected));
 }
 
 bool PlaylistSongList::Rows::eventHook(QEvent *e) {
@@ -1486,9 +1498,13 @@ void PlaylistSongList::setArtworkSession(not_null<Main::Session*> session) {
 	_rows->setArtworkSession(session);
 }
 
-void PlaylistSongList::reserveTileScrollbarSpace() {
-	_rows->reserveTileScrollbarSpace();
+void PlaylistSongList::reserveScrollbarSpace() {
+	_rows->reserveScrollbarSpace();
 	resizeToWidth(width());
+}
+
+void PlaylistSongList::setFilterFocused(bool focused) {
+	_rows->setFilterFocused(focused);
 }
 
 void PlaylistSongList::setTiles(bool tiles) {
