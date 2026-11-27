@@ -449,5 +449,8 @@ on logout.
 Every query word must match. Literal name matches rank first, followed by name
 matches using the other keyboard layout, username or phone, then contact note.
 Persian and US QWERTY layout conversion works in either direction for names.
-The palettes dim and elide contact notes and highlight matching text. Use
-Up or Down to move and Enter to open the selected chat.
+The palettes dim and elide contact notes and highlight matching text. Searchable
+pickers select the first match when they open and when you edit the query. Use
+Up or Down to move and Enter to open the selected chat. In lists with the Escape
+ladder, clearing the filter from the list keeps the highlighted item if it is
+still present.

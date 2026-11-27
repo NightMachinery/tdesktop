@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Purple {
 class RecipientPickerBridge;
+class PickerSelection;
 }
 
 #include "ui/rp_widget.h"
@@ -821,6 +822,7 @@ protected:
 
 private:
 	friend class Purple::RecipientPickerBridge;
+	friend class Purple::PickerSelection;
 
 	void refreshIndices();
 	void removeRowAtIndex(std::vector<std::unique_ptr<PeerListRow>> &from, int index);
@@ -943,6 +945,7 @@ private:
 	const style::PeerList &_st;
 	not_null<PeerListController*> _controller;
 	PeerListSearchMode _searchMode = PeerListSearchMode::Disabled;
+	bool _purpleSelectFirst = true;
 
 	Mode _mode = Mode::Default;
 	int _rowHeight = 0;

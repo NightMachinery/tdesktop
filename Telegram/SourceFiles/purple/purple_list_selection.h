@@ -6,11 +6,29 @@
 
 namespace Purple {
 
+[[nodiscard]] inline int FirstListMatch(int count, const auto &accept) {
+	for (auto index = 0; index < count; ++index) {
+		if (accept(index)) {
+			return index;
+		}
+	}
+	return -1;
+}
+
+[[nodiscard]] inline int FirstListMatch(int count) {
+	return FirstListMatch(count, [](int) { return true; });
+}
+
 template <typename Id>
 class ListSelection final {
 public:
+	void queryEdited() {
+		_queryEdited = true;
+	}
+
 	void keepCurrentOnClear() {
 		_anchor.reset();
+		_keepCurrent = true;
 	}
 
 	[[nodiscard]] int refilter(
@@ -26,6 +44,11 @@ public:
 			_anchor.reset();
 		}
 		_filtering = filtering;
+		const auto first = _queryEdited && !_keepCurrent;
+		_queryEdited = _keepCurrent = false;
+		if (first) {
+			return FirstListMatch(int(visible.size()));
+		}
 		if (visible.empty()) {
 			return -1;
 		}
@@ -44,6 +67,8 @@ public:
 private:
 	std::optional<Id> _anchor;
 	bool _filtering = false;
+	bool _queryEdited = false;
+	bool _keepCurrent = false;
 
 };
 

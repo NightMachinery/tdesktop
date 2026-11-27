@@ -42,6 +42,11 @@ namespace Payments { struct InvoiceId; }
 
 namespace Purple {
 
+class PickerSelection final {
+public:
+	static void Refresh(not_null<PeerListContent*> list);
+};
+
 void InstallPickerFilter(
 	not_null<PeerListBox*> box,
 	not_null<Ui::MultiSelect*> filter,

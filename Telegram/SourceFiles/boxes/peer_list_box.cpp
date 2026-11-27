@@ -1656,6 +1656,7 @@ void PeerListContent::refreshRows() {
 	if (_mouseSelection) {
 		selectByMouse(QCursor::pos());
 	}
+	Purple::PickerSelection::Refresh(this);
 	loadProfilePhotos();
 	update();
 }
@@ -2261,6 +2262,7 @@ PeerListContent::SkipResult PeerListContent::selectSkip(int direction) {
 	if (hasPressed()) {
 		return { _selected.index.value, _selected.index.value };
 	}
+	_purpleSelectFirst = false;
 	_mouseSelection = false;
 	_lastMousePosition = std::nullopt;
 
@@ -2353,6 +2355,7 @@ void PeerListContent::selectSkipPage(int height, int direction) {
 }
 
 void PeerListContent::selectLast() {
+	_purpleSelectFirst = false;
 	const auto rowsCount = shownRowsCount();
 	const auto newSelectedIndex = rowsCount - 1;
 	_selected.index.value = newSelectedIndex;
@@ -2567,6 +2570,7 @@ void PeerListContent::setSearchQuery(
 	setContexted(Selected());
 	_mouseSelection = false;
 	_lastMousePosition = std::nullopt;
+	_purpleSelectFirst = true;
 	_searchQuery = query;
 	_normalizedSearchQuery = normalizedQuery;
 	_mentionHighlight = _searchQuery.startsWith('@')
@@ -2677,6 +2681,7 @@ auto PeerListContent::restoreSelectedData(SelectedSaved from)
 }
 
 void PeerListContent::selectByMouse(QPoint globalPosition) {
+	_purpleSelectFirst = false;
 	_mouseSelection = true;
 	_lastMousePosition = globalPosition;
 	const auto point = mapFromGlobal(globalPosition);

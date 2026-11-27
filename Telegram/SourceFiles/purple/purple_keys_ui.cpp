@@ -1838,7 +1838,7 @@ private:
 	void refilter() {
 		const auto query = _input->getLastText();
 		_filtered = ModalMx::RankAndFilter(_candidates, _config.history, query);
-		_selected = 0;
+		_selected = FirstListMatch(int(_filtered.size()));
 		auto tokens = ModalMx::ParseTokens(query);
 		auto aliasReasons = std::vector<QString>(_candidates.size());
 		if (!tokens.empty()) {
@@ -2268,6 +2268,7 @@ public:
 		_scroll->setOwnedWidget(std::move(rows));
 
 		_filter->changes() | rpl::on_next([=] {
+			_selection.queryEdited();
 			refilter();
 		}, lifetime());
 		_filter->submits() | rpl::on_next([=](Qt::KeyboardModifiers) {
@@ -3035,6 +3036,7 @@ public:
 		}
 
 		_filter->changes() | rpl::on_next([=] {
+			_selection.queryEdited();
 			_autoLoadPaused = false;
 			refilter(/*preserveScroll=*/false, selectedRoot());
 			maybeRequestMore();
@@ -4217,6 +4219,7 @@ public:
 		_scroll->setOwnedWidget(std::move(rows));
 
 		_filter->changes() | rpl::on_next([=] {
+			_selection.queryEdited();
 			refilter();
 		}, lifetime());
 		_filter->submits() | rpl::on_next([=](Qt::KeyboardModifiers) {

@@ -939,6 +939,13 @@ ordered(privacy_input, "bool filterWindowEvent", "QEvent::ShortcutOverride", "QE
 assert all(word not in notice_probe for word in ("writePref", "WriteSettings", "sync(", "api()."))
 assert "Purple::IsChatPaletteController(_controller)" in read("boxes/peer_list_box.cpp")
 
+ordered(palette_ui, "void refilter()", "RankAndFilter", "FirstListMatch")
+picker = read("purple/purple_picker.cpp")
+ordered(picker, "void PickerSelection::Refresh", "FirstListMatch", "disabled()", "setSelected")
+ordered(read("boxes/peer_list_box.cpp"), "void PeerListContent::refreshRows",
+        "Purple::PickerSelection::Refresh(this)")
+ordered(music, "void ChooseMusicSourceFolder", "ModalKeysEnabled()",
+        "CreateCommandPaletteLayer", "showLayer", "SingleChoiceBox")
 palette = read("purple/purple_chat_palette.cpp")
 ordered(palette, "bool Searchable(", "PickerVisible(peer)",
         "!recent || !peer->owner().history(peer)->purpleHiddenFromView()")

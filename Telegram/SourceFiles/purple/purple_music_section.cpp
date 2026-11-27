@@ -28,7 +28,9 @@
 #include "mtproto/sender.h"
 #include "purple/purple_config.h"
 #include "purple/purple_keys.h"
+#include "purple/purple_keys_ui.h"
 #include "purple/purple_notices.h"
+#include "purple/purple_privacy_screen.h"
 #include "purple/purple_copy.h"
 #include "purple/purple_music_bookmark.h"
 #include "purple/purple_music_diagnostics.h"
@@ -49,6 +51,7 @@
 #include "ui/widgets/popup_menu.h"
 #include "ui/boxes/single_choice_box.h"
 #include "ui/layers/generic_box.h"
+#include "ui/layers/layer_widget.h"
 #include "ui/text/format_values.h"
 #include "ui/toast/toast.h"
 #include "ui/widgets/buttons.h"
@@ -71,6 +74,7 @@
 #include "styles/style_window_main_menu.h"
 
 #include <QtCore/QDateTime>
+#include <QtCore/QTimer>
 #include <QtCore/QVariant>
 #include <QtGui/QClipboard>
 #include <QtGui/QKeyEvent>
@@ -1793,30 +1797,64 @@ void ChooseMusicSourceFolder(not_null<Window::SessionController*> controller) {
 		controller->show(Ui::MakeInformBox(tr::lng_purple_music_no_folders(tr::now)));
 		return;
 	}
+	const auto weak = base::make_weak(controller.get());
+	const auto apply = [weak](FilterId id) {
+		const auto window = weak.get();
+		if (!window || !MusicWindowCurrent(window) || PrivacyScreenActiveAny()
+			|| Core::App().activeWindow() != &window->window()) {
+			return;
+		}
+		auto &session = window->session();
+		const auto &filters = session.data().chatsFilters().list();
+		if (std::ranges::find(filters, id, &Data::ChatFilter::id) != filters.end()) {
+			SetMusicSourceFolder(&session, id);
+			MusicFolderChanges.fire_copy(&session);
+		}
+	};
+	if (ModalKeysEnabled()) {
+		auto items = std::vector<ModalUi::PaletteItem>();
+		items.reserve(ids.size());
+		for (auto i = 0; i < int(ids.size()); ++i) {
+			items.push_back({
+				.actionId = i,
+				.id = QString::number(i),
+				.label = labels[i],
+			});
+		}
+		const auto picker = std::make_shared<QPointer<Ui::LayerWidget>>();
+		auto layer = ModalUi::CreateCommandPaletteLayer({
+			.promptBadge = tr::lng_purple_music_source(tr::now),
+			.placeholder = u"Filter folders"_q,
+			.items = std::move(items),
+			.onPick = [picker, ids, apply](int index, QString) {
+				if (*picker && index >= 0 && index < int(ids.size())) {
+					const auto id = ids[index];
+					QTimer::singleShot(0, picker->data(), [picker, id, apply] {
+						if (*picker) {
+							(*picker)->closeLayer();
+							apply(id);
+						}
+					});
+				}
+			},
+		});
+		*picker = layer.get();
+		controller->window().showLayer(std::move(layer), Ui::LayerOption::KeepOther);
+		return;
+	}
 	const auto folder = MusicSourceFolder(&session);
 	const auto initial = std::ranges::find(ids, folder);
 	const auto selected = initial != ids.end() ? int(initial - ids.begin()) : -1;
-	const auto weak = base::make_weak(controller.get());
-	controller->show(Box<Ui::GenericBox>([weak, ids = std::move(ids),
-			labels = std::move(labels), selected](not_null<Ui::GenericBox*> box) {
+	controller->show(Box<Ui::GenericBox>([ids = std::move(ids),
+			labels = std::move(labels), selected, apply](not_null<Ui::GenericBox*> box) {
 		SingleChoiceBox(box, {
 			.title = tr::lng_purple_music_source(),
 			.options = labels,
 			.initialSelection = selected,
-			.callback = [weak, ids](int index) {
-				const auto window = weak.get();
-				if (!window || !MusicWindowCurrent(window)
-					|| index < 0 || index >= int(ids.size())) {
-					return;
+			.callback = [ids, apply](int index) {
+				if (index >= 0 && index < int(ids.size())) {
+					apply(ids[index]);
 				}
-				auto &session = window->session();
-				const auto &filters = session.data().chatsFilters().list();
-				if (std::ranges::find(filters, ids[index], &Data::ChatFilter::id)
-					== filters.end()) {
-					return;
-				}
-				SetMusicSourceFolder(&session, ids[index]);
-				MusicFolderChanges.fire_copy(&session);
 			},
 		});
 	}));

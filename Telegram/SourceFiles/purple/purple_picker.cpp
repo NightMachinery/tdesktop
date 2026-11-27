@@ -1,6 +1,8 @@
 #include "purple/purple_picker.h"
+#include "purple/purple_chat_palette.h"
 #include "purple/purple_keys.h"
 #include "purple/purple_list_filter_keys.h"
+#include "purple/purple_list_selection.h"
 
 #include "apiwrap.h"
 #include "chat_helpers/compose/compose_show.h"
@@ -24,6 +26,19 @@
 #include <QtWidgets/QTextEdit>
 
 namespace Purple {
+
+void PickerSelection::Refresh(not_null<PeerListContent*> list) {
+	if (!list->_purpleSelectFirst || list->hasPressed()
+		|| list->_searchMode == PeerListSearchMode::Disabled
+		|| (!ModalKeysEnabled() && !IsChatPaletteController(list->_controller))) {
+		return;
+	}
+	const auto row = FirstListMatch(list->shownRowsCount(), [&](int index) {
+		const auto row = list->getRow(PeerListContent::RowIndex(index));
+		return row && !row->disabled();
+	});
+	list->setSelected(PeerListContent::Selected(row, 0));
+}
 
 void InstallPickerFilter(
 		not_null<PeerListBox*> box,

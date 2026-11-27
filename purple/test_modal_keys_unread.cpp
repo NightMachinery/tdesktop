@@ -111,6 +111,17 @@ int main() {
 			"clearing restores row four and Return opens that peer");
 		Check(marks.contains(fourthPeer) && !marks.contains(20),
 			"filtering keeps the mark on the original peer");
+		selection.queryEdited();
+		Check(selection.refilter(dms, fourthPeer, 3, true, peerAt) == 0,
+			"typing selects the top match even when the old peer still matches");
+		selection.keepCurrentOnClear();
+		selection.queryEdited();
+		Check(SelectedPeer(items, all, selection.refilter(
+			all, uint64_t(20), 0, false, peerAt)) == 20,
+			"Escape clears without resetting the selected identity");
+		Check(Purple::FirstListMatch(4, [](int row) { return row > 1; }) == 2,
+			"preselection skips disabled leading rows");
+		Check(Purple::FirstListMatch(0) == -1, "an empty picker has no selection");
 		Check(selection.refilter({}, fourthPeer, 3, true, peerAt) == -1,
 			"zero matches have no actionable row");
 		Check(selection.refilter(all, {}, -1, false, peerAt) == 3,
