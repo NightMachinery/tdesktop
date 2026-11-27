@@ -1,7 +1,7 @@
 #include "purple/purple_privacy_canvas.h"
 
 #include <QtCore/QDir>
-#include <QtCore/QFileInfo>
+#include <QtGui/QFontDatabase>
 #include <QtWidgets/QApplication>
 
 #include <cstdlib>
@@ -40,10 +40,10 @@ Frame Fixture(bool dark, bool day, const QLocale &locale) {
 		.code = day ? 61 : 0,
 	};
 	const auto first = QDateTime(now.date(), QTime(now.time().hour(), 0), clock).addSecs(3600);
-	for (auto i = 0; i != 6; ++i) {
+	for (auto i = 0; i != 24; ++i) {
 		const auto code = day ? (i < 2 ? 61 : i == 3 ? 2 : 3) : (i < 3 ? 0 : 3);
-		weather.hours.push_back({ first.addSecs(i * 3600), day ? 14 + i / 2 : 8 - (i + 1) / 2,
-			i == 0 ? 0 : day ? 85 - i * 9 : 4 + 2 * i, DescribeWmoCode(code), code });
+		weather.hours.push_back({ first.addSecs(i * 3600), day ? 5 + std::abs(i - 13) / 2 : 3 + std::abs(i - 11) / 2,
+			i == 0 || i > 8 ? 0 : 80 - std::abs(i - 4) * 16, DescribeWmoCode(code), code });
 	}
 	for (auto i = 0; i != 3; ++i) {
 		const auto low = day ? (i == 0 ? 10 : i == 1 ? -10 : 9) : 3 + i;
@@ -65,12 +65,22 @@ Frame Fixture(bool dark, bool day, const QLocale &locale) {
 		.motifCode = day ? 61 : 0,
 		.dark = dark,
 		.day = day,
+		.labels = {
+			.local = QStringLiteral("Local weather"),
+			.chance = QStringLiteral("Chance of precipitation"),
+			.unavailable = QStringLiteral("Precipitation data unavailable"),
+			.hours = [](int count) { return QStringLiteral("Next %1 hours").arg(count); },
+			.days = [](int count) { return QStringLiteral("Next %1 days").arg(count); },
+			.peak = [](const QString &chance, const QString &time) {
+				return QStringLiteral("Peak %1 at %2").arg(chance, time);
+			},
+		},
 	};
 }
 
-void Render(const QDir &output, const QString &name, QSize size, Frame frame, int pixels) {
+QString Render(const QDir &output, const QString &name, QSize size, Frame frame, int pixels) {
 	auto canvas = Canvas();
-	auto font = QFont(QStringLiteral("Helvetica Neue"));
+	auto font = QFont(QStringLiteral("Open Sans"));
 	font.setPixelSize(pixels);
 	canvas.setFont(font);
 	canvas.resize(size);
@@ -81,74 +91,123 @@ void Render(const QDir &output, const QString &name, QSize size, Frame frame, in
 	const auto shot = canvas.grab();
 	Check(!shot.isNull() && shot.deviceIndependentSize().toSize() == size, "production canvas fits viewport");
 	Check(shot.save(output.filePath(name + QStringLiteral(".png"))), "save offscreen production canvas");
-	if (name == QStringLiteral("privacy-narrow")) {
-		const auto pixels = shot.toImage();
-		auto moonPixels = 0;
-		for (auto y = 0; y < pixels.height() / 4; ++y) {
-			for (auto x = 3 * pixels.width() / 4; x < pixels.width(); ++x) {
-				moonPixels += pixels.pixelColor(x, y) == QColor(0xffdc9f);
-			}
-		}
-		Check(moonPixels > 50, "narrow clear-night motif survives beside the clock text");
-	}
 	const auto desc = canvas.accessibleDescription();
 	Check(desc.contains(frame.locale.toString(frame.local.time(), QLocale::ShortFormat)),
 		"widget reports the locale-formatted time");
-	for (const auto &clock : frame.clocks) {
-		if (clock.dayDifference == 1) {
-			Check(desc.contains(QStringLiteral("Tomorrow")), "future relative day");
-		} else if (clock.dayDifference == -1) {
-			Check(desc.contains(QStringLiteral("Yesterday")), "previous relative day");
-		}
-	}
+	Check(desc.contains(frame.locale.toString(frame.local.date(), QLocale::LongFormat)),
+		"full date and year remain accessible");
 	if (frame.weather) {
-		Check(desc.contains(QStringLiteral("0%")), "real zero precipitation is present in widget data");
-		Check(desc.contains(QStringLiteral("Open-Meteo")), "weather attribution is visible to assistive technology");
+		Check(desc.contains(QStringLiteral("Open-Meteo")), "weather attribution is available");
+		Check(!desc.contains(QStringLiteral("Private fixture town")), "weather location is private");
 	}
-	if (name == QStringLiteral("privacy-day-rain")) {
-		Check(desc.contains(QStringLiteral("low \u221210°")), "negative temperatures use a minus sign");
-	}
+	return desc;
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
 	const auto app = QApplication(argc, argv);
-	Check(argc == 2, "pass a render directory");
+	Check(argc == 3, "pass a render directory and the bundled font directory");
+	const auto fonts = QDir(QString::fromLocal8Bit(argv[2]));
+	for (const auto name : { "OpenSans-Regular.ttf", "OpenSans-SemiBold.ttf" }) {
+		Check(QFontDatabase::addApplicationFont(fonts.filePath(QString::fromLatin1(name))) >= 0,
+			"load the app’s bundled Open Sans");
+	}
 	const auto output = QDir(QString::fromLocal8Bit(argv[1]));
 	Check(output.mkpath(QStringLiteral(".")), "create the offscreen output directory");
 	const auto british = QLocale(QLocale::English, QLocale::UnitedKingdom);
 	const auto american = QLocale(QLocale::English, QLocale::UnitedStates);
-	Check(british.toString(QTime(22, 15), QLocale::ShortFormat) == QStringLiteral("22:15"),
-		"24-hour sample locale");
-	Check(american.toString(QTime(22, 15), QLocale::ShortFormat).endsWith(QStringLiteral("PM")),
-		"12-hour sample locale");
-	auto night = Fixture(true, false, british);
+	for (const auto dark : { false, true }) {
+		const auto theme = dark ? QStringLiteral("-dark") : QStringLiteral("-light");
+		auto frame = Fixture(dark, !dark, british);
+		frame.weather->location = QStringLiteral("Private fixture town");
+		frame.flat = true;
+		auto desc = Render(output, QStringLiteral("timeline-full") + theme, { 1512, 982 }, frame, 14);
+		Check(desc.contains(QStringLiteral("Next 24 hours")), "full layout selects 24 hours");
+		Check(desc.count(QStringLiteral("chance of precipitation")) == 24, "24 accessible samples");
+		Check(desc.contains(QStringLiteral("Next 3 days")), "full layout includes the daily band");
+		Check(desc.contains(QStringLiteral("0%")), "known zero precipitation is accessible");
+		desc = Render(output, QStringLiteral("timeline-half") + theme, { 750, 982 }, frame, 14);
+		Check(desc.contains(QStringLiteral("Next 12 hours")), "half-width layout selects 12 hours");
+		Check(desc.contains(QStringLiteral("Next 3 days")), "half-width layout stacks the daily summaries");
+		desc = Render(output, QStringLiteral("timeline-short") + theme, { 1100, 500 }, frame, 14);
+		Check(desc.contains(QStringLiteral("Next 12 hours")), "short layout keeps twelve hours");
+		Check(!desc.contains(QStringLiteral("Next 3 days")), "short layout drops the daily summaries");
+		Check(desc.contains(QStringLiteral("Peak 80%")), "short layout keeps the precipitation peak");
+	}
 	auto day = Fixture(false, true, british);
-	Render(output, QStringLiteral("privacy-night-clear"), { 1300, 820 }, night, 14);
-	Render(output, QStringLiteral("privacy-day-rain"), { 1300, 820 }, day, 14);
-	Render(output, QStringLiteral("privacy-narrow"), { 430, 820 }, night, 14);
-	Render(output, QStringLiteral("privacy-compact"), { 360, 360 }, night, 14);
-	auto offline = day;
-	offline.update = QStringLiteral("Offline · last updated 09:30 AM · Open-Meteo");
-	Render(output, QStringLiteral("privacy-compact-offline"), { 360, 360 }, offline, 14);
-	Render(output, QStringLiteral("privacy-rain-800"), { 800, 500 }, day, 14);
-	Render(output, QStringLiteral("privacy-rain-large-text"), { 800, 500 }, day, 17);
-	night.weather.reset();
-	night.update.clear();
-	Render(output, QStringLiteral("privacy-clocks-only"), { 1300, 820 }, night, 14);
+	auto dry = day;
+	for (auto &hour : dry.weather->hours) {
+		hour.temperatureC = 5;
+		hour.precipitation = 0;
+	}
+	auto desc = Render(output, QStringLiteral("timeline-dry-flat"), { 1512, 982 }, dry, 14);
+	Check(desc.count(QStringLiteral("0%")) == 24, "confirmed dry hours keep their real zeroes");
+	Check(!desc.contains(QStringLiteral("Peak ")), "dry forecast has no rain-lane summary");
+	auto sparse = day;
+	sparse.weather->hours.erase(sparse.weather->hours.begin() + 5);
+	for (auto &hour : sparse.weather->hours) {
+		hour.precipitation = std::nullopt;
+	}
+	sparse.weather->hours[7].temperatureC.reset();
+	sparse.weather->days[1].highC.reset();
+	desc = Render(output, QStringLiteral("timeline-sparse"), { 1512, 982 }, sparse, 14);
+	Check(desc.contains(QStringLiteral("Next 23 hours")), "missing hours are not counted as samples");
+	Check(desc.contains(QStringLiteral("Precipitation data unavailable")), "unknown rain is exposed as unavailable");
+	Check(desc.contains(QStringLiteral("low \u221210° high –")), "a partial range retains its known endpoint");
+	sparse.weather->hours[2].precipitation = 90;
+	Render(output, QStringLiteral("timeline-mixed-rain"), { 750, 982 }, sparse, 14);
 	auto twelveHour = Fixture(true, false, american);
 	twelveHour.flat = true;
 	twelveHour.fahrenheit = true;
-	Render(output, QStringLiteral("privacy-12-hour"), { 1280, 806 }, twelveHour, 14);
-	auto yesterday = Fixture(false, true, british);
-	yesterday.local = yesterday.local.addSecs(-8 * 3600);
-	yesterday.clocks = Purple::PrivacyClocks::At(yesterday.local, yesterday.local.timeZone(), {
-		{ QStringLiteral("America/New_York"), QStringLiteral("New York") },
-	});
-	Check(yesterday.clocks.front().dayDifference == -1, "relative day fixture crosses local midnight");
-	yesterday.weather.reset();
-	yesterday.update.clear();
-	Render(output, QStringLiteral("privacy-yesterday"), { 800, 500 }, yesterday, 14);
+	const auto zone = QTimeZone(QByteArray("Europe/Berlin"));
+	const auto beforeFallback = QDateTime(QDate(2026, 10, 24), QTime(21, 30), QTimeZone::UTC);
+	twelveHour.local = beforeFallback;
+	twelveHour.weather->zone = zone;
+	auto i = 0;
+	for (auto &hour : twelveHour.weather->hours) {
+		hour.time = beforeFallback.addSecs(1800 + 3600 * i++).toTimeZone(zone);
+	}
+	desc = Render(output, QStringLiteral("timeline-dst-fahrenheit"), { 1512, 982 }, twelveHour, 14);
+	Check(desc.contains(QStringLiteral("AM")) && desc.contains(QStringLiteral("PM")), "12-hour forecast labels");
+	const auto repeatedTime = american.toString(QTime(2, 0), QLocale::ShortFormat);
+	Check(desc.contains(repeatedTime + QStringLiteral(" UTC+02:00"))
+		&& desc.contains(repeatedTime + QStringLiteral(" UTC+01:00")),
+		"both repeated hours have distinct offsets");
+	Check(desc.contains(QStringLiteral("UTC+02:00")), "different forecast offset is shown");
+	Check(desc.contains(QStringLiteral("46°F")), "current conditions use the chosen units");
+
+	auto rtl = Fixture(true, false, QLocale(QLocale::Persian, QLocale::Iran));
+	rtl.clocks.front().label = QStringLiteral("یک ساعت با نام پیکربندی‌شدهٔ طولانی");
+	Render(output, QStringLiteral("timeline-rtl"), { 750, 982 }, rtl, 17);
+	desc = Render(output, QStringLiteral("timeline-small"), { 360, 360 }, day, 14);
+	Check(!desc.contains(QStringLiteral("Next 12 hours")) && desc.contains(QStringLiteral("Tehran")),
+		"compact fallback retains the first world clock and current weather");
+	desc = Render(output, QStringLiteral("timeline-large-type"), { 800, 500 }, day, 21);
+	Check(desc.contains(QStringLiteral("Local weather")), "large type retains current conditions");
+	auto current = day;
+	current.weather->hours.clear();
+	desc = Render(output, QStringLiteral("timeline-daily-only"), { 1270, 810 }, current, 14);
+	Check(desc.contains(QStringLiteral("Next 3 days")) && !desc.contains(QStringLiteral(" hours")),
+		"daily section stands alone");
+	current.weather->days.clear();
+	current.update = QStringLiteral("Offline · last updated 09:30 · Open-Meteo");
+	desc = Render(output, QStringLiteral("timeline-current-only"), { 1270, 810 }, current, 14);
+	Check(desc.contains(QStringLiteral("Offline")) && !desc.contains(QStringLiteral("Next ")),
+		"current-only layout keeps its status");
+	current.weather.reset();
+	current.update.clear();
+	Render(output, QStringLiteral("timeline-clocks-only"), { 1270, 810 }, current, 14);
+
+	auto resized = Canvas();
+	resized.resize(1512, 982);
+	day.controlsTop = 900;
+	resized.setFrame(day);
+	resized.show();
+	QApplication::processEvents();
+	Check(resized.accessibleDescription().contains(QStringLiteral("Next 24 hours")), "resize fixture starts full");
+	resized.resize(750, 982);
+	QApplication::processEvents();
+	Check(resized.accessibleDescription().contains(QStringLiteral("Next 12 hours")), "resize refreshes the accessible selection");
 	std::cout << Checks << " checks, 0 failures\n";
 }

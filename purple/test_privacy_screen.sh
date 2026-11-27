@@ -38,7 +38,7 @@ if [[ "${1:-}" == "--render" ]]; then
     "${Root}/purple/test_privacy_canvas.cpp" \
     "${Root}/Telegram/SourceFiles/purple/purple_privacy_canvas.cpp" \
     "${QtFlags[@]}" "${QtWidgetsFlags[@]}" -o "${Bin}"
-  QT_QPA_PLATFORM=offscreen "${Bin}" "${2:?Pass an offscreen render directory}"
+  QT_QPA_PLATFORM=offscreen "${Bin}" "${2:?Pass an offscreen render directory}"     "${Root}/Telegram/lib_ui/fonts"
   exit
 fi
 

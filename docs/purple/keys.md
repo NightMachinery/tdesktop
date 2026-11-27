@@ -337,8 +337,9 @@ on the modal status line and cheatsheet footer.
     or in app-wide `settings.toml`. Clocks use IANA time zones. The cover
     hides clocks with the same current UTC offset and marks differences in
     calendar date. A label is visible on the cover.
-  - **Weather.** The cover can show current conditions, the next six hours,
-    and the next three days. It uses approximate current location by default
+  - **Weather.** The cover shows current conditions beside the clocks and a
+    24-hour temperature and precipitation timeline above the next three days.
+    Narrow or short covers show up to 12 hours. It uses approximate current location by default
     and waits until the cover is shown to request it. When system location
     is denied, restricted, or unavailable, the cover shows only its
     non-weather content. **Settings → Purple → Privacy screen weather** shows

@@ -962,3 +962,14 @@ docs/purple/upstream_hooks.md.
 "lng_purple_translate_excluded_count#other" = "{count} chats";
 "lng_purple_translate_excluded_toast" = "Translation disabled for this chat.";
 "lng_purple_translate_allowed_toast" = "Translation enabled for this chat.";
+
+
+// Privacy cover forecast
+"lng_purple_privacy_weather_local" = "Local weather";
+"lng_purple_privacy_weather_hours#one" = "Next {count} hour";
+"lng_purple_privacy_weather_hours#other" = "Next {count} hours";
+"lng_purple_privacy_weather_days#one" = "Next {count} day";
+"lng_purple_privacy_weather_days#other" = "Next {count} days";
+"lng_purple_privacy_weather_chance" = "Chance of precipitation";
+"lng_purple_privacy_weather_peak" = "Peak {value} at {time}";
+"lng_purple_privacy_weather_precipitation_unavailable" = "Precipitation data unavailable";

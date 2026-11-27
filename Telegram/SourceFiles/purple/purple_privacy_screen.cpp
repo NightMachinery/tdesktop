@@ -5,6 +5,7 @@
 #include "core/current_geo_location.h"
 #include "core/core_settings.h"
 #include "core/core_settings_proxy.h"
+#include "lang/lang_keys.h"
 #include "main/main_domain.h"
 #include "platform/platform_current_geo_location.h"
 #include "mainwindow.h"
@@ -928,6 +929,21 @@ void PrivacyBackdropWidget::refreshCanvas() {
 		.day = fresh ? forecast->isDay.value_or(localDay) : localDay,
 		.flat = flat,
 		.fahrenheit = Fahrenheit(locale),
+		.labels = {
+			.local = tr::lng_purple_privacy_weather_local(tr::now),
+			.chance = tr::lng_purple_privacy_weather_chance(tr::now),
+			.unavailable = tr::lng_purple_privacy_weather_precipitation_unavailable(tr::now),
+			.hours = [](int count) {
+				return tr::lng_purple_privacy_weather_hours(tr::now, lt_count, count);
+			},
+			.days = [](int count) {
+				return tr::lng_purple_privacy_weather_days(tr::now, lt_count, count);
+			},
+			.peak = [](const QString &chance, const QString &time) {
+				return tr::lng_purple_privacy_weather_peak(
+					tr::now, lt_value, chance, lt_time, time);
+			},
+		},
 	});
 }
 

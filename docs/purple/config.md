@@ -37,10 +37,13 @@ An explicit Off, including a saved blank city from the original weather
 setting, or a previously configured town is preserved. Purple requests
 system location when the cover is visible and needs a forecast. If location
 is denied, restricted, or unavailable, the cover omits the forecast and the
-settings show the reason and offer town or postal-code search. At full size the cover shows current conditions, the next six
-hours, and the next three days. Narrow covers show three hourly forecasts.
-Short covers reserve space for the controls, local time, first world clock,
-and current conditions. The forecast credits Open-Meteo alongside the last
+settings show the reason and offer town or postal-code search. The cover
+places current conditions beside the clocks. Full covers show a timeline of
+up to 24 hours and a shared-scale range for each of the next three days.
+Narrow or short covers use up to 12 hours. Short covers omit the daily band
+and smallest covers keep the clocks, current conditions, and controls. The
+forecast uses the forecast area's time zone and collapses the precipitation
+lane when every sample reports zero. It credits Open-Meteo alongside the last
 update time. Forecasts and town searches use an enabled SOCKS5 or HTTP app
 proxy, with its configured credentials. In-flight weather requests switch
 routes when the app proxy changes. System proxy mode follows Qt's system proxy

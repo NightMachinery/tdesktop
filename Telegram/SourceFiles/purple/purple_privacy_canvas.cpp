@@ -1,5 +1,6 @@
 #include "purple/purple_privacy_canvas.h"
 
+#include <QtCore/QEvent>
 #include <QtGui/QFontMetrics>
 #include <QtGui/QLinearGradient>
 #include <QtGui/QPainter>
@@ -156,7 +157,7 @@ void Landscape(QPainter &p, const QRect &bounds, const QRegion &clockArea,
 	const auto motifSize = std::clamp(w / 7, 3 * unit, 6 * unit);
 	const auto motif = QRect(w - 2 * unit - motifSize, 2 * unit, motifSize, motifSize);
 	const auto drawMotif = [&] {
-		if (!clockArea.intersects(motif) && h >= 20 * unit) {
+		if (!frame.weather && !clockArea.intersects(motif) && h >= 20 * unit) {
 			Condition(p, motif, std::max(0, frame.motifCode), frame.day, colors);
 		}
 	};
@@ -201,198 +202,724 @@ void Landscape(QPainter &p, const QRect &bounds, const QRegion &clockArea,
 	drawMotif();
 }
 
+struct Fonts {
+	QFont caption;
+	QFont label;
+	QFont heading;
+	QFont figure;
+};
+
+struct Metrics {
+	int unit = 0;
+	int gap = 0;
+	int caption = 0;
+	int label = 0;
+	int heading = 0;
+	int icon = 0;
+};
+
 struct Forecast {
 	std::vector<HourlyWeather> hours;
 	std::vector<DailyWeather> days;
 };
 
-Forecast Upcoming(const Frame &frame, int count) {
+constexpr auto kSecondsPerHour = 3600;
+constexpr auto kFullHours = 24;
+constexpr auto kCompactHours = 12;
+
+Forecast Upcoming(const Frame &frame) {
 	auto result = Forecast();
 	if (!frame.weather) {
 		return result;
 	}
+	const auto now = frame.local.toSecsSinceEpoch();
 	for (const auto &hour : frame.weather->hours) {
-		if (hour.time > frame.local) {
+		const auto ahead = hour.time.toSecsSinceEpoch() - now;
+		if (hour.time.isValid() && ahead > 0
+			&& ahead <= kFullHours * kSecondsPerHour) {
 			result.hours.push_back(hour);
-			if (int(result.hours.size()) == count) break;
 		}
 	}
-	const auto today = frame.local.toTimeZone(frame.weather->zone).date();
+	std::stable_sort(result.hours.begin(), result.hours.end(),
+		[](const auto &a, const auto &b) { return a.time < b.time; });
+	result.hours.erase(std::unique(result.hours.begin(), result.hours.end(),
+		[](const auto &a, const auto &b) { return a.time == b.time; }),
+		result.hours.end());
+	if (result.hours.size() > kFullHours) {
+		result.hours.resize(kFullHours);
+	}
+	const auto today = frame.weather->zone.isValid()
+		? frame.local.toTimeZone(frame.weather->zone).date()
+		: frame.local.date();
 	for (const auto &day : frame.weather->days) {
-		if (day.date > today) {
+		const auto ahead = today.daysTo(day.date);
+		if (ahead > 0 && ahead <= 3) {
 			result.days.push_back(day);
-			if (result.days.size() == 3) break;
 		}
 	}
 	return result;
 }
 
-struct Fonts {
-	QFont caption;
-	QFont label;
-	QFont heading;
-	QFont current;
-};
-
-struct ClockCell {
-	QRect rect;
-	QString label;
-	QString time;
-	QString relative;
-	int divider = 0;
-};
-
-struct WeatherMetrics {
-	int gap = 0;
-	int inset = 0;
-	int header = 0;
-	int current = 0;
-	int section = 0;
-	int caption = 0;
-	int icon = 0;
-	int line = 0;
-	int row = 0;
-	int curveGap = 0;
-	int curveHeight = 0;
-	int precipitationGap = 0;
-	int hourly = 0;
-};
-
-WeatherMetrics WeatherSizes(const Fonts &fonts, int unit, int extraSpacing) {
-	const auto caption = QFontMetrics(fonts.caption).height();
-	const auto section = QFontMetrics(fonts.heading).height();
-	const auto line = QFontMetrics(fonts.label).height();
-	const auto icon = unit * 7 / 5;
-	const auto gap = std::max(1, unit / 4);
-	const auto curveGap = gap + extraSpacing / 2;
-	const auto curveHeight = unit + extraSpacing / 2;
-	const auto precipitationGap = extraSpacing / 2;
-	return {
-		.gap = gap, .inset = unit, .header = std::max(caption, section),
-		.current = QFontMetrics(fonts.current).height(), .section = section,
-		.caption = caption, .icon = icon, .line = line,
-		.row = icon + 2 * gap + extraSpacing * 5 / 8,
-		.curveGap = curveGap, .curveHeight = curveHeight,
-		.precipitationGap = precipitationGap,
-		.hourly = section + 3 * caption + icon + line + curveHeight
-			+ 3 * gap + 2 * curveGap + precipitationGap,
-	};
+QString ShortHour(const Frame &frame, QTime time) {
+	if (frame.locale.timeFormat(QLocale::ShortFormat).contains(u'a', Qt::CaseInsensitive)) {
+		const auto hour = time.hour() % 12;
+		return frame.locale.toString(hour ? hour : 12);
+	}
+	return frame.locale.toString(time, QStringLiteral("HH"));
 }
 
-void Hourly(QPainter &p, QRect rect, const Frame &frame,
-		const std::vector<HourlyWeather> &hours, const Fonts &fonts,
-		const WeatherMetrics &m, int unit, const Colors &c) {
-	Text(p, { rect.x(), rect.y(), rect.width(), m.section },
-		QStringLiteral("Hourly forecast"), fonts.heading, c.ink);
-	const auto timeTop = rect.y() + m.section + m.gap;
-	const auto iconTop = timeTop + m.caption + m.gap;
-	const auto tempTop = iconTop + m.icon + m.gap;
-	const auto curveTop = tempTop + m.line + m.curveGap;
-	const auto rainTop = curveTop + m.curveHeight + m.curveGap;
-	auto lows = std::numeric_limits<int>::max();
-	auto highs = std::numeric_limits<int>::min();
+QString Offset(const Frame &frame, int seconds) {
+	const auto magnitude = std::abs(seconds) / 60;
+	return QStringLiteral("UTC%1%2").arg(seconds < 0 ? u'−' : u'+').arg(
+		frame.locale.toString(QTime(magnitude / 60, magnitude % 60), QStringLiteral("HH:mm")));
+}
+
+bool Repeated(const HourlyWeather &hour, const std::vector<HourlyWeather> &hours) {
+	return std::any_of(hours.begin(), hours.end(), [&](const auto &other) {
+		return hour.time.date() == other.time.date()
+			&& hour.time.time() == other.time.time()
+			&& hour.time.offsetFromUtc() != other.time.offsetFromUtc();
+	});
+}
+
+QString HourTime(const Frame &frame, const HourlyWeather &hour, bool repeated) {
+	auto result = Time(frame.locale, hour.time.time());
+	if (repeated) {
+		result += u' ' + Offset(frame, hour.time.offsetFromUtc());
+	}
+	return result;
+}
+
+struct RainLane {
+	std::optional<int> peak;
+	QString summary;
+	bool show = false;
+};
+
+RainLane Precipitation(const Frame &frame, const std::vector<HourlyWeather> &hours) {
+	auto result = RainLane();
+	auto missing = false;
+	for (auto i = 0; i != int(hours.size()); ++i) {
+		const auto chance = hours[i].precipitation;
+		missing = missing || !chance
+			|| (i && hours[i - 1].time.secsTo(hours[i].time) > kSecondsPerHour);
+		if (chance && (!result.peak || *chance > *hours[*result.peak].precipitation)) {
+			result.peak = i;
+		}
+	}
+	if (result.peak) {
+		const auto &hour = hours[*result.peak];
+		result.show = missing || *hour.precipitation > 0;
+		if (result.show) {
+			result.summary = frame.labels.peak(Chance(frame, hour),
+				HourTime(frame, hour, Repeated(hour, hours)));
+		}
+	}
+	return result;
+}
+
+int Width(const QFont &font, const QString &string) {
+	return QFontMetrics(font).horizontalAdvance(string);
+}
+
+struct Layout {
+	Fonts fonts;
+	Metrics m;
+	Forecast forecast;
+	RainLane rain;
+	QString heading;
+	QRect header;
+	QRect panel;
+	int titleHeight = 0;
+	int dailyHeight = 0;
+	int chartHeight = 0;
+	int rainHeight = 0;
+	int repeatedHeight = 0;
+	bool stackedCredit = false;
+	bool stackedRain = false;
+	bool columns = false;
+	bool icons = false;
+};
+
+Layout Measure(const Frame &frame, const QRect &bounds, const QFont &base) {
+	auto result = Layout();
+	const auto unit = std::max(1, QFontMetrics(base).height());
+	const auto u = unit;
+	const auto gap = std::max(2, u / 3);
+	const auto outer = std::clamp(bounds.width() / 24, u, 3 * u);
+	const auto edge = frame.controlsTop > 0
+		? std::min(bounds.height(), frame.controlsTop) : bounds.height();
+	const auto available = std::max(0, edge - 2 * gap);
+	const auto w = std::max(0, bounds.width() - 2 * outer);
+	result.fonts = { Font(base, 4 * u / 5), Font(base, u),
+		Font(base, 3 * u / 2, QFont::DemiBold), Font(base, 7 * u / 2, QFont::Light) };
+	const auto &fonts = result.fonts;
+	result.m = { u, gap, QFontMetrics(fonts.caption).height(),
+		QFontMetrics(fonts.label).height(), QFontMetrics(fonts.heading).height(), u * 4 / 3 };
+	const auto &m = result.m;
+	const auto tall = available >= 33 * u;
+	const auto inner = std::max(0, w - 2 * u);
+	const auto headerHeight = tall
+		? std::clamp(available / 4, 9 * u, 15 * u)
+		: std::max(6 * u, available * 27 / 100);
+	const auto budget = available - headerHeight - 2 * u;
+	result.header = { outer + gap, gap, std::max(0, w - 2 * gap), available - gap };
+	auto all = Upcoming(frame);
+	auto minorWidth = 0;
+	for (const auto &hour : all.hours) {
+		minorWidth = std::max(minorWidth, Width(fonts.caption, ShortHour(frame, hour.time.time())));
+	}
+	result.columns = inner >= 49 * u;
+	const auto full = tall && inner >= (kFullHours + 1) * (minorWidth + u);
+	const auto hours = full ? kFullHours : kCompactHours;
+	const auto limit = frame.local.addSecs(hours * kSecondsPerHour);
+	all.hours.erase(std::remove_if(all.hours.begin(), all.hours.end(), [&](const auto &h) {
+		return h.time > limit;
+	}), all.hours.end());
+	if (int(all.hours.size()) > hours) {
+		all.hours.resize(hours);
+	}
+	if (inner < 18 * u || (all.hours.size() > 1 && inner < 12 * (minorWidth + gap))
+		|| budget < 5 * u) {
+		all.hours.clear();
+	}
+	if (tall && !all.days.empty()) {
+		result.dailyHeight = m.label + 2 * gap + (result.columns
+			? m.icon + m.caption + 2 * m.label + 3 * gap
+			: int(all.days.size()) * (m.icon + 2 * gap));
+	} else {
+		all.days.clear();
+	}
+	result.forecast = std::move(all);
+	auto &f = result.forecast;
+	if (f.hours.empty() && f.days.empty()) {
+		return result;
+	}
+	if (!f.hours.empty()) {
+		result.heading = frame.labels.hours(int(f.hours.size()));
+		if (frame.weather->zone.isValid()) {
+			const auto offset = frame.weather->zone.offsetFromUtc(frame.local.toUTC());
+			if (offset != frame.local.offsetFromUtc()) {
+				result.heading += QStringLiteral(" · ") + Offset(frame, offset);
+			}
+		}
+	} else {
+		result.heading = frame.labels.days(int(f.days.size()));
+		result.dailyHeight -= m.label + 2 * gap;
+	}
+	result.stackedCredit = Width(fonts.heading, result.heading) + u
+		+ Width(fonts.caption, frame.update) > inner;
+	result.titleHeight = m.heading + (result.stackedCredit ? m.caption + gap : 0);
+	result.rain = Precipitation(frame, f.hours);
+	result.stackedRain = result.rain.show && Width(fonts.caption, frame.labels.chance)
+		+ Width(fonts.caption, result.rain.summary) + u > inner;
+	auto remaining = budget - result.titleHeight - gap;
+	if (!f.hours.empty()) {
+		result.icons = tall;
+		if (std::any_of(f.hours.begin(), f.hours.end(), [&](const auto &hour) {
+			return Repeated(hour, f.hours);
+		})) {
+			result.repeatedHeight = m.caption + gap;
+		}
+		auto axis = m.caption + 3 * gap + result.repeatedHeight
+			+ (result.icons ? m.icon + gap : 0);
+		const auto rainText = result.rain.show
+			? (result.stackedRain ? 2 * m.caption + gap : m.caption) + 2 * gap : 0;
+		result.rainHeight = result.rain.show ? (tall ? 3 : 2) * u : 0;
+		if (remaining - axis - rainText - result.rainHeight - result.dailyHeight < 4 * u) {
+			f.days.clear();
+			result.dailyHeight = 0;
+		}
+		if (remaining - axis - rainText - result.rainHeight < 4 * u && result.icons) {
+			result.icons = false;
+			axis -= m.icon + gap;
+		}
+		if (remaining - axis - rainText - result.rainHeight < 4 * u) {
+			result.rainHeight = 0;
+		}
+		remaining -= axis + rainText + result.rainHeight + result.dailyHeight;
+		if (remaining < 4 * u) {
+			f.hours.clear();
+			return result;
+		}
+		result.chartHeight = remaining;
+	} else if (result.dailyHeight > remaining) {
+		f.days.clear();
+		return result;
+	}
+	result.header.setHeight(headerHeight - 2 * gap);
+	const auto panelHeight = f.hours.empty()
+		? result.titleHeight + gap + result.dailyHeight + 2 * u
+		: available - headerHeight;
+	result.panel = { outer, headerHeight, w, panelHeight };
+	return result;
+}
+
+QRect Visual(const QPainter &p, QRect outer, QRect rect) {
+	if (p.layoutDirection() == Qt::RightToLeft) {
+		rect.moveLeft(outer.left() + outer.right() - rect.right());
+	}
+	return rect;
+}
+
+double VisualX(const QPainter &p, QRect outer, double x) {
+	return (p.layoutDirection() == Qt::RightToLeft)
+		? outer.left() + outer.right() - x : x;
+}
+
+Qt::Alignment Leading(const QPainter &p) {
+	return Qt::AlignVCenter | Qt::AlignAbsolute | (p.layoutDirection() == Qt::RightToLeft
+		? Qt::AlignRight : Qt::AlignLeft);
+}
+
+Qt::Alignment Trailing(const QPainter &p) {
+	return Qt::AlignVCenter | Qt::AlignAbsolute | (p.layoutDirection() == Qt::RightToLeft
+		? Qt::AlignLeft : Qt::AlignRight);
+}
+
+struct Header {
+	struct ClockCell {
+		QString label;
+		QString time;
+		QString relative;
+		QRect rect;
+	};
+	QRect date;
+	QRect time;
+	QFont timeFont;
+	QFont zoneFont;
+	QRect current;
+	std::vector<ClockCell> clocks;
+};
+
+Header MeasureHeader(const Frame &frame, const Layout &g, const QFont &base) {
+	auto result = Header();
+	const auto &m = g.m;
+	const auto bounds = g.header;
+	const auto weather = frame.weather.has_value();
+	const auto status = !frame.update.isEmpty() && g.panel.isEmpty();
+	const auto currentW = weather || status ? bounds.width() * 2 / 5 : 0;
+	const auto clockW = bounds.width() - currentW - (currentW ? 2 * m.gap : 0);
+	const auto tall = bounds.height() > 10 * m.unit;
+	const auto compact = g.panel.isEmpty() && bounds.width() < 24 * m.unit;
+	const auto stackClocks = compact || (tall && !g.columns);
+	const auto top = bounds.y() + (tall ? m.unit : m.gap);
+	const auto dateH = m.label;
+	const auto time = Time(frame.locale, frame.local.time());
+	result.zoneFont = Font(base, 3 * m.unit / 2, QFont::Medium);
+	const auto zoneH = QFontMetrics(result.zoneFont).height() + 2 * m.caption;
+	auto timeSize = std::min(tall ? 6 * m.unit : 5 * m.unit, bounds.height() / 2);
+	if (stackClocks && !frame.clocks.empty()) {
+		const auto room = std::max(1, bounds.bottom() - top - dateH - zoneH - m.gap);
+		const auto natural = QFontMetrics(Font(base, timeSize, QFont::Light)).height();
+		timeSize = std::max(1, std::min(timeSize, timeSize * room / natural));
+	}
+	const auto goal = Font(base, timeSize, QFont::Light);
+	timeSize = std::max(1, std::min(timeSize,
+		timeSize * clockW / std::max(1, Width(goal, time))));
+	result.timeFont = Font(base, timeSize, QFont::Light);
+	const auto timeH = QFontMetrics(result.timeFont).height();
+	const auto x = bounds.x() + m.gap;
+	const auto timeW = Width(result.timeFont, time);
+	result.date = { x, top, clockW - m.gap, dateH };
+	result.time = { x, top + dateH, timeW, timeH };
+	const auto clockBottom = top + dateH + timeH;
+	const auto end = bounds.x() + clockW;
+	auto nextX = stackClocks ? x : x + timeW + 4 * m.gap;
+	auto nextY = stackClocks ? clockBottom + m.gap
+		: std::max(top + dateH, clockBottom - zoneH);
+	for (const auto &clock : frame.clocks) {
+		const auto local = Time(frame.locale, clock.time.time());
+		const auto relative = RelativeDay(clock.dayDifference);
+		const auto cellW = std::min(clockW - m.gap,
+			std::max({ Width(g.fonts.caption, clock.label),
+				Width(g.fonts.caption, relative), Width(result.zoneFont, local) }));
+		if (nextX + cellW > end) {
+			nextX = x;
+			nextY = std::max(clockBottom, nextY + zoneH) + m.gap;
+		}
+		if (nextY + zoneH > bounds.bottom() && !result.clocks.empty()) {
+			break;
+		}
+		result.clocks.push_back({ clock.label, local, relative,
+			QRect(nextX, nextY, cellW, zoneH) });
+		nextX += cellW + 3 * m.gap;
+		if (compact) {
+			break;
+		}
+	}
+	result.current = { end + 2 * m.gap, top, currentW, std::max(0, bounds.bottom() - top) };
+	return result;
+}
+
+QString CurrentTemperature(const Frame &frame) {
+	return Temperature(frame, frame.weather->temperatureC) + (frame.fahrenheit ? u'F' : u'C');
+}
+
+void PaintHeader(QPainter &p, const Frame &frame, const Layout &g,
+		const Header &header, const QFont &base, const Colors &c) {
+	const auto &m = g.m;
+	const auto &f = g.fonts;
+	const auto text = [&](QRect rect, const QString &s, const QFont &font, QColor color) {
+		Text(p, Visual(p, g.header, rect), s, font, color, Leading(p));
+	};
+	text(header.date, frame.locale.toString(frame.local.date(), QLocale::LongFormat), f.label, c.muted);
+	text(header.time, Time(frame.locale, frame.local.time()), header.timeFont, c.ink);
+	for (const auto &clock : header.clocks) {
+		auto r = clock.rect;
+		const auto zoneH = QFontMetrics(header.zoneFont).height();
+		if (r.x() > header.time.x() && r.y() < header.time.bottom()) {
+			p.setPen(c.rule);
+			const auto divider = VisualX(p, g.header, r.x() - 2 * m.gap);
+			p.drawLine(QPointF(divider, r.y()), QPointF(divider, r.bottom()));
+		}
+		const auto w = r.width();
+		text({ r.x(), r.y(), w, m.caption }, clock.label, f.caption, c.muted);
+		r.translate(0, m.caption);
+		text({ r.x(), r.y(), w, zoneH }, clock.time, header.zoneFont, c.ink);
+		r.translate(0, zoneH);
+		text({ r.x(), r.y(), w, m.caption }, clock.relative, f.caption, c.muted);
+	}
+	auto r = header.current;
+	if (r.isEmpty()) {
+		return;
+	}
+	if (!frame.weather) {
+		p.setFont(f.caption);
+		p.setPen(c.muted);
+		p.drawText(Visual(p, g.header, r), Leading(p) | Qt::TextWordWrap, frame.update);
+		return;
+	}
+	text({ r.x(), r.y(), r.width(), m.label }, frame.labels.local, f.label, c.muted);
+	r.translate(0, m.label + 2 * m.gap);
+	const auto icon = std::min(3 * m.unit, r.width() / 4);
+	const auto temp = CurrentTemperature(frame);
+	const auto goal = Width(f.figure, temp);
+	auto figure = f.figure;
+	if (goal + icon + m.gap > r.width()) {
+		figure = Font(base, f.figure.pixelSize() * std::max(1, r.width() - icon - m.gap)
+			/ std::max(1, goal), QFont::Light);
+	}
+	const auto figureH = QFontMetrics(figure).height();
+	Condition(p, Visual(p, g.header, QRect(r.x(), r.y() + (figureH - icon) / 2, icon, icon)),
+		frame.weather->code, frame.weather->isDay.value_or(frame.day), c);
+	const auto tempX = r.x() + icon + m.gap;
+	const auto tempW = Width(figure, temp);
+	text({ tempX, r.y(), tempW, figureH }, temp, figure, c.ink);
+	const auto condition = frame.weather->condition;
+	const auto conditionW = Width(f.label, condition);
+	if (tempX + tempW + 3 * m.gap + conditionW <= r.right()) {
+		text({ tempX + tempW + 2 * m.gap, r.y(), conditionW + m.gap, figureH },
+			condition, f.label, c.ink);
+	} else {
+		text({ r.x(), r.y() + figureH, r.width(), m.label }, condition, f.label, c.ink);
+		r.translate(0, m.label);
+	}
+	if (g.panel.isEmpty() && !frame.update.isEmpty()) {
+		p.setFont(f.caption);
+		p.setPen(c.muted);
+		const auto y = r.y() + figureH + m.gap;
+		const auto room = g.header.bottom() - y + 1;
+		if (room > 0) {
+			p.drawText(Visual(p, g.header, QRect(r.x(), y, r.width(), room)),
+				Leading(p) | Qt::TextWordWrap, frame.update);
+		}
+	}
+}
+
+struct AxisLabel {
+	QString full;
+	QString shortTime;
+	bool midnight = false;
+	bool repeated = false;
+	bool major = false;
+	bool minor = false;
+	int row = 0;
+};
+
+std::vector<AxisLabel> AxisLabels(const Frame &frame, const std::vector<HourlyWeather> &hours) {
+	auto result = std::vector<AxisLabel>();
+	result.reserve(hours.size());
+	for (auto i = 0; i != int(hours.size()); ++i) {
+		const auto &hour = hours[i];
+		const auto previousDate = i ? hours[i - 1].time.date()
+			: frame.local.toTimeZone(hour.time.timeZone()).date();
+		const auto midnight = hour.time.date() != previousDate;
+		const auto repeated = Repeated(hour, hours);
+		const auto day = midnight
+			? frame.locale.dayName(hour.time.date().dayOfWeek(), QLocale::ShortFormat) + u' '
+			: QString();
+		result.push_back({ day + HourTime(frame, hour, repeated),
+			ShortHour(frame, hour.time.time()), midnight, repeated });
+	}
+	return result;
+}
+
+void PaintTimeline(QPainter &p, QRect rect, int y, const Frame &frame,
+		const Layout &g, const Colors &c) {
+	const auto &m = g.m;
+	const auto &f = g.fonts;
+	const auto &hours = g.forecast.hours;
+	const auto count = int(hours.size());
+	auto labels = AxisLabels(frame, hours);
+	const auto endpoints = std::max(Width(f.caption, labels.front().full),
+		Width(f.caption, labels.back().full));
+	const auto inset = std::min(rect.width() / 6, std::max(m.unit, endpoints / 2 + m.gap));
+	const auto plot = rect.adjusted(inset, 0, -inset, 0);
+	const auto secs = hours.front().time.secsTo(hours.back().time);
+	const auto timeX = [&](qint64 offset) {
+		return VisualX(p, rect, secs ? plot.left() + (plot.width() - 1)
+			* offset / double(secs) : plot.center().x());
+	};
+	const auto x = [&](int i) { return timeX(hours.front().time.secsTo(hours[i].time)); };
+	const auto chartTop = y + m.label;
+	const auto chartBottom = y + g.chartHeight;
+	p.setPen(c.rule);
+	p.drawLine(plot.left(), chartBottom, plot.right(), chartBottom);
+	auto used = QRegion();
+	auto majorCount = 0;
+	const auto fitLabel = [&](int i, bool major) {
+		auto &label = labels[i];
+		if (label.major || label.minor || (!major && (label.repeated || label.midnight))) {
+			return;
+		}
+		const auto w = major ? std::max(Width(f.caption, label.full),
+			Width(f.label, Temperature(frame, hours[i].temperatureC))) : Width(f.caption, label.shortTime);
+		auto target = QRect(int(std::lround(x(i))) - w / 2 - m.gap / 2, 0, w + m.gap, 1);
+		if (major && label.repeated && used.intersects(target)) {
+			target.moveTop(1);
+		}
+		if (!used.intersects(target) && target.left() >= rect.left() && target.right() <= rect.right()) {
+			used += target;
+			label.major = major;
+			label.minor = !major;
+			label.row = target.y();
+			majorCount += major;
+		}
+	};
+	fitLabel(0, true);
+	fitLabel(count - 1, true);
+	for (auto i = 1; i + 1 < count; ++i) {
+		if (labels[i].midnight || labels[i].repeated) {
+			fitLabel(i, true);
+		}
+	}
+	for (auto i = 3; i + 1 < count; i += 4) {
+		if (count > kCompactHours || majorCount < 4) {
+			fitLabel(i, true);
+		}
+	}
+	for (auto i = 0; i != count; ++i) {
+		fitLabel(i, false);
+	}
+	auto minimum = std::numeric_limits<int>::max();
+	auto maximum = std::numeric_limits<int>::min();
 	for (const auto &hour : hours) {
 		if (hour.temperatureC) {
-			lows = std::min(lows, *hour.temperatureC);
-			highs = std::max(highs, *hour.temperatureC);
+			minimum = std::min(minimum, *hour.temperatureC);
+			maximum = std::max(maximum, *hour.temperatureC);
 		}
 	}
-	auto previous = std::optional<QPointF>();
-	const auto count = int(hours.size());
+	auto points = std::vector<QPointF>();
+	const auto flush = [&] {
+		if (points.size() > 1) {
+			auto shade = c.accent;
+			shade.setAlpha(20);
+			auto fill = QPainterPath(QPointF(points.front().x(), chartBottom));
+			for (const auto &point : points) fill.lineTo(point);
+			fill.lineTo(points.back().x(), chartBottom);
+			fill.closeSubpath();
+			p.fillPath(fill, shade);
+			p.setPen(QPen(c.accent, std::max(2., m.unit / 7.), Qt::SolidLine, Qt::RoundCap));
+			p.drawPolyline(points.data(), int(points.size()));
+		}
+		points.clear();
+	};
+	const auto point = [&](int i) {
+		const auto mid = (minimum + maximum) / 2.;
+		const auto span = std::max(4, maximum - minimum);
+		const auto fraction = .5 - .75 * (*hours[i].temperatureC - mid) / span;
+		return QPointF(x(i), chartTop + (chartBottom - chartTop) * fraction);
+	};
+	for (auto i = 0; i != count; ++i) {
+		if (!hours[i].temperatureC || (i && hours[i - 1].time.secsTo(hours[i].time) != kSecondsPerHour)) {
+			flush();
+		}
+		if (hours[i].temperatureC) {
+			points.push_back(point(i));
+		}
+		if (labels[i].midnight) {
+			p.setPen(c.rule);
+			p.drawLine(QPointF(x(i), chartTop), QPointF(x(i), chartBottom));
+		}
+	}
+	flush();
+	const auto axisTop = chartBottom + 2 * m.gap;
 	for (auto i = 0; i != count; ++i) {
 		const auto &hour = hours[i];
-		const auto x = rect.x() + i * rect.width() / count;
-		const auto w = rect.x() + (i + 1) * rect.width() / count - x;
-		const auto center = x + w / 2;
-		auto time = Time(frame.locale, hour.time.time());
-		if (std::any_of(hours.begin(), hours.end(), [&](const HourlyWeather &other) {
-			return hour.time.date() == other.time.date()
-				&& hour.time.time() == other.time.time()
-				&& hour.time.offsetFromUtc() != other.time.offsetFromUtc();
-		})) {
-			time += u' ' + hour.time.timeZoneAbbreviation();
+		const auto &label = labels[i];
+		const auto center = int(std::lround(x(i)));
+		p.setPen(c.rule);
+		p.drawLine(center, chartBottom, center, chartBottom + m.gap);
+		if (label.major || label.minor) {
+			const auto time = label.major ? label.full : label.shortTime;
+			const auto w = Width(f.caption, time) + 2;
+			Text(p, { center - w / 2, axisTop + label.row * g.repeatedHeight, w, m.caption }, time,
+				f.caption, label.major ? c.ink : c.muted, Qt::AlignCenter);
+		} else if (label.midnight) {
+			const auto name = frame.locale.dayName(hour.time.date().dayOfWeek(), QLocale::ShortFormat);
+			const auto w = Width(f.caption, name) + m.gap;
+			Text(p, { std::clamp(center - w / 2, rect.left(), rect.right() + 1 - w),
+				y, w, m.caption }, name, f.caption, c.muted, Qt::AlignCenter);
 		}
-		Text(p, { x, timeTop, w, m.caption }, time, fonts.caption, c.muted, Qt::AlignCenter);
-		const auto day = hour.time.time().hour() >= 7 && hour.time.time().hour() < 19;
-		Condition(p, { qreal(center - m.icon / 2), qreal(iconTop), qreal(m.icon), qreal(m.icon) },
-			hour.code, day, c);
-		Text(p, { x, tempTop, w, m.line }, Temperature(frame, hour.temperatureC),
-			fonts.label, c.ink, Qt::AlignCenter);
-		Text(p, { x, rainTop, w, m.caption }, Chance(frame, hour), fonts.caption, c.muted, Qt::AlignCenter);
 		if (hour.temperatureC) {
-			const auto span = std::max(1, highs - lows);
-			const auto mid = (lows + highs) / 2.;
-			const auto point = QPointF(center,
-				curveTop + m.curveHeight * (.5 - .63 * (*hour.temperatureC - mid) / span));
-			p.setPen(QPen(c.accent, std::max(1, unit / 12), Qt::SolidLine, Qt::RoundCap));
-			if (previous) p.drawLine(*previous, point);
+			const auto pos = point(i);
+			const auto r = label.major ? m.unit / 5. : m.unit / 10.;
 			p.setPen(Qt::NoPen);
 			p.setBrush(c.accent);
-			p.drawEllipse(point, unit / 11., unit / 11.);
-			previous = point;
-		} else {
-			previous.reset();
+			p.drawEllipse(pos, r, r);
+			if (label.major) {
+				const auto temp = Temperature(frame, hour.temperatureC);
+				const auto w = Width(f.label, temp) + 2;
+				Text(p, { center - w / 2, int(pos.y()) - m.label - m.gap, w, m.label },
+					temp, f.label, c.ink, Qt::AlignCenter);
+			}
+		}
+		if (g.icons && label.major) {
+			const auto h = hour.time.time().hour();
+			Condition(p, QRect(center - m.icon / 2,
+				axisTop + m.caption + m.gap + g.repeatedHeight,
+				m.icon, m.icon), hour.code, h >= 7 && h < 19, c);
 		}
 	}
-	Text(p, { rect.x(), rainTop + m.caption + m.precipitationGap, rect.width(), m.caption },
-		QStringLiteral("Chance of precipitation"), fonts.caption, c.muted);
+	if (!g.rain.show) {
+		return;
+	}
+	const auto rainY = axisTop + m.caption + 2 * m.gap + g.repeatedHeight
+		+ (g.icons ? m.icon + m.gap : 0);
+	const auto rainTitleY = rainY + (g.stackedRain ? m.caption + m.gap : 0);
+	if (g.rainHeight || !g.stackedRain) {
+		const auto w = g.stackedRain ? rect.width() : Width(f.caption, frame.labels.chance);
+		Text(p, Visual(p, rect, QRect(rect.x(), rainY, w, m.caption)),
+			frame.labels.chance, f.caption, c.muted, Leading(p));
+	}
+	const auto summaryW = g.stackedRain ? rect.width() : Width(f.caption, g.rain.summary);
+	Text(p, Visual(p, rect, QRect(rect.right() + 1 - summaryW, rainTitleY, summaryW, m.caption)),
+		g.rain.summary, f.caption, c.ink, Trailing(p));
+	if (g.rainHeight) {
+		const auto bottom = rainTitleY + m.caption + g.rainHeight;
+		const auto barW = std::min(2 * m.unit, std::max(2, plot.width() / count / 2));
+		p.setPen(c.rule);
+		p.drawLine(plot.left(), bottom, plot.right(), bottom);
+		const auto dash = [&](double center) {
+			p.setPen(c.muted);
+			p.drawLine(QPointF(center - barW / 4., bottom - m.gap),
+				QPointF(center + barW / 4., bottom - m.gap));
+		};
+		for (auto i = 0; i != count; ++i) {
+			const auto chance = hours[i].precipitation;
+			if (i) {
+				const auto from = hours.front().time.secsTo(hours[i - 1].time);
+				const auto to = hours.front().time.secsTo(hours[i].time);
+				for (auto offset = from + kSecondsPerHour; offset < to; offset += kSecondsPerHour) {
+					dash(timeX(offset));
+				}
+			}
+			if (!chance) {
+				dash(x(i));
+			} else if (*chance > 0) {
+				const auto h = std::max(2., (g.rainHeight - m.gap) * *chance / 100.);
+				p.setPen(Qt::NoPen);
+				p.setBrush(c.accent);
+				p.drawRoundedRect(QRectF(x(i) - barW / 2., bottom - h, barW, h), 2., 2.);
+			}
+		}
+	}
 }
 
-void Daily(QPainter &p, QRect rect, const Frame &frame,
-		const std::vector<DailyWeather> &days, const Fonts &fonts,
-		const WeatherMetrics &m, int unit, const Colors &c) {
-	Text(p, { rect.x(), rect.y(), rect.width(), m.section },
-		QStringLiteral("Next three days"), fonts.heading, c.ink);
-	const auto fm = QFontMetrics(fonts.label);
-	auto nameW = 0;
-	auto lowW = fm.horizontalAdvance(LocalizedTemperature(frame, -10));
-	auto highW = lowW;
+void PaintDays(QPainter &p, QRect rect, const Frame &frame, const Layout &g,
+		const Colors &c, bool heading) {
+	const auto &m = g.m;
+	const auto &f = g.fonts;
+	const auto &days = g.forecast.days;
+	const auto count = int(days.size());
+	if (heading) {
+		p.setPen(c.rule);
+		p.drawLine(rect.left(), rect.top(), rect.right(), rect.top());
+		rect.setTop(rect.top() + m.gap);
+		Text(p, rect.adjusted(0, 0, 0, m.label - rect.height()), frame.labels.days(count),
+			f.label, c.ink, Leading(p));
+		rect.setTop(rect.top() + m.label + m.gap);
+	}
+	auto textW = 0;
+	auto dayW = 0;
 	auto minimum = std::numeric_limits<int>::max();
 	auto maximum = std::numeric_limits<int>::min();
 	for (const auto &day : days) {
-		nameW = std::max(nameW, fm.horizontalAdvance(frame.locale.dayName(day.date.dayOfWeek(), QLocale::ShortFormat)));
-		lowW = std::max(lowW, fm.horizontalAdvance(Temperature(frame, day.lowC)));
-		highW = std::max(highW, fm.horizontalAdvance(Temperature(frame, day.highC)));
-		for (const auto temp : { day.lowC, day.highC }) {
-			if (temp) {
-				minimum = std::min(minimum, *temp);
-				maximum = std::max(maximum, *temp);
+		dayW = std::max(dayW, Width(f.label, frame.locale.dayName(day.date.dayOfWeek())));
+		for (const auto t : { day.lowC, day.highC }) {
+			textW = std::max(textW, Width(f.caption, Temperature(frame, t)) + 2);
+			if (t) {
+				minimum = std::min(minimum, *t);
+				maximum = std::max(maximum, *t);
 			}
 		}
 	}
-	nameW = std::min(nameW, rect.width() / 4);
-	const auto iconX = rect.x() + nameW + m.gap;
-	const auto lowX = iconX + m.icon + m.gap;
-	const auto highX = rect.x() + rect.width() - highW;
-	const auto start = lowX + lowW + m.gap;
-	const auto finish = highX - m.gap;
-	const auto y0 = rect.y() + m.section + m.gap;
-	for (auto i = 0; i != int(days.size()); ++i) {
+	const auto row = m.icon + 2 * m.gap;
+	const auto colW = rect.width() / count;
+	for (auto i = 0; i != count; ++i) {
 		const auto &day = days[i];
-		const auto y = y0 + i * m.row;
-		const auto mid = y + m.row / 2;
-		Text(p, { rect.x(), y, nameW, m.row }, frame.locale.dayName(day.date.dayOfWeek(), QLocale::ShortFormat),
-			fonts.label, c.ink);
-		Condition(p, { qreal(iconX), qreal(mid - m.icon / 2), qreal(m.icon), qreal(m.icon) }, day.code, true, c);
-		Text(p, { lowX, y, lowW, m.row }, Temperature(frame, day.lowC),
-			fonts.label, c.muted, Qt::AlignRight | Qt::AlignVCenter);
-		Text(p, { highX, y, highW, m.row }, Temperature(frame, day.highC),
-			fonts.label, c.ink, Qt::AlignRight | Qt::AlignVCenter);
-		if (finish > start) {
-			p.setPen(QPen(c.rule, std::max(1, unit / 8), Qt::SolidLine, Qt::RoundCap));
-			p.drawLine(start, mid, finish, mid);
-			if (day.lowC && day.highC) {
-				const auto point = [&](int t) {
-					return (minimum == maximum) ? (start + finish) / 2.
-						: start + (finish - start) * (t - minimum) / qreal(maximum - minimum);
-				};
-				const auto from = QPointF(point(*day.lowC), mid);
-				const auto to = QPointF(point(*day.highC), mid);
-				const auto width = std::max(2, unit / 5);
-				p.setPen(QPen(c.accent, width, Qt::SolidLine, Qt::RoundCap));
-				if (from == to) p.drawPoint(from);
-				else p.drawLine(from, to);
-			}
+		const auto name = frame.locale.dayName(day.date.dayOfWeek());
+		const auto x = rect.x() + (g.columns ? i * colW : 0);
+		const auto y = rect.y() + (g.columns ? 0 : i * row);
+		const auto w = g.columns ? colW - 2 * m.gap : rect.width();
+		const auto iconX = g.columns ? x : x + std::min(dayW, w / 4) + 2 * m.gap;
+		const auto labelX = g.columns ? iconX + m.icon + m.gap : x;
+		const auto labelW = g.columns ? w - m.icon - m.gap : iconX - x - m.gap;
+		Condition(p, Visual(p, rect, QRect(iconX, y, m.icon, m.icon)), day.code, true, c);
+		Text(p, Visual(p, rect, QRect(labelX, y, labelW, m.label)), name, f.label, c.ink, Leading(p));
+		const auto detailX = iconX + m.icon + m.gap;
+		const auto detailW = g.columns ? x + w - detailX : x + w / 2 - detailX;
+		Text(p, Visual(p, rect, QRect(detailX, y + (g.columns ? m.label : 0), detailW, m.caption)),
+			day.condition, f.caption, c.muted, Leading(p));
+		const auto trackY = y + (g.columns ? m.label + m.caption + 2 * m.gap + m.label / 2 : m.label / 2);
+		const auto track = QRect(g.columns ? x : x + w / 2, trackY - m.label / 2,
+			g.columns ? w : w - w / 2, m.label);
+		const auto left = track.left() + textW + m.gap;
+		const auto right = track.right() - textW - m.gap;
+		const auto paintValue = [&](int edge, std::optional<int> value, bool low) {
+			const auto pos = low ? edge - m.gap - textW : edge + m.gap;
+			const auto label = Visual(p, rect, QRect(pos, track.y(), textW, track.height()));
+			p.fillRect(label, c.panel);
+			Text(p, label, Temperature(frame, value), f.caption,
+				low ? c.muted : c.ink, low ? Trailing(p) : Leading(p));
+		};
+		if (left > right) {
+			Text(p, Visual(p, rect, track), Temperature(frame, day.lowC)
+				+ QStringLiteral(" / ") + Temperature(frame, day.highC),
+				f.caption, c.ink, Trailing(p));
+			continue;
+		}
+		const auto pos = [&](int value) {
+			return (minimum == maximum) ? (left + right) / 2
+				: left + (right - left) * (value - minimum) / (maximum - minimum);
+		};
+		const auto low = day.lowC ? pos(*day.lowC) : left;
+		const auto high = day.highC ? pos(*day.highC) : right;
+		p.setPen(QPen(c.rule, std::max(1., m.unit / 5.), Qt::SolidLine, Qt::RoundCap));
+		p.drawLine(QPointF(VisualX(p, rect, left), trackY), QPointF(VisualX(p, rect, right), trackY));
+		p.setPen(QPen(c.accent, std::max(2., m.unit / 4.), Qt::SolidLine, Qt::RoundCap));
+		if (day.lowC && day.highC && low != high) {
+			p.drawLine(QPointF(VisualX(p, rect, low), trackY), QPointF(VisualX(p, rect, high), trackY));
+		} else if (day.lowC || day.highC) {
+			p.drawPoint(QPointF(VisualX(p, rect, day.lowC ? low : high), trackY));
+		}
+		paintValue(low, day.lowC, true);
+		paintValue(high, day.highC, false);
+		if (g.columns && i) {
+			p.setPen(c.rule);
+			const auto divider = VisualX(p, rect, x - m.gap);
+			p.drawLine(QPointF(divider, y), QPointF(divider, track.bottom()));
 		}
 	}
 }
@@ -408,199 +935,106 @@ Canvas::Canvas(QWidget *parent) : QWidget(parent) {
 
 void Canvas::setFrame(Frame frame) {
 	_frame = std::move(frame);
+	refreshDescription();
+	update();
+}
+
+void Canvas::resizeEvent(QResizeEvent *event) {
+	QWidget::resizeEvent(event);
+	refreshDescription();
+}
+
+void Canvas::changeEvent(QEvent *event) {
+	QWidget::changeEvent(event);
+	if (event->type() == QEvent::FontChange || event->type() == QEvent::LayoutDirectionChange) {
+		refreshDescription();
+	}
+}
+
+void Canvas::refreshDescription() {
+	const auto g = Measure(_frame, rect(), font());
+	const auto header = MeasureHeader(_frame, g, font());
 	auto description = QStringList{ _frame.locale.toString(_frame.local.date(), QLocale::LongFormat),
 		Time(_frame.locale, _frame.local.time()) };
-	for (const auto &clock : _frame.clocks) {
-		description.push_back(clock.label + u' ' + Time(_frame.locale, clock.time.time()) + u' '
-			+ RelativeDay(clock.dayDifference));
+	for (const auto &clock : header.clocks) {
+		description.push_back(clock.label + u' ' + clock.time + u' ' + clock.relative);
 	}
-	if (const auto &weather = _frame.weather) {
-		description.push_back(QStringLiteral("Local weather %1 %2").arg(
-			Temperature(_frame, weather->temperatureC), weather->condition));
-		const auto upcoming = Upcoming(_frame, 6);
-		for (const auto &hour : upcoming.hours) {
-			description.push_back(QStringLiteral("%1 %2 %3, chance of precipitation %4").arg(
-				Time(_frame.locale, hour.time.time()), hour.condition,
-				Temperature(_frame, hour.temperatureC), Chance(_frame, hour)));
-		}
-		for (const auto &day : upcoming.days) {
-			description.push_back(QStringLiteral("%1 %2, low %3 high %4").arg(
-				_frame.locale.dayName(day.date.dayOfWeek(), QLocale::ShortFormat), day.condition,
-				Temperature(_frame, day.lowC), Temperature(_frame, day.highC)));
+	if (_frame.weather) {
+		description.push_back(_frame.labels.local + u' ' + CurrentTemperature(_frame)
+			+ u' ' + _frame.weather->condition);
+		if (!g.panel.isEmpty()) {
+			description.push_back(g.heading);
+			const auto &hours = g.forecast.hours;
+			for (const auto &hour : hours) {
+				description.push_back(QStringLiteral("%1 %2 %3, chance of precipitation %4").arg(
+					_frame.locale.toString(hour.time.date(), QLocale::ShortFormat)
+						+ u' ' + HourTime(_frame, hour, Repeated(hour, hours)),
+					hour.condition, Temperature(_frame, hour.temperatureC), Chance(_frame, hour)));
+			}
+			if (!hours.empty() && !g.rain.peak) {
+				description.push_back(_frame.labels.unavailable);
+			} else if (!g.rain.summary.isEmpty()) {
+				description.push_back(g.rain.summary);
+			}
+			if (!hours.empty() && !g.forecast.days.empty()) {
+				description.push_back(_frame.labels.days(int(g.forecast.days.size())));
+			}
+			for (const auto &day : g.forecast.days) {
+				description.push_back(QStringLiteral("%1 %2, low %3 high %4").arg(
+					_frame.locale.dayName(day.date.dayOfWeek()), day.condition,
+					Temperature(_frame, day.lowC), Temperature(_frame, day.highC)));
+			}
 		}
 	}
 	if (!_frame.update.isEmpty()) description.push_back(_frame.update);
 	setAccessibleDescription(description.join(u'\n'));
-	update();
 }
 
 void Canvas::paintEvent(QPaintEvent *) {
 	auto p = QPainter(this);
 	p.setRenderHint(QPainter::Antialiasing);
+	if (_frame.locale.textDirection() == Qt::RightToLeft) {
+		p.setLayoutDirection(Qt::RightToLeft);
+	}
 	const auto c = Palette(_frame.dark);
-	const auto base = font();
-	const auto unit = std::max(1, QFontMetrics(base).height());
-	const auto outer = std::clamp(width() / 24, unit * 3 / 4, 3 * unit);
-	const auto edge = _frame.controlsTop > 0 ? std::min(height(), _frame.controlsTop) : height();
-	const auto available = std::max(0, edge - unit);
-	const auto w = width() - 2 * outer;
-	const auto wide = w >= 35 * unit;
-	const auto compact = available < 24 * unit;
-	const auto extraSpacing = wide
-		? std::clamp((available - 30 * unit) / 12, 0, unit) : 0;
-	const auto fonts = Fonts{ Font(base, unit * 4 / 5), Font(base, unit),
-		Font(base, unit * 11 / 10, QFont::DemiBold), Font(base, unit * 2, QFont::DemiBold) };
-	const auto metrics = WeatherSizes(fonts, unit, extraSpacing);
-	const auto f = Upcoming(_frame, wide ? 6 : 3);
-	const auto forecast = _frame.weather.has_value();
-	const auto visible = forecast || !_frame.update.isEmpty();
-	const auto weatherTitle = QStringLiteral("Local weather");
-	const auto inner = w - 2 * metrics.inset;
-	const auto updateW = QFontMetrics(fonts.caption).horizontalAdvance(_frame.update);
-	const auto titleW = QFontMetrics(fonts.heading).horizontalAdvance(weatherTitle);
-	const auto stackHeader = updateW > 0 && titleW + metrics.gap + updateW > inner;
-	const auto headerH = metrics.header + (stackHeader ? metrics.gap + metrics.caption : 0);
-	const auto hourly = !compact && !f.hours.empty() ? metrics.hourly : 0;
-	const auto daily = !compact && !f.days.empty()
-		? metrics.section + metrics.gap + int(f.days.size()) * metrics.row : 0;
-	const auto sections = wide ? std::max(hourly, daily)
-		: hourly + daily + ((hourly && daily) ? 2 * metrics.gap : 0);
-	const auto panelH = !visible ? 0
-		: 2 * metrics.inset + headerH + (forecast ? metrics.current + metrics.gap : 0)
-			+ (sections ? sections + 4 * metrics.gap : 0);
-	const auto panelY = std::max(0, available - panelH);
-	const auto skyHeight = std::max(0, visible ? panelY - unit / 2 : available);
-
-	const auto clockLeft = outer + unit / 2;
-	const auto groupWidth = std::max(0, w - unit);
-	const auto clockWidth = wide ? std::min(groupWidth, 31 * unit) : groupWidth;
-	const auto dateFont = Font(base, unit * 6 / 5, QFont::Medium);
-	const auto clockDateH = QFontMetrics(dateFont).height();
-	const auto date = _frame.locale.toString(_frame.local.date(), QLocale::LongFormat);
-	const auto time = Time(_frame.locale, _frame.local.time());
-	const auto zoneCaption = Font(base, unit * 4 / 5 + extraSpacing / 6);
-	const auto zoneCaptionMetrics = QFontMetrics(zoneCaption);
-	const auto zoneCaptionH = zoneCaptionMetrics.height();
-	const auto zoneFont = Font(base, unit * 3 / 2 + extraSpacing * 3 / 8, QFont::Medium);
-	const auto zoneTimeH = QFontMetrics(zoneFont).height();
-	const auto zoneH = 2 * zoneCaptionH + zoneTimeH + metrics.gap;
-	const auto reserveZone = !_frame.clocks.empty()
-		&& skyHeight > clockDateH + 2 * unit + zoneH ? zoneH : 0;
-	const auto timeLimit = reserveZone
-		? (skyHeight - clockDateH - reserveZone - unit) * 3 / 4 : skyHeight / 2;
-	const auto proposed = std::clamp(std::min(groupWidth / 5, timeLimit), 2 * unit, 9 * unit);
-	const auto measured = QFontMetrics(Font(base, proposed, QFont::Light)).horizontalAdvance(time);
-	const auto timeFont = Font(base, measured > groupWidth && measured > 0
-		? proposed * groupWidth / measured : proposed, QFont::Light);
-	const auto timeH = QFontMetrics(timeFont).height();
-	const auto columns = std::clamp(clockWidth / std::max(1, 6 * unit), 1, 3);
-	const auto maxRows = std::max(0, (skyHeight - clockDateH - timeH - unit) / zoneH);
-	const auto clocks = std::min(int(_frame.clocks.size()), compact ? std::min(1, maxRows) : maxRows * columns);
-	const auto rows = (clocks + columns - 1) / columns;
-	const auto blockH = clockDateH + timeH + rows * zoneH;
-	const auto top = std::max(unit / 2, int((skyHeight - blockH) * (visible ? .29 : .56)));
+	const auto g = Measure(_frame, rect(), font());
+	const auto &m = g.m;
+	const auto &f = g.fonts;
+	const auto header = MeasureHeader(_frame, g, font());
 	auto clockArea = QRegion();
-	const auto exclude = [&](QRect rect) {
-		const auto margin = unit / 3;
-		clockArea += rect.adjusted(-margin, -margin, margin, margin);
-	};
-	exclude({ clockLeft, top, std::min(groupWidth, QFontMetrics(dateFont).horizontalAdvance(date)), clockDateH });
-	exclude({ clockLeft, top + clockDateH,
-		std::min(groupWidth, QFontMetrics(timeFont).horizontalAdvance(time)), timeH });
-	const auto pitch = clockWidth / columns;
-	const auto pad = unit * 3 / 4 + extraSpacing / 2;
-	const auto zoneTime = QFontMetrics(zoneFont);
-	auto cells = std::vector<ClockCell>();
-	cells.reserve(clocks);
-	auto x = clockLeft;
-	for (auto i = 0; i != clocks; ++i) {
-		const auto column = i % columns;
-		const auto y = top + clockDateH + timeH + (i / columns) * zoneH;
-		const auto &clock = _frame.clocks[i];
-		const auto divider = column ? x + pad : 0;
-		x = column ? divider + pad : clockLeft;
-		const auto localTime = Time(_frame.locale, clock.time.time());
-		const auto relative = RelativeDay(clock.dayDifference);
-		const auto zw = std::min(pitch - 2 * pad,
-			std::max({ zoneCaptionMetrics.horizontalAdvance(clock.label),
-				zoneCaptionMetrics.horizontalAdvance(relative),
-				zoneTime.horizontalAdvance(localTime) }));
-		const auto rect = QRect(x, y, zw, zoneH);
-		cells.push_back({ rect, clock.label, localTime, relative, divider });
-		exclude(rect);
-		x += zw;
-	}
-	const auto horizon = std::clamp(visible ? panelY - unit / 4 : int(height() * .65), 0, height());
-	Landscape(p, rect(), clockArea, horizon, unit, _frame, c);
+	for (const auto &clock : header.clocks) clockArea += Visual(p, g.header, clock.rect);
+	clockArea += Visual(p, g.header, header.date);
+	clockArea += Visual(p, g.header, header.time);
+	clockArea += Visual(p, g.header, header.current);
+	const auto horizon = g.panel.isEmpty() ? int(height() * .66) : g.panel.top() - m.gap;
+	Landscape(p, rect(), clockArea, std::max(0, horizon), m.unit, _frame, c);
+	PaintHeader(p, _frame, g, header, font(), c);
 
-	Text(p, { clockLeft, top, groupWidth, clockDateH }, date, dateFont, c.muted);
-	Text(p, { clockLeft, top + clockDateH, groupWidth, timeH }, time, timeFont, c.ink);
-	for (const auto &cell : cells) {
-		const auto x = cell.rect.x();
-		const auto y = cell.rect.y();
-		const auto w = cell.rect.width();
-		if (cell.divider) {
-			p.setPen(c.rule);
-			p.drawLine(cell.divider, y + metrics.gap, cell.divider, y + zoneH - metrics.gap);
-		}
-		Text(p, { x, y, w, zoneCaptionH }, cell.label, zoneCaption, c.muted);
-		Text(p, { x, y + zoneCaptionH, w, zoneTimeH }, cell.time, zoneFont, c.ink);
-		Text(p, { x, y + zoneCaptionH + zoneTimeH, w, zoneCaptionH }, cell.relative, zoneCaption, c.muted);
-	}
-
-	if (visible && w > 0) {
+	if (!g.panel.isEmpty()) {
 		p.setPen(Qt::NoPen);
 		p.setBrush(c.panel);
-		p.drawRoundedRect(QRect(outer, panelY, w, panelH), unit * .75, unit * .75);
-		const auto x = outer + metrics.inset;
-		const auto y = panelY + metrics.inset;
-		const auto headingW = stackHeader ? inner : inner - updateW - metrics.gap;
-		Text(p, { x, y, headingW, metrics.header }, weatherTitle, fonts.heading, c.ink);
-		if (stackHeader) {
-			Text(p, { x, y + metrics.header + metrics.gap, inner, metrics.caption },
-				_frame.update, fonts.caption, c.muted);
-		} else {
-			Text(p, { x + inner - updateW, y, updateW, metrics.header }, _frame.update, fonts.caption,
-				c.muted, Qt::AlignRight | Qt::AlignVCenter);
+		p.drawRoundedRect(g.panel, m.unit, m.unit);
+		const auto inside = g.panel.adjusted(m.unit, m.unit, -m.unit, -m.unit);
+		const auto titleW = g.stackedCredit ? inside.width()
+			: std::max(0, inside.width() - Width(f.caption, _frame.update) - m.gap);
+		Text(p, Visual(p, inside, QRect(inside.x(), inside.y(), titleW, m.heading)),
+			g.heading, f.heading, c.ink, Leading(p));
+		const auto creditY = inside.y() + (g.stackedCredit ? m.heading + m.gap : 0);
+		Text(p, { inside.x(), creditY, inside.width(), g.stackedCredit ? m.caption : m.heading },
+			_frame.update, f.caption, c.muted, g.stackedCredit ? Leading(p) : Trailing(p));
+		const auto y = inside.y() + g.titleHeight + m.gap;
+		const auto hours = !g.forecast.hours.empty();
+		if (hours) {
+			PaintTimeline(p, inside, y, _frame, g, c);
 		}
-		if (forecast) {
-			const auto temp = Temperature(_frame, _frame.weather->temperatureC)
-				+ (_frame.fahrenheit ? u'F' : u'C');
-			const auto currentY = y + headerH + metrics.gap;
-			const auto icon = metrics.current * 2 / 3;
-			Condition(p, { qreal(x), qreal(currentY + (metrics.current - icon) / 2), qreal(icon), qreal(icon) },
-				_frame.weather->code, _frame.day, c);
-			const auto tempX = x + icon + metrics.gap;
-			const auto tempW = QFontMetrics(fonts.current).horizontalAdvance(temp);
-			Text(p, { tempX, currentY, tempW, metrics.current }, temp, fonts.current, c.ink);
-			const auto conditionX = tempX + tempW + 2 * metrics.gap;
-			Text(p, { conditionX, currentY, x + inner - conditionX, metrics.current },
-				_frame.weather->condition, fonts.label, c.ink);
-			if (sections) {
-				const auto ruleY = currentY + metrics.current + 2 * metrics.gap - 1;
-				p.setPen(c.rule);
-				p.drawLine(x, ruleY, x + inner, ruleY);
-				const auto sectionsY = ruleY + 2 * metrics.gap + 1;
-				const auto split = wide && hourly && daily;
-				const auto divider = x + inner * 57 / 100;
-				const auto dividerGap = unit + extraSpacing / 2;
-				const auto hourW = split ? divider - x - dividerGap : inner;
-				if (hourly) Hourly(p, { x, sectionsY, hourW, hourly }, _frame, f.hours, fonts, metrics, unit, c);
-				if (daily) {
-					const auto dx = split ? divider + dividerGap : x;
-					const auto dy = sectionsY + ((hourly && !wide) ? hourly + 2 * metrics.gap : 0);
-					Daily(p, { dx, dy, x + inner - dx, daily }, _frame, f.days, fonts, metrics, unit, c);
-				}
-				if (split) {
-					p.setPen(c.rule);
-					p.drawLine(divider, sectionsY, divider, sectionsY + sections);
-				}
-			}
+		if (!g.forecast.days.empty()) {
+			const auto start = hours ? inside.bottom() + 1 - g.dailyHeight : y;
+			PaintDays(p, QRect(inside.x(), start, inside.width(), g.dailyHeight), _frame, g, c, hours);
 		}
 	}
 	if (!_frame.hint.isEmpty()) {
-		Text(p, { outer, height() - metrics.caption - unit / 2, w, metrics.caption },
-			_frame.hint, fonts.caption, _frame.dark ? c.muted : c.ink, Qt::AlignCenter);
+		Text(p, { 0, height() - m.caption - m.unit / 2, width(), m.caption },
+			_frame.hint, f.caption, _frame.dark ? c.muted : c.ink, Qt::AlignCenter);
 	}
 }
 
