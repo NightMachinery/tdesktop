@@ -306,7 +306,7 @@ ordered(stroke, "_frozenEffective = EffectiveBindings", "IsExactLocalleader(_pre
 repeat_path = between(keys, "void Keys::repeat", "bool Keys::layerKey")
 ordered(repeat_path, "Enabled()", "_preeditInput", "_prefix.empty()", "_count",
         "currentTarget(receiver)", "_normal || target.musicDialog",
-        "Available(*action, target)", "_motion.next", "dispatch(*action, target, 1, { PhysicalIdentity(event), true })")
+        "Available(*action, target)", "_motion.next", "dispatch(*action, target, 1, { .physical = stroke.physical")
 scroll_key = between(keys, "void Keys::scrollKey", "bool Keys::advanceScroll")
 ordered(scroll_key, "readScroll(view, layer)", "anim::Disabled()", "ScrollTo(view, current->top + delta)",
         "_pixel.expectedTop", "press.repeat && style == ScrollStyle::Continuous",
@@ -315,6 +315,10 @@ ordered(keys, "Keys::readScroll", "owner()", "HistoryScroll(target)",
         "scroll->movement()", "KeyboardAttachment::ScrollAnimating", "animatedScrolling()")
 ordered(keys, "void ScrollTo(", "elastic->scrollToY", "scroll->scrollToY",
         "QAbstractScrollArea*>(view)->verticalScrollBar()->setValue(top)")
+ordered(keys, "bool Keys::scrollShift", "isAutoRepeat()", "_pixel.boostable",
+        "PhysicalIdentity(event)", "Qt::ShiftModifier")
+ordered(keys, "key->key() == Qt::Key_Shift", "_pixel.motion.setBoost", "return false",
+        "_motion.cancel()")
 ordered(keys, "bool Keys::advanceScroll", "current->top != _pixel.expectedTop",
         "_pixel.motion.advance", "_pixel.expectedTop = next", "ScrollTo(_pixel.view, next)")
 ordered(routing, "_motion.release(physical)", "_pixel.motion.release", "_pixel.physical = 0")

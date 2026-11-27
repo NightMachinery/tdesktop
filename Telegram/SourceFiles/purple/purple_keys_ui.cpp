@@ -981,7 +981,7 @@ protected:
 	}
 
 	void keyPressEvent(QKeyEvent *e) override {
-		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
+		const auto mods = ModalScrollModifiers(*e, this);
 		const auto key = ModalPhysicalKey(*e);
 		const auto modal = ModalKeysEnabled();
 		const auto step = ListStep(key, mods, modal);
@@ -3733,7 +3733,7 @@ protected:
 		if (_closing) {
 			return;
 		}
-		const auto mods = e->modifiers() & ~Qt::KeypadModifier;
+		const auto mods = ModalScrollModifiers(*e, this);
 		const auto modal = ModalKeysEnabled();
 		const auto key = modal ? ModalPhysicalKey(*e) : e->key();
 		if (!modal) {

@@ -21,6 +21,8 @@ in windows without a rail.
 - In history and topics, a tap of `j` or `k` eases one step. The first repeat
   starts continuous pixel scrolling, and release stops it with a short ease-out.
   The cheatsheet, notice bodies, and Customize review scroll the same way.
+  Hold Shift during sustained `j` / `k` scrolling to double the speed.
+  Release Shift to return to the regular speed without stopping.
   Repeated half-page and page motions retarget the current scroll animation.
   Lists and pickers still move one row at a time. Turning off Animations
   restores discrete scroll steps.

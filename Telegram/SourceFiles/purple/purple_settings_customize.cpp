@@ -954,7 +954,9 @@ private:
 			}
 			return true;
 		}
-		const auto mods = event->modifiers() & ~Qt::KeypadModifier;
+		const auto mods = (_reviewBody && object == _reviewBody)
+			? ModalScrollModifiers(*event, this)
+			: (event->modifiers() & ~Qt::KeypadModifier);
 		const auto key = ModalPhysicalKey(*event);
 		const auto enter = key == Qt::Key_Return || key == Qt::Key_Enter;
 		const auto cancel = key == Qt::Key_Escape || (key == Qt::Key_G && mods == kCtrlMod);

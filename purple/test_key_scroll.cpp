@@ -101,6 +101,25 @@ int main() {
 	motion.cancel();
 	Check(!motion.active() && motion.advance(1300, 1056, 5000) == 1056, "scope cancel stops now");
 
+	auto boosted = Motion();
+	position = 1000;
+	boosted.startHold(0, 1);
+	for (auto now = 10; now <= 100; now += 10) {
+		position = boosted.advance(now, position, 5000);
+	}
+	boosted.setBoost(105, true);
+	Check(boosted.advance(110, position, 5000) == 1091,
+		"Shift applies at its event time without restarting the ramp");
+	position = boosted.advance(120, 1091, 5000);
+	Check(position == 1119, "Shift doubles the held velocity");
+	boosted.setBoost(125, false);
+	position = boosted.advance(130, position, 5000);
+	Check(position == 1140, "releasing Shift returns to normal at once");
+	boosted.release(130);
+	position = boosted.advance(170, position, 5000);
+	position = boosted.advance(210, position, 5000);
+	Check(position == 1196 && !boosted.active(), "braking uses the speed at key release");
+
 	std::cout << Checks << " checks, " << Failures << " failures\n";
 	return Failures ? 1 : 0;
 }

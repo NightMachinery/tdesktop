@@ -28,11 +28,19 @@ public:
 		_remainder = 0.;
 	}
 
+	void setBoost(Time now, bool boosted) {
+		if (_boosted != boosted) {
+			if (_phase == Phase::Hold) {
+				_remainder += _direction * frameDistance(now);
+			}
+			_boosted = boosted;
+		}
+	}
+
 	void release(Time now) {
 		if (_phase == Phase::Hold) {
-			const auto from = std::max(_lastFrame, now - kMaxFrameMs);
-			_remainder += _direction * (distance(now - _started) - distance(from - _started));
-			_speedAtRelease = kSpeed * progress(now - _started, kRampMs);
+			_remainder += _direction * frameDistance(now);
+			_speedAtRelease = kSpeed * multiplier() * progress(now - _started, kRampMs);
 			_phase = Phase::Brake;
 			_started = _lastFrame = now;
 		}
@@ -62,9 +70,7 @@ public:
 			}
 			return std::clamp(next, 0, maximum);
 		}
-		const auto from = std::max(_lastFrame, now - kMaxFrameMs);
-		_lastFrame = now;
-		const auto delta = distance(now - _started) - distance(from - _started);
+		const auto delta = frameDistance(now);
 		const auto total = _direction * delta + _remainder;
 		const auto pixels = int(std::lround(total));
 		_remainder = total - pixels;
@@ -90,6 +96,18 @@ private:
 		return std::clamp(double(elapsed) / double(duration), 0., 1.);
 	}
 
+	[[nodiscard]] double multiplier() const {
+		return _boosted ? 2. : 1.;
+	}
+
+	[[nodiscard]] double frameDistance(Time now) {
+		now = std::max(now, _lastFrame);
+		const auto from = std::max(_lastFrame, now - kMaxFrameMs);
+		_lastFrame = now;
+		return (distance(now - _started) - distance(from - _started))
+			* ((_phase == Phase::Hold) ? multiplier() : 1.);
+	}
+
 	[[nodiscard]] double distance(Time elapsed) const {
 		if (_phase == Phase::Brake) {
 			const auto t = double(std::clamp(elapsed, Time(0), kBrakeMs));
@@ -101,6 +119,7 @@ private:
 	}
 
 	Phase _phase = Phase::Idle;
+	bool _boosted = false;
 	Time _started = 0;
 	Time _lastFrame = 0;
 	int _origin = 0;

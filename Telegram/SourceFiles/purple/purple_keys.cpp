@@ -321,6 +321,8 @@ struct ScrollReadout {
 struct ScrollPress {
 	int physical = 0;
 	bool repeat = false;
+	bool boostable = false;
+	bool shifted = false;
 };
 
 enum class ScrollStyle { Step, Continuous };
@@ -1029,6 +1031,10 @@ int PhysicalIdentity(const QKeyEvent &event) {
 	}
 #endif // Q_OS_MAC
 	return ModalKey(event);
+}
+
+bool BareScrollChord(int chord) {
+	return chord == Qt::Key_J || chord == Qt::Key_K;
 }
 
 KeyRepeat::Stroke HoldStroke(const QKeyEvent &event) {
@@ -2234,6 +2240,7 @@ public:
 	bool handle(QObject *receiver, QEvent *event);
 	bool handleWindowHints(QWidget *receiver, QKeyEvent *event, int key);
 	bool layerKey(const QKeyEvent &event, not_null<QWidget*> layer, bool motion);
+	[[nodiscard]] bool scrollShift(const QKeyEvent &event) const;
 	void scrollKey(
 		not_null<QWidget*> view,
 		QWidget *layer,
@@ -2343,6 +2350,7 @@ private:
 		KeyScroll::Motion motion;
 		int physical = 0;
 		int expectedTop = 0;
+		bool boostable = false;
 	};
 	PixelScroll _pixel;
 	uint64 _scrollRevision = 0;
@@ -2777,6 +2785,12 @@ bool Keys::eventFilter(QObject *watched, QEvent *event) {
 			|| type == QEvent::KeyRelease) {
 			const auto key = static_cast<QKeyEvent*>(event);
 			const auto physical = PhysicalIdentity(*key);
+			if (_pixel.physical && _pixel.boostable && key->key() == Qt::Key_Shift) {
+				if (type != QEvent::ShortcutOverride && !key->isAutoRepeat()) {
+					_pixel.motion.setBoost(crl::now(), type == QEvent::KeyPress);
+				}
+				return false;
+			}
 			if (type == QEvent::KeyPress && !key->isAutoRepeat()) {
 				ClaimedKeys.erase(physical);
 				_held.remove(physical);
@@ -4244,13 +4258,26 @@ void Keys::repeat(const QKeyEvent &event, QObject *receiver) {
 	if (!target.focus || !(_normal || target.musicDialog) || !Available(*action, target)) {
 		_motion.cancel();
 		cancelScroll();
-	} else if (_motion.next(HoldStroke(event), MotionContext(target, *action))) {
-		dispatch(*action, target, 1, { PhysicalIdentity(event), true });
+	} else {
+		auto stroke = HoldStroke(event);
+		const auto shifted = scrollShift(event);
+		if (shifted) stroke.chord &= ~int(Qt::ShiftModifier);
+		if (_motion.next(stroke, MotionContext(target, *action))) {
+			dispatch(*action, target, 1, { .physical = stroke.physical,
+				.repeat = true, .shifted = shifted });
+		}
 	}
 }
 
+bool Keys::scrollShift(const QKeyEvent &event) const {
+	return event.isAutoRepeat() && _pixel.boostable
+		&& _pixel.physical == PhysicalIdentity(event)
+		&& (event.modifiers() & ~Qt::KeypadModifier) == Qt::ShiftModifier;
+}
+
 bool Keys::layerKey(const QKeyEvent &event, not_null<QWidget*> layer, bool motion) {
-	const auto stroke = HoldStroke(event);
+	auto stroke = HoldStroke(event);
+	if (scrollShift(event)) stroke.chord &= ~int(Qt::ShiftModifier);
 	const auto focus = QApplication::focusWidget();
 	const auto target = KeyRepeat::Context{ focus, layer.get(), Enabled() };
 	const auto current = focus && layer->isVisible()
@@ -4329,6 +4356,7 @@ void Keys::scrollKey(
 		_pixel.layer = layer;
 		_pixel.focus = focus;
 		_pixel.physical = press.physical;
+		_pixel.boostable = press.boostable && style == ScrollStyle::Continuous;
 		_pixel.expectedTop = current->top;
 	} else if (_pixel.physical != press.physical || _pixel.view != view.get()
 		|| _pixel.focus != focus || _pixel.layer != layer || _pixel.expectedTop != current->top) {
@@ -4338,6 +4366,7 @@ void Keys::scrollKey(
 	const auto now = crl::now();
 	if (press.repeat && style == ScrollStyle::Continuous) {
 		_pixel.motion.startHold(now, (delta < 0) ? -1 : 1);
+		_pixel.motion.setBoost(now, _pixel.boostable && press.shifted);
 	} else {
 		_pixel.motion.step(now, current->top, current->maximum, delta);
 	}
@@ -4601,7 +4630,10 @@ void Keys::stroke(KeyRepeat::Stroke press, const Target &target) {
 			if (arm) {
 				_motion.start(press, MotionContext(target, action), action, policy);
 			}
-			dispatch(action, target, count, { .physical = arm ? press.physical : 0 });
+			dispatch(action, target, count, {
+				.physical = arm ? press.physical : 0,
+				.boostable = BareScrollChord(press.chord),
+			});
 		} else {
 			const auto &cmd = FindCommand(action);
 			showFeedback((cmd.need && *cmd.need)
@@ -5907,6 +5939,15 @@ void CloseModalFilterLayer(not_null<Ui::LayerWidget*> layer) {
 	}
 }
 
+Qt::KeyboardModifiers ModalScrollModifiers(
+		const QKeyEvent &event,
+		not_null<QWidget*> layer) {
+	const auto window = dynamic_cast<MainWindow*>(layer->window());
+	const auto keys = window ? FindKeys(window) : nullptr;
+	const auto mods = event.modifiers() & ~Qt::KeypadModifier;
+	return (keys && keys->scrollShift(event)) ? Qt::NoModifier : mods;
+}
+
 void ScrollModalLayer(
 		const QKeyEvent &event,
 		not_null<QWidget*> layer,
@@ -5917,6 +5958,8 @@ void ScrollModalLayer(
 		keys->scrollKey(scroll, layer, delta, ScrollStyle::Continuous, {
 			.physical = PhysicalIdentity(event),
 			.repeat = event.isAutoRepeat(),
+			.boostable = BareScrollChord(KeyStroke(event, ModalKey(event))),
+			.shifted = keys->scrollShift(event),
 		});
 	} else {
 		ScrollTo(scroll, scroll->verticalScrollBar()->value() + delta);

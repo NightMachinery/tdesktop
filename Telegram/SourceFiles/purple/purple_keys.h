@@ -47,6 +47,9 @@ struct MusicShortcutHints;
 	not_null<QWidget*> layer,
 	bool motion = false);
 void CloseModalFilterLayer(not_null<Ui::LayerWidget*> layer);
+[[nodiscard]] Qt::KeyboardModifiers ModalScrollModifiers(
+	const QKeyEvent &event,
+	not_null<QWidget*> layer);
 void ScrollModalLayer(
 	const QKeyEvent &event,
 	not_null<QWidget*> layer,
