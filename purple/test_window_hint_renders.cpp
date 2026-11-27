@@ -38,7 +38,7 @@ Purple::HintPalette BadgePalette(bool dark, int percent = 80, bool symbols = tru
 		colors.colors[i] = Purple::ResolveHintColors(
 			dark ? QColor(0x17212b) : QColor(Qt::white),
 			dark ? QColor(0xf5f5f5) : QColor(Qt::black),
-			QColor(accents[i]), percent);
+			QColor(accents[i]), Role(i), percent);
 	}
 	return colors;
 }
@@ -67,8 +67,24 @@ bool CheckPalette() {
 			}
 		}
 		if (!Readable(Purple::ResolveHintColors(QColor(139, 136, 133, 142),
-			QColor(140, 137, 134, 100), QColor(147, 143, 135, 47), opacity))) {
+			QColor(140, 137, 134, 100), QColor(147, 143, 135, 47), Role::Reply, opacity))) {
 			return false;
+		}
+	}
+	for (const auto dark : { false, true }) {
+		const auto palette = BadgePalette(dark, 80);
+		for (const auto background : { 0x192c39, 0xb1ce92, 0xfff3c8, 0x72484f }) {
+			auto accents = std::vector<QColor>();
+			for (const auto role : { Role::Navigate, Role::Reply, Role::Playback, Role::Menu }) {
+				const auto &fill = palette.colors[int(role)].fill;
+				const auto mixed = Purple::MixHintColor(QColor(background), fill, fill.alphaF());
+				if (mixed.hsvSaturation() < 72) return false;
+				for (const auto &other : accents) {
+					const auto delta = std::abs(other.hsvHue() - mixed.hsvHue());
+					if (std::min(delta, 360 - delta) < 30) return false;
+				}
+				accents.push_back(mixed);
+			}
 		}
 	}
 	auto silhouettes = std::vector<QImage>();

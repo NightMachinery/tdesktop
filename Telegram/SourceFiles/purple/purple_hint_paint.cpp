@@ -20,7 +20,7 @@ HintPalette CurrentHintPalette() {
 	static_assert(accents.size() == int(HintRole::Count));
 	for (auto i = size_t(0); i != accents.size(); ++i) {
 		result.colors[i] = ResolveHintColors(st::windowBg->c, st::windowFg->c,
-			accents[i], settings.opacityPercent.value_or(80));
+			accents[i], HintRole(i), settings.opacityPercent.value_or(80));
 	}
 	return result;
 }

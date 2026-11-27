@@ -30,7 +30,27 @@ inline double HintLuminance(QColor color) {
 	return .2126 * linear(color.redF()) + .7152 * linear(color.greenF()) + .0722 * linear(color.blueF());
 }
 
-inline HintColors ResolveHintColors(QColor bg, QColor ink, QColor accent, int percent) {
+inline QColor HintAccent(HintRole role, QColor token, bool dark) {
+	int hue = 0;
+	switch (role) {
+	case HintRole::Navigate: hue = 217; break;
+	case HintRole::Reply: hue = 273; break;
+	case HintRole::PlayPause:
+	case HintRole::Playback: hue = 163; break;
+	case HintRole::Menu: hue = 41; break;
+	case HintRole::Close:
+	case HintRole::Destructive: hue = 2; break;
+	default: return token;
+	}
+	if (token.hsvSaturation() > 40) {
+		const auto offset = (token.hsvHue() - hue + 540) % 360 - 180;
+		hue = (360 + hue + std::clamp(offset, -8, 8)) % 360;
+	}
+	return QColor::fromHsv(hue, dark ? 228 : 160, dark ? 154 : 255);
+}
+
+inline HintColors ResolveHintColors(
+		QColor bg, QColor ink, QColor accent, HintRole role, int percent) {
 	const auto surface = QColor(HintLuminance(bg) < .18 ? Qt::black : Qt::white);
 	bg = MixHintColor(surface, bg, bg.alphaF());
 	ink = MixHintColor(bg, ink, ink.alphaF());
@@ -39,7 +59,10 @@ inline HintColors ResolveHintColors(QColor bg, QColor ink, QColor accent, int pe
 	const auto pole = QColor(lightInk ? Qt::white : Qt::black);
 	const auto other = QColor(lightInk ? Qt::black : Qt::white);
 	const auto alpha = qRound(std::clamp(percent, 60, 100) * 255. / 100.);
-	const auto base = MixHintColor(bg, accent, lightInk ? .30 : .42);
+	const auto gray = qGray(accent.rgb());
+	const auto base = (role == HintRole::General)
+		? MixHintColor(bg, QColor(gray, gray, gray), .28)
+		: HintAccent(role, accent, lightInk);
 	auto fill = base;
 	const auto contrast = [&](QColor fg) {
 		const auto near = HintLuminance(MixHintColor(pole, fill, alpha / 255.));
@@ -55,7 +78,7 @@ inline HintColors ResolveHintColors(QColor bg, QColor ink, QColor accent, int pe
 		prefix = MixHintColor(ink, fill, i / 100.);
 		if (contrast(prefix) >= 4.7) break;
 	}
-	const auto originalEdge = MixHintColor(accent, ink, .48);
+	const auto originalEdge = MixHintColor(base, ink, .66);
 	auto edge = originalEdge;
 	for (auto i = 1; contrast(edge) < 3.1 && i <= 100; ++i) {
 		edge = MixHintColor(originalEdge, ink, i / 100.);
