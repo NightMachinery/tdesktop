@@ -55,6 +55,13 @@ void InstallPickerFilter(
 		return;
 	}
 	ListFilter::Mark(edit);
+	const auto mode = closeOnEscape
+		? ListFilter::HalfPageMode::Always
+		: ListFilter::HalfPageMode::Modal;
+	for (const auto widget : { static_cast<QWidget*>(box.get()),
+			static_cast<QWidget*>(list.get()), static_cast<QWidget*>(edit) }) {
+		ListFilter::MarkHalfPage(widget, mode);
+	}
 	base::install_event_filter(edit, [=](not_null<QEvent*> event) {
 		using Result = base::EventFilterResult;
 		const auto modal = ModalKeysEnabled();

@@ -231,6 +231,8 @@ void InstallListFilter(
 		Fn<FilterResult(QKeyEvent*)> handler) {
 	const auto edit = field->rawTextEdit();
 	ListFilter::Mark(edit);
+	ListFilter::MarkHalfPage(edit);
+	ListFilter::MarkHalfPage(layer);
 	base::install_event_filter(edit, [=](not_null<QEvent*> event) {
 		if (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut) {
 			layer->update();
@@ -3635,6 +3637,7 @@ public:
 	, _close(Ui::CreateChild<Ui::IconButton>(this, st::boxTitleClose))
 	, _scroll(Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll)) {
 		setFocusPolicy(Qt::StrongFocus);
+		ListFilter::MarkHalfPage(this);
 		setMouseTracking(true);
 		_close->setClickedCallback([=] { closeLayer(); });
 

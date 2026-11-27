@@ -166,6 +166,8 @@ ChatMusicBox::ChatMusicBox(
 			}
 		},
 	}, keys);
+	ListFilter::MarkHalfPage(_view.filter->rawTextEdit());
+	ListFilter::MarkHalfPage(box);
 	_view.filter->rawTextEdit()->installEventFilter(this);
 	box->installEventFilter(this);
 	_view.filter->changes() | rpl::on_next([=] { filter(); }, box->lifetime());
@@ -381,6 +383,10 @@ bool ChatMusicBox::eventFilter(QObject *object, QEvent *event) {
 }
 
 bool ChatMusicBox::keyPress(QKeyEvent *event) {
+	if (const auto half = ListFilter::HalfPageDirection(event->key(), event->modifiers())) {
+		navigate((half < 0) ? TrackListAction::HalfUp : TrackListAction::HalfDown, 1);
+		return true;
+	}
 	if (event->modifiers() & ~Qt::KeypadModifier) return false;
 	const auto key = event->key();
 	if (key == Qt::Key_Escape) {

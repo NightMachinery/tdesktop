@@ -338,6 +338,7 @@ PlaylistSongList::Rows::Rows(
 , _artworkUpdate([=] { refreshArtwork(); })
 , _playbackBadge([=] { updatePlaybackBadge(); }) {
 	setFocusPolicy(Qt::StrongFocus);
+	ListFilter::MarkHalfPage(this);
 	setMouseTracking(true);
 	setAccessibleName(_mode == Mode::Library
 		? tr::lng_purple_music_title(tr::now)

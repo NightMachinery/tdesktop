@@ -952,7 +952,13 @@ assert "Purple::IsChatPaletteController(_controller)" in read("boxes/peer_list_b
 ordered(palette_ui, "void refilter()", "RankAndFilter", "FirstListMatch")
 picker = read("purple/purple_picker.cpp")
 ordered(picker, "void PickerSelection::Refresh", "FirstListMatch", "disabled()", "setSelected")
-ordered(picker, "void PickerSelection::HalfPage", "HalfPageRows", "void InstallPickerFilter")
+ordered(picker, "void PickerSelection::HalfPage", "HalfPageRows", "void InstallPickerFilter",
+        "MarkHalfPage")
+keys_filter = between(keys, "bool Keys::ownsHalfPage", "Window::SessionController *Keys::owner()")
+ordered(keys_filter, "HalfPageDirection", "focus != _preeditInput",
+        "_window->windowHandle()", "owner()", "HandlesHalfPage", "activeTarget().list",
+        "type == QEvent::ShortcutOverride", "ownsHalfPage(watched", "event->accept()")
+ordered(routing, "event->type() == QEvent::KeyPress && ownsHalfPage", "return false")
 ordered(read("dialogs/dialogs_inner_widget.cpp"), "bool InnerWidget::processKeyDispatch",
         "HalfPageDirection", "HalfPageRows", "Qt::Key_PageUp")
 track_rows = read("purple/purple_playlist_song_list.cpp")

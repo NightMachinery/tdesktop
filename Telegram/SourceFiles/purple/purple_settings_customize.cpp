@@ -581,6 +581,8 @@ private:
 			button->installEventFilter(this);
 		}
 		layout->addWidget(footer);
+		ListFilter::MarkHalfPage(_filter);
+		ListFilter::MarkHalfPage(_tree);
 		for (const auto child : { static_cast<QWidget*>(_filter), static_cast<QWidget*>(_tree),
 			static_cast<QWidget*>(_inspector), static_cast<QWidget*>(_clear), static_cast<QWidget*>(close) }) {
 			child->installEventFilter(this);
@@ -1129,6 +1131,7 @@ private:
 	}
 
 	void addSheetWidget(QWidget *widget) {
+		if (qobject_cast<QListWidget*>(widget)) ListFilter::MarkHalfPage(widget);
 		widget->installEventFilter(this);
 		if (const auto button = qobject_cast<QPushButton*>(widget)) CustomizeLook::AppendAction(_sheetLayout, button);
 		else _sheetLayout->addWidget(widget);
@@ -1317,6 +1320,7 @@ private:
 		_reviewPages = SettingsStructures::ReviewLines(preview.diff, preview.before, preview.after);
 		_reviewPage = 0;
 		_reviewBody = sheetText({}, u"Reviewed settings effects and lines"_q);
+		ListFilter::MarkHalfPage(_reviewBody);
 		_reviewEffectsShown = true;
 		_reviewBody->setHtml(reviewEffects(preview));
 		const auto actions = new CustomizeLook::Actions(_sheet);

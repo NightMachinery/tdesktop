@@ -67,6 +67,18 @@ inline constexpr auto kControl = Qt::ControlModifier;
 }
 
 inline constexpr auto kFieldProperty = "purpleListFilterField";
+inline constexpr auto kHalfPageProperty = "purpleHalfPageList";
+
+enum class HalfPageMode { Disabled, Modal, Always };
+
+inline void MarkHalfPage(QWidget *widget, HalfPageMode mode = HalfPageMode::Always) {
+	widget->setProperty(kHalfPageProperty, int(mode));
+}
+
+[[nodiscard]] inline bool HandlesHalfPage(const QWidget *widget, bool modal) {
+	const auto mode = HalfPageMode(widget->property(kHalfPageProperty).toInt());
+	return mode == HalfPageMode::Always || (modal && mode == HalfPageMode::Modal);
+}
 
 inline void Mark(QWidget *field) {
 	field->setProperty(kFieldProperty, true);

@@ -128,6 +128,7 @@ public:
 		button(footer, u"Back"_q, u"Esc"_q, [this] { back(); });
 		for (const auto widget : { static_cast<QWidget*>(_list), static_cast<QWidget*>(_peerList),
 				static_cast<QWidget*>(_search) }) {
+			ListFilter::MarkHalfPage(widget);
 			widget->installEventFilter(this);
 		}
 		connect(_list, &QListWidget::itemDoubleClicked, this, [this] { activate(); });

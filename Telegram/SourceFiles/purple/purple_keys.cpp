@@ -115,6 +115,7 @@
 #include <QtGui/QMouseEvent>
 #include <QtGui/QTextBlock>
 #include <QtGui/QTextLayout>
+#include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QAbstractScrollArea>
 #include <QtWidgets/QScrollBar>
@@ -2265,6 +2266,7 @@ public:
 	void closeFilterLayer(not_null<Ui::LayerWidget*> layer);
 
 protected:
+	[[nodiscard]] bool ownsHalfPage(QObject *receiver, const QKeyEvent &event) const;
 	bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
@@ -2731,6 +2733,18 @@ void Keys::watchUserKeymap() {
 	}
 }
 
+bool Keys::ownsHalfPage(QObject *receiver, const QKeyEvent &event) const {
+	if (!ListFilter::HalfPageDirection(event.key(), event.modifiers())) {
+		return false;
+	}
+	const auto focus = QApplication::focusWidget();
+	return focus && focus->window() == _window && focus != _preeditInput
+		&& (receiver == focus || receiver == _window->windowHandle())
+		&& focus->isVisible() && focus->isEnabled() && owner()
+		&& (ListFilter::HandlesHalfPage(focus, Enabled())
+			|| (Enabled() && _normal && activeTarget().list));
+}
+
 bool Keys::eventFilter(QObject *watched, QEvent *event) {
 	if (Test::TryPurpleNoticeProbe(_window, watched, event)) {
 		return true;
@@ -2739,6 +2753,11 @@ bool Keys::eventFilter(QObject *watched, QEvent *event) {
 		schedulePendingNoticeFlush();
 	}
 	const auto type = event->type();
+	if (type == QEvent::ShortcutOverride
+		&& ownsHalfPage(watched, *static_cast<QKeyEvent*>(event))) {
+		event->accept();
+		return true;
+	}
 #ifdef Q_OS_MAC
 	if (type == QEvent::InputMethodQuery && watched == _normalComposer
 		&& watched == QApplication::focusWidget() && Enabled() && _normal && owner()) {
@@ -4098,6 +4117,9 @@ bool Keys::handle(QObject *receiver, QEvent *event) {
 		return false;
 	}
 	const auto keyEvent = static_cast<QKeyEvent*>(event);
+	if (event->type() == QEvent::KeyPress && ownsHalfPage(receiver, *keyEvent)) {
+		return false;
+	}
 	const auto key = ModalKey(*keyEvent);
 	const auto physical = PhysicalIdentity(*keyEvent);
 	if (event->type() == QEvent::KeyRelease) {
