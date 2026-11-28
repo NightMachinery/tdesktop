@@ -410,8 +410,11 @@ public:
 			}, lifetime());
 		}
 		rpl::merge(Core::App().passcodeLockChanges(),
-			Core::App().screenIsLockedValue() | rpl::skip(1),
-			PrivacyScreenChanges()) | rpl::on_next([this] { protectionChanged(); }, lifetime());
+			Core::App().screenIsLockedValue() | rpl::skip(1)
+		) | rpl::on_next([this] { protectionChanged(); }, lifetime());
+		PrivacyScreenChanges() | rpl::on_next([this] {
+			protectionChanged(false);
+		}, lifetime());
 		SettingsChanges() | rpl::on_next([this] {
 			QTimer::singleShot(0, this, [this] { refreshFromDisk(); });
 		}, lifetime());
@@ -430,8 +433,11 @@ public:
 
 	void focusPage() {
 		if (isVisible()) {
-			if (_pages->currentWidget() == _browser) _tree->setFocus();
-			else if (_resumeRefused && visibleContent()) _coverClose->setFocus();
+			if (_pages->currentWidget() == _browser) {
+				if (!SettingsFocus(_browserFocus).restore(_browser)) _tree->setFocus();
+			} else if (_resumeRefused && visibleContent()) {
+				_coverClose->setFocus();
+			}
 		} else if (!_presentation && visibleContent()) {
 			protectionChanged();
 		}
@@ -622,7 +628,7 @@ private:
 		QTimer::singleShot(0, this, [this] { closeLayer(); });
 	}
 
-	void protectionChanged() {
+	void protectionChanged(bool deferRestore = true) {
 		if (!sameSession()) {
 			retire();
 		} else if (!visibleContent()) {
@@ -643,7 +649,7 @@ private:
 			}
 		} else {
 			const auto wasCovered = _pages->currentWidget() == _covered;
-			QTimer::singleShot(0, this, [this, wasCovered] {
+			const auto restore = [this, wasCovered] {
 				if (!visibleContent()) return;
 				const auto weak = QPointer(this);
 				refreshFromDisk();
@@ -661,11 +667,14 @@ private:
 						displayApplying(u"Waiting for the reviewed settings operation."_q);
 					} else if (!_protectedForm.restore(_pages, _sheetPage,
 							SettingsDraft::CanRestoreForm(sameSession(), !_draftStale))) {
+						const auto previous = SettingsFocus(_browserFocus);
 						_pages->setCurrentWidget(_browser);
-						_tree->setFocus();
+						if (!previous.restore(_browser)) _tree->setFocus();
 					}
 				}
-			});
+			};
+			if (deferRestore) QTimer::singleShot(0, this, restore);
+			else restore();
 		}
 	}
 

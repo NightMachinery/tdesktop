@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QtCore/QPointer>
-#include <QtWidgets/QApplication>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QPlainTextEdit>
 #include <QtWidgets/QStackedWidget>
@@ -60,7 +59,7 @@ public:
 	void hide(QStackedWidget *pages, QWidget *form, QWidget *cover, bool retainForm) {
 		if (retainForm && pages->currentWidget() == form) {
 			_held = true;
-			_focus = SettingsFocus(QApplication::focusWidget());
+			_focus = SettingsFocus(form->focusWidget());
 		}
 		pages->setCurrentWidget(cover);
 	}

@@ -73,6 +73,8 @@ void ProtectedForm() {
 	auto text = new QPlainTextEdit(QStringLiteral("Draft line one\nDraft line two"), form);
 	formLayout->addWidget(text);
 	auto cover = new QLabel(QStringLiteral("Settings hidden while locked"), editor);
+	auto coverFocus = QPushButton(QStringLiteral("Return"), &owner);
+	coverFocus.move(12, 10);
 	editor->addWidget(form);
 	editor->addWidget(cover);
 	owner.resize(400, 250);
@@ -89,6 +91,10 @@ void ProtectedForm() {
 
 	auto protection = SettingsProtectedForm();
 	for (const auto detach : { false, true }) {
+		coverFocus.show();
+		coverFocus.raise();
+		coverFocus.setFocus();
+		Check(coverFocus.hasFocus(), "privacy surface initially owns focus");
 		protection.hide(editor, form, cover, true);
 		Check(protection.held() && !text->isVisible() && !text->hasFocus(),
 			"protected form is hidden and unfocusable");
@@ -109,9 +115,10 @@ void ProtectedForm() {
 		Check(!protection.restore(editor, form, SettingsDraft::CanRestoreForm(false, true))
 			&& !text->isVisible(), "another session cannot reveal the form");
 		Check(protection.restore(editor, form, SettingsDraft::CanRestoreForm(true, true))
-			&& text->isVisible() && text->textCursor().position() == 7
+			&& text->isVisible() && text->hasFocus() && text->textCursor().position() == 7
 			&& text->toPlainText() == QStringLiteral("Draft line one\nDraft line two"),
-			"same opening resumes the exact unsaved text and caret");
+			"same opening resumes the exact focus, unsaved text and caret");
+		coverFocus.hide();
 	}
 }
 
@@ -123,6 +130,54 @@ void Theme(QWidget *root, bool dark) {
 		QColor(dark ? 0x76899d : 0x727d88),
 		QColor(dark ? 0x6ab5e9 : 0x168acd),
 		QColor(dark ? 0x253240 : 0xe6eaf0));
+}
+
+void ProtectedActionFocus(const QDir &output, bool dark) {
+	auto root = Canvas();
+	root.resize(320, 140);
+	Theme(&root, dark);
+	auto pages = QStackedWidget(&root);
+	pages.setGeometry(root.rect().adjusted(20, 20, -20, -20));
+	auto form = Canvas(&pages);
+	auto cover = Canvas(&pages);
+	auto button = Action(QStringLiteral("Apply"), &form);
+	button.setGeometry(20, 20, 140, 36);
+	auto coverFocus = QPushButton(QStringLiteral("Return"), &root);
+	coverFocus.move(180, 76);
+	coverFocus.hide();
+	pages.addWidget(&form);
+	pages.addWidget(&cover);
+	root.show();
+	root.activateWindow();
+	QApplication::processEvents();
+	button.setFocus();
+	Check(button.hasFocus() && !button.testAttribute(Qt::WA_MacShowFocusRect),
+		"Customize button uses its own focus border");
+	const auto before = root.grab();
+	coverFocus.show();
+	coverFocus.raise();
+	coverFocus.setFocus();
+	Check(coverFocus.hasFocus(), "privacy overlay takes focus before Customize hides");
+	auto protection = SettingsProtectedForm();
+	protection.hide(&pages, &form, &cover, true);
+	Check(!button.isVisible() && !button.hasFocus(), "protected button is hidden");
+	coverFocus.hide();
+	Check(protection.restore(&pages, &form, true) && button.hasFocus(),
+		"the button regains focus before the first paint after uncover");
+	const auto firstFrame = root.grab();
+	const auto bitmap = firstFrame.toImage();
+	const auto pixel = [&](QPoint point) {
+		return bitmap.pixelColor(QPointF(point * firstFrame.devicePixelRatio()).toPoint());
+	};
+	const auto edge = button.mapTo(&root, QPoint(button.width() / 2, 0));
+	Check(pixel(edge + QPoint(0, 1)) == Tone(&button, "customizeAccent", QPalette::Link),
+		"the first frame draws the focused border inside the button");
+	Check(pixel(edge - QPoint(0, 1)) == Tone(&root, "customizeBackground", QPalette::Window),
+		"the first frame leaves the background outside the button clear");
+	Check(before.toImage() == bitmap, "uncover restores the exact focused rendering");
+	Check(firstFrame.save(output.filePath(dark
+		? QStringLiteral("protected-focus-dark.png")
+		: QStringLiteral("protected-focus-light.png"))), "PNG exported");
 }
 
 void Frame(QWidget *root, QVBoxLayout *layout, const QString &heading) {
@@ -614,6 +669,7 @@ int main(int argc, char **argv) {
 	ReviewRenameLosses();
 	ReviewCollidingEntries();
 	for (const auto dark : { false, true }) {
+		ProtectedActionFocus(output, dark);
 		for (const auto width : { 640, 800, 1200 }) {
 			TreeRender(output, dark, width);
 			FormRender(output, dark, width);

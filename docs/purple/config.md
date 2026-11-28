@@ -1510,6 +1510,8 @@ off** are device-local Desktop preferences. Both take effect immediately
 across windows. The Option+X preference is also available in Customize and
 uses the same setting as the native page. Customize's **Apply** writes the
 reviewed TOML draft.
+After dismissing the privacy screen, Customize restores focus to the previous
+control when its settings source and account are still valid.
 The archive row shows this account's measured size. A trailing `+` marks a
 scan still in progress. The archive page includes the full storage summary,
 cleanup reviews, and Telegram's separate media cache.

@@ -99,10 +99,11 @@ assert command_ids["CustomizeSettings"] == "customize-settings"
 ordered(keys, "case Action::CustomizeSettings:", "ShowCustomizeSettings")
 customize = read("purple/purple_settings_customize.cpp")
 ordered(customize, "class CustomizeLayer final", "passcodeLockChanges()", "PrivacyScreenChanges()",
-        "void protectionChanged()", "_protectedForm.hide", "Core::App().passcodeLocked()",
+        "protectionChanged(false)", "void protectionChanged(bool deferRestore", "_protectedForm.hide", "Core::App().passcodeLocked()",
         "setParent(_window->bodyWidget())", "_presentation.clear()", "refreshFromDisk()",
         "_resumeRefused = _draftStale", "present(anim::type::instant)", "_coverClose->show()",
-        "_protectedForm.restore", "setCurrentWidget(_browser)")
+        "_protectedForm.restore", "setCurrentWidget(_browser)", "previous.restore(_browser)",
+        "if (deferRestore) QTimer::singleShot", "else restore()")
 ordered(customize, "bool privacyKey", "qobject_cast<QLineEdit*>", "Qt::Key_F8", "TogglePrivacyScreen")
 ordered(customize, "FilterCustomizeSettingsInput", "editor->privacyKey")
 ordered(keys, ".onPick = [guard", "CommandAvailable(action, restored)", "guard->dispatch(action, restored, 1)")

@@ -98,6 +98,7 @@ public:
 		setAutoDefault(false);
 		setDefault(false);
 		setAttribute(Qt::WA_LayoutUsesWidgetRect);
+		setAttribute(Qt::WA_MacShowFocusRect, false);
 		setToolTip(text);
 		setAccessibleName(text);
 		setAccessibleDescription(_shortcut == QStringLiteral("Enter")
