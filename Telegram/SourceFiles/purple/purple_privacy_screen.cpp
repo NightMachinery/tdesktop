@@ -566,6 +566,11 @@ public:
 		_active = false;
 		const auto focus = std::exchange(_previousFocus, {});
 		const auto session = std::exchange(_previousSession, {});
+		const auto coveredFocus = _window->focusWidget();
+		if (coveredFocus && (coveredFocus == this || isAncestorOf(coveredFocus))) {
+			// Hiding a focused widget makes Qt advance to the next tab stop.
+			coveredFocus->clearFocus();
+		}
 		hide();
 		_window->updateTitle();
 		_window->updateControlsGeometry();

@@ -942,8 +942,10 @@ ordered(keys, "Core::App().passcodeLockValue()", "_held.clear()", "if (!locked)"
 privacy_input = read("purple/purple_privacy_screen.cpp")
 ordered(privacy_input, "void activate(QRect body)", "if (!_active)", "_window->focusWidget()",
         "_previousSession", "setFocus(Qt::OtherFocusReason)")
-ordered(privacy_input, "void dismissLocal()", "exchange(_previousFocus", "hide()",
-        "CanRestoreFocus(locked", "focus->setFocus", "_window->setInnerFocus()")
+ordered(privacy_input, "void dismissLocal()", "exchange(_previousFocus",
+        "coveredFocus == this || isAncestorOf(coveredFocus)",
+        "coveredFocus->clearFocus()", "hide()", "CanRestoreFocus(locked",
+        "focus->setFocus", "_window->setInnerFocus()")
 ordered(keys, "Purple::PrivacyScreenChanges()", "!active && Enabled()", "enterNormal(true, false)")
 ordered(privacy_input, "bool filterWindowEvent", "QEvent::ShortcutOverride", "QEvent::KeyRelease",
         "Swallow every keystroke", "return true")
