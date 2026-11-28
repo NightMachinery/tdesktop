@@ -2048,8 +2048,10 @@ worker's pending database transactions. The existing playlist menu hook in
 ### Bot thread edit refresh
 
 - `boxes/peers/edit_forum_topic_box.cpp`: refreshes the edited bot thread by
-  ID after a successful or already-applied edit. The normal topic update
-  notifies the stock header and Purple topic picker.
+  ID after a successful or already-applied edit. The topic model refreshes
+  the chat-list entry and notifies the Purple topic picker.
+- `history/view/history_view_top_bar_widget.cpp` repaints the open thread
+  header when the active topic's title changes.
 
 ### Forum topic paging
 

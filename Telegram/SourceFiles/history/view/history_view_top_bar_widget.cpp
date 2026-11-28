@@ -975,6 +975,13 @@ void TopBarWidget::setActiveChat(
 		}
 
 		if (const auto topic = _activeChat.key.topic()) {
+			session().changes().topicUpdates(
+				topic,
+				Data::TopicUpdate::Flag::Title
+			) | rpl::on_next([=] {
+				update();
+			}, _activeChatLifetime);
+
 			Info::Profile::NameValue(
 				topic->peer()
 			) | rpl::on_next([=](const QString &name) {
