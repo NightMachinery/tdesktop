@@ -115,6 +115,26 @@ void ArchivePolicyCases() {
 	CHECK(f.routing.settings(B).archive.timedMiB == 30);
 	const auto repaired = f.scalar(A, { u"archive"_q, u"ordinary_file_mib"_q }, int64(2));
 	CHECK(repaired.status == SettingsEditorStatus::Ready && repaired.review);
+
+	const auto retention = f.prepare(B, std::vector{
+		Scalar({ u"archive"_q, u"days"_q }, int64(7)),
+		Scalar({ u"archive"_q, u"total_mib"_q }, int64(64)),
+		Scalar({ u"archive"_q, u"timed_media_mib"_q }, int64(0)),
+		Scalar({ u"archive"_q, u"ordinary_file_mib"_q }, int64(4)),
+		Scalar({ u"archive"_q, u"days_by_class"_q, u"bot"_q }, int64(2)),
+	});
+	CHECK(retention.status == SettingsEditorStatus::Ready && retention.review);
+	if (!retention.review) return;
+	CHECK(retention.review->preview().fileAccount == A);
+	CHECK(ApplySettingsEditorEdit(f.routing, *retention.review, Current).status == SettingsEditorStatus::Saved);
+	CHECK(Get(f.root) == retention.review->preview().after);
+	const auto disk = ParseSettings(QString::fromUtf8(Get(f.root)), f.root);
+	CHECK(disk.ok() && disk.settings.archive.valid);
+	CHECK(disk.settings.archive.days == 7 && disk.settings.archive.totalMiB == 64);
+	CHECK(disk.settings.archive.timedMiB == 0 && disk.settings.archive.ordinaryFileMiB == 4);
+	CHECK(disk.settings.archive.daysFor(ArchiveV2::ChatClass::Bot) == 2);
+	f.routing.refreshSettings();
+	CHECK(f.routing.settings(B).archive == disk.settings.archive);
 }
 
 void ScopeCases() {

@@ -3,6 +3,7 @@
 #include "purple/purple_archive_v2_acquisition.h"
 #include "purple/purple_archive_v2_schema.h"
 #include "purple/purple_archive_v2_writer.h"
+#include "purple/purple_settings.h"
 #include "tests/archive_test_support.h"
 #include <QtCore/QBuffer>
 #include <QtCore/QCoreApplication>
@@ -129,6 +130,7 @@ int main(int argc, char** argv) {
 	V2Fixtures::LiveTrim();
 	V2Fixtures::TotalsMatchAfterMixedWrites();
 	V2Fixtures::QuotaDiskAndAge();
+	V2Fixtures::ConfiguredRetention();
 	V2Fixtures::VerifiedCompleteFile();
 	V2Fixtures::HistoryAndCleanup();
 	V2Fixtures::ConfirmedCleanupScrubsFiles();

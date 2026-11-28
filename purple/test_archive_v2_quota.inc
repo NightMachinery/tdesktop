@@ -214,6 +214,37 @@ void QuotaDiskAndAge() {
 		&& trimmed->database + trimmed->wal >= reusable * pageSize);
 }
 
+void ConfiguredRetention() {
+	Section = "v2 TOML retention prunes at the class boundary and uses global days for other chats";
+	const auto temp = QTemporaryDir();
+	auto options = Options(temp.path());
+	const auto day = int64(86400);
+	auto now = 20000 * day;
+	options.now = [&] { return now; };
+	auto store = V2Store(options);
+	CHECK(store.open());
+	const auto make = [&](int number, ChatClass kind, int daysAgo) {
+		auto event = MediaRow(store.id(), number, false, now - daysAgo * day);
+		event.kind = kind;
+		CHECK(store.capture(event).committed);
+		return event.identity;
+	};
+	const auto oldDirect = make(1, ChatClass::Direct, 7);
+	const auto recentDirect = make(2, ChatClass::Direct, 6);
+	const auto oldBot = make(3, ChatClass::Bot, 2);
+	const auto recentBot = make(4, ChatClass::Bot, 1);
+	const auto parsed = ParseSettings(
+		u"[archive]\ndays = 7\n[archive.days_by_class]\nbot = 2\n"_q, u"retention.toml"_q);
+	CHECK(parsed.ok() && parsed.settings.archive.valid);
+	CHECK(store.estimateExpired(parsed.settings.archive) == 2);
+	CHECK(store.updatePolicy(parsed.settings.archive));
+	CHECK(!store.body(oldDirect, 1) && !store.body(oldBot, 1));
+	CHECK(store.body(recentDirect, 1) && store.body(recentBot, 1));
+	now += day;
+	CHECK(store.maintenancePending() && store.maintain());
+	CHECK(!store.body(recentDirect, 1) && !store.body(recentBot, 1));
+}
+
 void BothAllowances(int ordinaryMiB = 16, int timedMiB = 8) {
 	Section = "v2 both independent buckets fit at their limits in either order";
 	for (const auto timedFirst : { false, true }) {

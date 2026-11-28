@@ -16,12 +16,26 @@ formatting and emoji.
 
 ## Policy
 
-Set `days`, `total_mib`, `timed_media_mib` and `ordinary_file_mib` under
-`[archive]`. Their defaults are 90 days and 512, 256 and 16 MiB respectively.
-Timed media uses its own allowance. The ordinary file limit must fit inside
-the ordinary allowance. Zero timed MiB disables timed file storage.
-`[archive.days_by_class]` accepts optional `direct`, `bot`, `group` and
-`channel` overrides.
+Open **Settings > Purple > Customize settings… > Archive v2 > Archive** to edit
+the app-wide policy. The same settings are under `[archive]` in
+`settings.toml`. Each signed-in account applies the policy to its own store.
+
+- **History retention (days)** is `days` and defaults to 90. **History
+  retention by chat class** is `[archive.days_by_class]`, with optional
+  `direct`, `bot`, `group` and `channel` overrides.
+- **Ordinary archive allowance (MiB)** is `total_mib` and defaults to 512.
+  It covers message history and ordinary files.
+- **Timed media allowance (MiB)** is `timed_media_mib` and defaults to 256.
+  Zero disables timed file storage.
+- **Ordinary file limit (MiB)** is `ordinary_file_mib` and defaults to 16.
+  It must fit inside the ordinary allowance.
+
+Desktop checks age on startup, when the UTC day changes, and after a policy
+change. It removes records whose last activity is at or beyond the retention
+limit. Space pressure evicts the oldest eligible file copies in the affected
+allowance first. Ordinary pressure can then remove the oldest eligible
+message history. Maintenance recovers free database pages in bounded batches,
+so physical size can fall gradually after a policy change.
 
 Timed media defaults to `on_open`. Set `timed_download` to `off` or
 `on_open` under `[archive]` or a typed chat table such as

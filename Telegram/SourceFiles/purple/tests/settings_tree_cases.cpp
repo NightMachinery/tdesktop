@@ -5,6 +5,7 @@
 #include <QtGui/QTextDocument>
 
 #include <iostream>
+#include <tuple>
 
 namespace {
 
@@ -51,6 +52,17 @@ int main() {
 	const auto reasons = found(last);
 	Check(reasons != rows.end() && reasons->source == QStringLiteral("Inherited · same value · Studio"),
 		"inherited default has a distinct source label");
+	for (const auto &[key, value, label] : {
+			std::tuple{ "days", 90, "History retention (days)" },
+			{ "total_mib", 512, "Ordinary archive allowance (MiB)" },
+			{ "timed_media_mib", 256, "Timed media allowance (MiB)" },
+			{ "ordinary_file_mib", 16, "Ordinary file limit (MiB)" },
+	}) {
+		const auto row = found(QStringLiteral("archive.") + QString::fromLatin1(key));
+		Check(row != rows.end() && row->editable && row->scope == SettingScope::AppWide
+			&& row->effective.toInt() == value && row->label == QString::fromLatin1(label),
+			"Customizable archive defaults are available before an archive table exists");
+	}
 	const auto archiveGlobal = QByteArray(
 		"[archive]\ntimed_download = 'on_open'\n[archive.timed_download_by_class]\nbot = 'off'\n"
 		"[archive.chats.\"user:17\"]\ntimed_download = 'on_open'\n");

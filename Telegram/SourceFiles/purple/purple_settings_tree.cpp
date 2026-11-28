@@ -68,6 +68,16 @@ QString Label(const SettingAddress &address, const SettingDescriptor *descriptor
 	if (descriptor && descriptor->id == SettingId::ReadyTimeout) {
 		return u"Ready timeout"_q;
 	}
+	if (descriptor && address.front() == SettingAddressPart(u"archive"_q)) {
+		switch (descriptor->id) {
+		case SettingId::ArchiveDays: return u"History retention (days)"_q;
+		case SettingId::ArchiveTotal: return u"Ordinary archive allowance (MiB)"_q;
+		case SettingId::ArchiveTimed: return u"Timed media allowance (MiB)"_q;
+		case SettingId::ArchiveOrdinaryLimit: return u"Ordinary file limit (MiB)"_q;
+		case SettingId::ArchiveDaysByClass: return u"History retention by chat class"_q;
+		default: break;
+		}
+	}
 	if (text.endsWith(u"_p"_q)) {
 		text.chop(2);
 	}
