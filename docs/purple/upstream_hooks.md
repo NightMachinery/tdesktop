@@ -2052,6 +2052,8 @@ worker's pending database transactions. The existing playlist menu hook in
   the chat-list entry and notifies the Purple topic picker.
 - `history/view/history_view_top_bar_widget.cpp` repaints the open thread
   header when the active topic's title changes.
+- `window/window_controller.cpp` refreshes the native window title when the
+  displayed topic's title changes, including in its separate media window.
 
 ### Forum topic paging
 

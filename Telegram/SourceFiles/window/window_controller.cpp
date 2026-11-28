@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/themes/window_theme_editor.h"
 #include "ui/boxes/confirm_box.h"
 #include "data/components/promo_suggestions.h"
+#include "data/data_changes.h"
 #include "data/data_thread.h"
 #include "settings/settings_common.h"
 #include "wallet/wallet_panel.h"
@@ -204,6 +205,17 @@ void Controller::showAccount(
 			_sessionController->activeChatChanges(
 			) | rpl::on_next([=] {
 				_widget.updateTitle();
+			}, _sessionController->lifetime());
+			session->changes().topicUpdates(
+				Data::TopicUpdate::Flag::Title
+			) | rpl::on_next([=](const Data::TopicUpdate &update) {
+				const auto id = _sessionController->windowId();
+				const auto topic = (id.type == SeparateType::SharedMedia)
+					? id.thread->asTopic()
+					: _sessionController->activeChatCurrent().topic();
+				if (update.topic == topic) {
+					_widget.updateTitle();
+				}
 			}, _sessionController->lifetime());
 			_widget.updateTitle();
 
